@@ -4,17 +4,36 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MTG Vec2Search</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
   <meta name="description" content="Search Magic: The Gathering cards by describing them in plain English.">
+  <script>
+    // Dark by default; the toggle's choice is remembered
+    try { document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark"; }
+    catch { document.documentElement.dataset.theme = "dark"; }
+  </script>
   <style>
     @font-face {
       font-family: 'Beleren Bold';
       src: url('fonts/Beleren2016-Bold.ttf') format('truetype');
     }
+    :root {
+      --bg1: #f8f1e7; --bg2: #e9d8c7; --text: #4b2e2e; --muted: #6a4d2e; --title-shadow: #d2a679;
+      --link: #3f6e4c; --border: #bfa27a; --input-bg: #fdf6e3; --input-shadow: #e0cda9;
+      --surface: #fcf8f0; --chip: #efe3cf; --track: #e0d4b8; --dialog: #f5ebe0; --pip-border: #0005;
+      --accent: #5a8f68; --accent-hover: #467451;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg1: #1c1613; --bg2: #2a201a; --text: #ecdcc6; --muted: #c4a988; --title-shadow: #000;
+      --link: #93c9a2; --border: #6e5640; --input-bg: #251d18; --input-shadow: #120d0b;
+      --surface: #2c231d; --chip: #3a2e25; --track: #3d3128; --dialog: #241c17; --pip-border: #fff6;
+      --accent: #4f8a5f; --accent-hover: #5f9d6f;
+    }
     * { box-sizing: border-box; }
     body {
       font-family: Garamond, serif;
-      background: linear-gradient(#f8f1e7, #e9d8c7) fixed;
-      color: #4b2e2e;
+      background: linear-gradient(var(--bg1), var(--bg2)) fixed;
+      color: var(--text);
       text-align: center;
       margin: 0;
       padding: 32px 16px;
@@ -22,10 +41,10 @@
     h1, h2, h3, button, legend, .card-name { font-family: 'Beleren Bold', Garamond, serif; }
     h1 {
       font-size: clamp(32px, 7vw, 48px);
-      text-shadow: 2px 2px 4px #d2a679;
+      text-shadow: 2px 2px 4px var(--title-shadow);
       margin: 0 0 20px;
     }
-    a { color: #3f6e4c; }
+    a { color: var(--link); }
 
     /* Search form */
     form { max-width: 760px; margin: 0 auto; }
@@ -33,10 +52,10 @@
       width: 100%;
       padding: 14px;
       font-size: 18px;
-      border: 2px solid #bfa27a;
+      border: 2px solid var(--border);
       border-radius: 12px;
-      background-color: #fdf6e3;
-      box-shadow: inset 0 0 10px #e0cda9;
+      background-color: var(--input-bg);
+      box-shadow: inset 0 0 10px var(--input-shadow);
       font-family: Garamond, serif;
       color: inherit;
     }
@@ -46,27 +65,29 @@
     .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
     .chips label {
       padding: 5px 12px;
-      border: 2px solid #bfa27a;
+      border: 2px solid var(--border);
       border-radius: 999px;
-      background: #fcf8f0;
+      background: var(--surface);
       cursor: pointer;
       user-select: none;
     }
-    .chips label:has(input:checked) { background: #5a8f68; border-color: #467451; color: white; }
-    .chips label:has(input:focus-visible) { outline: 2px solid #4b2e2e; outline-offset: 2px; }
+    .chips label:has(input:checked) { background: var(--accent); border-color: var(--accent-hover); color: white; }
+    .chips label:has(input:focus-visible) { outline: 2px solid var(--text); outline-offset: 2px; }
     .chips input { position: absolute; opacity: 0; pointer-events: none; }
-    .pip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; border: 1px solid #0005; }
+    .pip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; border: 1px solid var(--pip-border); }
     .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; margin-top: 12px; }
     .row input, .row select {
       font: inherit; font-size: 16px; padding: 4px 6px;
-      border: 2px solid #bfa27a; border-radius: 8px; background: #fdf6e3; color: inherit;
+      border: 2px solid var(--border); border-radius: 8px; background: var(--input-bg); color: inherit;
     }
     .row input { width: 4.5em; }
+    .smart-toggle { display: block; margin-top: 14px; font-size: 15px; cursor: pointer; }
+    .smart-toggle input { accent-color: var(--accent); }
     button[type=submit], #more {
       margin-top: 16px;
       padding: 12px 28px;
       font-size: 20px;
-      background-color: #5a8f68;
+      background-color: var(--accent);
       color: white;
       border: none;
       border-radius: 10px;
@@ -74,13 +95,13 @@
       cursor: pointer;
       transition: background 0.3s;
     }
-    button[type=submit]:hover, #more:hover { background-color: #467451; }
+    button[type=submit]:hover, #more:hover { background-color: var(--accent-hover); }
 
     /* Results */
-    #status { font-size: 18px; color: #6a4d2e; margin: 24px 0 8px; }
+    #status { font-size: 18px; color: var(--muted); margin: 24px 0 8px; }
     .feature {
       display: inline-block; margin: 3px; padding: 2px 10px;
-      background: #efe3cf; border: 1px solid #bfa27a; border-radius: 999px; font-size: 15px;
+      background: var(--chip); border: 1px solid var(--border); border-radius: 999px; font-size: 15px;
     }
     .gallery {
       display: grid;
@@ -90,9 +111,9 @@
       margin: 20px auto 0;
     }
     .card {
-      background: #fcf8f0;
+      background: var(--surface);
       padding: 10px;
-      border: 2px solid #bfa27a;
+      border: 2px solid var(--border);
       border-radius: 12px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       transition: transform 0.3s, box-shadow 0.3s;
@@ -102,16 +123,16 @@
       animation: fadeInMoveUp 0.8s ease both;
     }
     .card:hover, .card:focus-visible { transform: scale(1.05); box-shadow: 0 6px 14px rgba(0,0,0,0.5); }
-    .card img { width: 100%; aspect-ratio: 488 / 680; border-radius: 8px; display: block; background: #e0d4b8; }
+    .card img { width: 100%; aspect-ratio: 488 / 680; border-radius: 8px; display: block; background: var(--track); }
     .card-name { display: block; margin: 8px 0 4px; font-size: 16px; }
     .similarity { font-size: 14px; }
-    .progress-container { display: block; background-color: #e0d4b8; border-radius: 8px; margin-top: 4px; height: 12px; }
-    .progress-bar { display: block; height: 100%; background: linear-gradient(to right, #5a8f68, #8fbc8f); border-radius: 8px; }
+    .progress-container { display: block; background-color: var(--track); border-radius: 8px; margin-top: 4px; height: 12px; }
+    .progress-bar { display: block; height: 100%; background: linear-gradient(to right, var(--accent), #8fbc8f); border-radius: 8px; }
     @keyframes fadeInMoveUp { from { opacity: 0; translate: 0 20px; } }
 
     /* Card details */
     dialog {
-      background: #f5ebe0;
+      background: var(--dialog);
       color: inherit;
       border: none;
       border-radius: 12px;
@@ -133,19 +154,19 @@
     .foil-wrapper { position: relative; width: 100%; max-width: 300px; overflow: hidden; border-radius: 4.75% / 3.5%; }
     .foil-wrapper img { width: 100%; aspect-ratio: 488 / 680; display: block; }
     .price-line { font-size: 20px; margin: 8px 0; }
-    .foil-toggle { font-size: 16px; background: #fcf8f0; padding: 8px; border-radius: 10px; }
+    .foil-toggle { font-size: 16px; background: var(--surface); padding: 8px; border-radius: 10px; }
     .version-button {
       width: 95%;
       margin-bottom: 8px;
       padding: 6px 10px;
-      background-color: #5a8f68;
+      background-color: var(--accent);
       color: white;
       border: none;
       border-radius: 6px;
       font-size: 13px;
       cursor: pointer;
     }
-    .version-button:hover, .version-button[aria-current] { background-color: #467451; }
+    .version-button:hover, .version-button[aria-current] { background-color: var(--accent-hover); }
     .foil-shimmer::after {
       content: "";
       position: absolute;
@@ -165,10 +186,16 @@
       .foil-shimmer::after { animation: none; }
     }
 
-    footer { font-size: 14px; color: #6a4d2e; max-width: 760px; margin: 48px auto 0; line-height: 1.5; }
+    #theme-toggle {
+      position: absolute; top: 12px; right: 12px;
+      background: var(--surface); color: var(--text); border: 2px solid var(--border);
+      border-radius: 999px; padding: 6px 12px; font-size: 14px; cursor: pointer;
+    }
+    footer { font-size: 14px; color: var(--muted); max-width: 760px; margin: 48px auto 0; line-height: 1.5; }
   </style>
 </head>
 <body>
+  <button id="theme-toggle" type="button"></button>
   <h1>MTG Vec2Search</h1>
 
   <form id="search">
@@ -176,7 +203,8 @@
     <p class="examples">Try:
       <a href="?q=flying+dragons">flying dragons</a> ·
       <a href="?q=cheap+green+elves+that+ramp">cheap green elves that ramp</a> ·
-      <a href="?q=board+wipe&c=W&c=B">board wipe in W/B</a>
+      <a href="?q=board+wipe&c=W&c=B">board wipe in W/B</a> ·
+      <a href="?q=double+the+number+of+tokens&smart=1">double the number of tokens</a> (smart)
     </p>
 
     <fieldset>
@@ -213,6 +241,10 @@
         <select name="f" id="format"><option value="">Any</option></select>
       </label>
     </div>
+
+    <label class="smart-toggle"><input type="checkbox" name="smart" value="1">
+      <strong>Smart search</strong> (beta): understands descriptions like “copy a spell” or
+      “punish opponents for drawing”. Downloads about 35 MB the first time.</label>
 
     <button type="submit">Search</button>
   </form>

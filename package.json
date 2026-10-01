@@ -1,0 +1,11 @@
+{
+  "name": "mtg-vec2search",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0"
+  }
+}

@@ -1,6 +1,10 @@
-import { parseQuery, buildIndex, search } from "./search.js";
+import {
+  parseQuery, buildIndex, search, expandQuery, loadEmbeddings, semanticSearch, SMART_MODEL,
+} from "./search.js";
 
 const PAGE_SIZE = 30;
+// Same version the build uses (package.json), so query and card embeddings match
+const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/dist/transformers.min.js";
 const COLOR_NAMES = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green" };
 const $ = id => document.getElementById(id);
 const form = $("search");
@@ -15,6 +19,17 @@ form.addEventListener("submit", e => {
   e.preventDefault();
   location.search = new URLSearchParams([...new FormData(form)].filter(([, v]) => v));
 });
+
+const themeToggle = $("theme-toggle");
+const showThemeLabel = () =>
+  (themeToggle.textContent = document.documentElement.dataset.theme === "dark" ? "☀ Light" : "☾ Dark");
+themeToggle.onclick = () => {
+  const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("theme", theme); } catch {}
+  showThemeLabel();
+};
+showThemeLabel();
 
 const imageUrl = id => `https://cards.scryfall.io/normal/front/${id[0]}/${id[1]}/${id}.jpg`;
 
@@ -51,15 +66,54 @@ const filters = {
   min: num("min"), max: num("max"),
 };
 const features = parseQuery(query, index.terms);
-const results = search(index, features, filters, query);
+const smart = params.get("smart") === "1" && query.trim() !== "";
+let results;
+let note = "";
+if (smart) {
+  try {
+    results = await smartSearch();
+  } catch (err) {
+    console.error(err);
+    note = "Smart search couldn't load, so these are regular results.";
+  }
+}
+results ??= search(index, features, filters, query);
 
 status.textContent = "";
+if (note) status.append(el("div", { textContent: note }));
 if (features.length) {
   status.append("Recognized: ", ...features.map(f => el("span", { className: "feature", textContent: featureLabel(f) })));
-} else if (query) {
+} else if (query && !(smart && !note)) {
   status.append(`No card features recognized, so showing cards named “${query}”.`);
 }
-if (params.size) status.append(el("div", { textContent: `${results.length.toLocaleString()} cards found` }));
+if (params.size) {
+  const count = results.length.toLocaleString();
+  status.append(el("div", { textContent: smart && !note ? `Smart search: top ${count} matches` : `${count} cards found` }));
+}
+
+// Loads the embedding model (cached by the browser after the first time) and the card vectors
+async function smartSearch() {
+  status.textContent = "Loading smart search…";
+  const [{ pipeline }, buffer] = await Promise.all([
+    import(TRANSFORMERS_URL),
+    fetch("embeddings.bin").then(r => {
+      if (!r.ok) throw new Error(`embeddings.bin: ${r.status}`);
+      return r.arrayBuffer();
+    }),
+  ]);
+  const extract = await pipeline("feature-extraction", SMART_MODEL, {
+    dtype: "q8",
+    progress_callback: p => {
+      if (p.status === "progress" && p.file.endsWith(".onnx")) {
+        status.textContent = `Loading smart search model… ${Math.round(p.progress)}%`;
+      }
+    },
+  });
+  const { data } = await extract(expandQuery(query, features), { pooling: "mean", normalize: true });
+  const emb = loadEmbeddings(buffer, index.cards.length);
+  // Smart scores aren't percentages, so no match bar
+  return semanticSearch(index, emb, data, features, filters, query).map(r => ({ card: r.card, score: null }));
+}
 
 let shown = 0;
 function showMore() {
@@ -141,6 +195,9 @@ async function updatePrice() {
     $("price").textContent = "Price unavailable";
     return;
   }
+  const text = `$${usd} USD`;
+  $("price").textContent = text;
   const rate = await cadRate;
-  $("price").textContent = `$${usd} USD` + (rate ? ` · $${(usd * rate).toFixed(2)} CAD` : "");
+  // Skip if the user switched printing/foil while the rate was loading
+  if (rate && $("price").textContent === text) $("price").textContent += ` · $${(usd * rate).toFixed(2)} CAD`;
 }

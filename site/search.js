@@ -65,35 +65,32 @@ export function buildIndex(data) {
   const termIndex = new Map(data.terms.map((t, i) => [t, i]));
   const cards = data.cards.map(([name, type, cmc, id, identity, legal, rank, bits]) => ({
     name, type, cmc, id, identity, legal, rank: rank ?? Infinity, bits,
+    // Popularity prior for smart search: 1 for the top EDHREC card, falling to 0 (unranked)
+    pop: rank ? Math.max(0, 1 - Math.log(rank) / Math.log(40000)) : 0,
   }));
-  return { terms: data.terms, formats: data.formats, termIndex, weight, cards };
+  return { terms: data.terms, formats: data.formats, termIndex, weight, df, cards };
 }
 
 // filters: { colors: ["W","U"], types: ["Creature"], format: "modern", min: 0, max: 3 }
-export function search(index, features, filters = {}, query = "") {
+function filterFn(index, filters) {
   const { colors = [], types = [], format = "", min = null, max = null } = filters;
   const formatBit = format ? 1 << index.formats.indexOf(format) : 0;
-  const passes = c =>
+  return c =>
     (!colors.length || [...c.identity].every(x => colors.includes(x))) &&
     (!types.length || types.some(t => c.type.includes(t))) &&
     (!formatBit || c.legal & formatBit) &&
     (min === null || c.cmc >= min) &&
     (max === null || c.cmc <= max);
+}
 
-  const byRank = (a, b) => b.score - a.score || a.card.rank - b.card.rank;
+const hasFilters = ({ colors = [], types = [], format = "", min = null, max = null }) =>
+  colors.length || types.length || format || min !== null || max !== null;
 
-  if (!features.length) {
-    // Nothing recognized: fall back to a card-name search, ranked by popularity
-    const q = query.trim().toLowerCase();
-    if (!q && !colors.length && !types.length && !format && min === null && max === null) return [];
-    return index.cards
-      .filter(c => passes(c) && c.name.toLowerCase().includes(q))
-      .map(card => ({ card, score: null }))
-      .sort((a, b) => a.card.rank - b.card.rank);
-  }
-
-  // Score = IDF-weighted share of the query the card covers (query vector · card vector / query total).
-  // Unlike cosine, a card isn't penalized for extra features the query didn't mention.
+// Per-card IDF-weighted share of the query each card covers (query vector · card vector / query total).
+// Unlike cosine, a card isn't penalized for extra features the query didn't mention.
+function coverage(index, features) {
+  const scores = new Float64Array(index.cards.length);
+  if (!features.length) return scores;
   const qw = new Float64Array(index.terms.length);
   const ids = features.map(f => index.termIndex.get(f));
   // A card has exactly one mana-value bucket, so requested buckets count once, as a group
@@ -101,13 +98,97 @@ export function search(index, features, filters = {}, query = "") {
   const cmcWeight = Math.max(0, ...cmcIds.map(i => index.weight[i]));
   for (const i of ids) qw[i] = cmcIds.includes(i) ? cmcWeight : index.weight[i];
   const total = ids.reduce((s, i) => s + (cmcIds.includes(i) ? 0 : qw[i]), cmcWeight);
-
-  const results = [];
-  for (const card of index.cards) {
+  index.cards.forEach((card, ci) => {
     let dot = 0;
     for (const b of card.bits) dot += qw[b];
-    if (dot > 0 && passes(card)) results.push({ card, score: Math.round((dot / total) * 1e6) / 1e6 });
+    scores[ci] = Math.round((dot / total) * 1e6) / 1e6;
+  });
+  return scores;
+}
+
+export function search(index, features, filters = {}, query = "") {
+  const passes = filterFn(index, filters);
+
+  if (!features.length) {
+    // Nothing recognized: fall back to a card-name search, ranked by popularity
+    const q = query.trim().toLowerCase();
+    if (!q && !hasFilters(filters)) return [];
+    return index.cards
+      .filter(c => passes(c) && c.name.toLowerCase().includes(q))
+      .map(card => ({ card, score: null }))
+      .sort((a, b) => a.card.rank - b.card.rank);
   }
+
+  const cov = coverage(index, features);
+  const results = [];
+  index.cards.forEach((card, i) => {
+    if (cov[i] > 0 && passes(card)) results.push({ card, score: cov[i] });
+  });
   // Ties go to the more popular card (EDHREC rank)
-  return results.sort(byRank);
+  return results.sort((a, b) => b.score - a.score || a.card.rank - b.card.rank);
+}
+
+// === Smart (semantic) search ===
+// Card rules text embedded at build time (embeddings.bin), compared with the embedded query.
+
+// Rules-text phrasing for concepts, so slang the parser knows ("board wipe")
+// also steers the embedding ("Destroy all creatures.")
+const CONCEPT_TEXT = {
+  "Life Gain": "You gain life.",
+  "Card Advantage": "Draw a card.",
+  "Tap Effect": "Tap target creature.",
+  "Direct Damage": "Deals damage to any target.",
+  "Mana Ramp": "Add one mana of any color. Search your library for a basic land card and put it onto the battlefield.",
+  "Graveyard Recursion": "Return target creature card from your graveyard to the battlefield.",
+  "Discard Effect": "Target opponent discards a card.",
+  "Counter Effect": "Counter target spell.",
+  "Removal": "Destroy target creature.",
+  "Exile Effect": "Exile target permanent.",
+  "Bounce Effect": "Return target permanent to its owner's hand.",
+  "Mass Removal": "Destroy all creatures.",
+  "Fight Effect": "Target creature you control fights target creature you don't control.",
+  "Mill Effect": "Target player mills cards.",
+  "Token Creation": "Create creature tokens.",
+  "Artifact Interaction": "Destroy target artifact.",
+  "Enchantment Interaction": "Destroy target enchantment.",
+  "Landfall Effect": "Whenever a land you control enters, ",
+};
+
+export function expandQuery(query, features) {
+  return [query, ...features.filter(f => CONCEPT_TEXT[f]).map(f => CONCEPT_TEXT[f])].join(" ");
+}
+
+// embeddings.bin: float32 scale, then one int8 vector per card (same order as cards.json)
+export function loadEmbeddings(buffer, cardCount) {
+  const scale = new Float32Array(buffer.slice(0, 4))[0];
+  const vectors = new Int8Array(buffer, 4);
+  const dims = vectors.length / cardCount;
+  if (!Number.isInteger(dims)) throw new Error("embeddings.bin doesn't match cards.json");
+  return { scale, vectors, dims };
+}
+
+export const SMART_MODEL = "Xenova/all-MiniLM-L6-v2";
+// Weights tuned on ~20 real queries (bakeoff/)
+export const SMART = { coverageWeight: 0.1, popularityWeight: 0.1, commonFeature: 0.25, limit: 300 };
+
+// Score = semantic similarity + small boosts for matching parsed features and for popularity.
+// Card names aren't embedded, so a query that's part of a card's name puts that card first.
+export function semanticSearch(index, emb, queryVector, features, filters = {}, query = "") {
+  const passes = filterFn(index, filters);
+  // Very common features (e.g. "Creature") would boost a quarter of all cards, so they don't count here
+  const n = index.cards.length;
+  const specific = features.filter(f => index.df[index.termIndex.get(f)] / n <= SMART.commonFeature);
+  const cov = coverage(index, specific);
+  const q = query.trim().toLowerCase();
+  const { scale, vectors, dims } = emb;
+  const results = [];
+  index.cards.forEach((card, i) => {
+    if (!passes(card)) return;
+    let dot = 0;
+    for (let d = 0, o = i * dims; d < dims; d++) dot += queryVector[d] * vectors[o + d];
+    const nameHit = q.length >= 3 && card.name.toLowerCase().includes(q) ? 1 : 0;
+    const score = dot / scale + SMART.coverageWeight * cov[i] + SMART.popularityWeight * card.pop + nameHit;
+    results.push({ card, score });
+  });
+  return results.sort((a, b) => b.score - a.score).slice(0, SMART.limit);
 }

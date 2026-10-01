@@ -3,6 +3,10 @@
 *.jsonl.gz
 all_cards.json
 site/cards.json
+site/embeddings.bin
+site/embeddings-keys.json
+bakeoff/*.f32
+node_modules/
 
 __pycache__/
 temp.txt

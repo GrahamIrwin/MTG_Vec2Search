@@ -1,7 +1,7 @@
 // Run with: node --test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseQuery, buildIndex, search } from "./site/search.js";
+import { parseQuery, buildIndex, search, expandQuery, loadEmbeddings, semanticSearch } from "./site/search.js";
 
 const terms = ["W", "R", "G", "Creature", "Instant", "Flying", "Ward", "Elf", "Dragon", "draw",
   "Card Advantage", "Mana Ramp", "CMC_0", "CMC_1", "CMC_2", "CMC_3", "CMC_6"];
@@ -43,4 +43,31 @@ test("search ranks by IDF-weighted query coverage, then popularity, and applies 
   // Unrecognized query falls back to name search
   assert.deepEqual(names([], {}, "dork"), ["Elf Dork"]);
   assert.deepEqual(names([], {}, ""), []);
+});
+
+test("smart search: query expansion, embeddings file, semantic ranking", () => {
+  assert.equal(expandQuery("board wipe", ["Mass Removal", "W"]), "board wipe Destroy all creatures.");
+
+  const data = {
+    terms: ["Creature", "Instant", "Mass Removal"], formats: ["standard"],
+    cards: [
+      ["Wrath", "Sorcery", 4, "a", "W", 1, 10, [2]],
+      ["Bear", "Creature — Bear", 2, "b", "G", 1, 5, [0]],
+      ["Shock", "Instant", 1, "c", "R", 1, 1, [1]],
+    ],
+  };
+  const index = buildIndex(data);
+  // 2-dim vectors, int8 with scale 100: Wrath and Shock point along x, Bear along y
+  const buf = new ArrayBuffer(4 + 6);
+  new Float32Array(buf, 0, 1)[0] = 100;
+  new Int8Array(buf, 4).set([100, 0, 0, 100, 90, 44]);
+  const emb = loadEmbeddings(buf, 3);
+  assert.equal(emb.dims, 2);
+  assert.throws(() => loadEmbeddings(buf, 4));
+
+  const names = (...args) => semanticSearch(index, emb, ...args).map(r => r.card.name);
+  assert.deepEqual(names([1, 0], []), ["Wrath", "Shock", "Bear"]);
+  assert.deepEqual(names([1, 0], [], { colors: ["R"] }), ["Shock"]);
+  // A query that's part of a card name puts that card first
+  assert.deepEqual(names([1, 0], [], {}, "bear"), ["Bear", "Wrath", "Shock"]);
 });
