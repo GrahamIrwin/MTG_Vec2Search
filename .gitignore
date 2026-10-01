@@ -1,7 +1,8 @@
-# Generated card data — rebuild with: python bulkCardDownload.py
+# Generated card data — rebuild with: python build_index.py
 *.db
 *.jsonl.gz
 all_cards.json
+site/cards.json
 
 __pycache__/
 temp.txt

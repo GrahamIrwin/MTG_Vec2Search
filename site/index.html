@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MTG Vec2Search</title>
+  <meta name="description" content="Search Magic: The Gathering cards by describing them in plain English.">
+  <style>
+    @font-face {
+      font-family: 'Beleren Bold';
+      src: url('fonts/Beleren2016-Bold.ttf') format('truetype');
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: Garamond, serif;
+      background: linear-gradient(#f8f1e7, #e9d8c7) fixed;
+      color: #4b2e2e;
+      text-align: center;
+      margin: 0;
+      padding: 32px 16px;
+    }
+    h1, h2, h3, button, legend, .card-name { font-family: 'Beleren Bold', Garamond, serif; }
+    h1 {
+      font-size: clamp(32px, 7vw, 48px);
+      text-shadow: 2px 2px 4px #d2a679;
+      margin: 0 0 20px;
+    }
+    a { color: #3f6e4c; }
+
+    /* Search form */
+    form { max-width: 760px; margin: 0 auto; }
+    input[type=search] {
+      width: 100%;
+      padding: 14px;
+      font-size: 18px;
+      border: 2px solid #bfa27a;
+      border-radius: 12px;
+      background-color: #fdf6e3;
+      box-shadow: inset 0 0 10px #e0cda9;
+      font-family: Garamond, serif;
+      color: inherit;
+    }
+    .examples { font-size: 15px; margin: 8px 0 4px; }
+    fieldset { border: none; margin: 10px 0 0; padding: 0; }
+    legend { font-size: 15px; margin: 0 auto 6px; }
+    .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+    .chips label {
+      padding: 5px 12px;
+      border: 2px solid #bfa27a;
+      border-radius: 999px;
+      background: #fcf8f0;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chips label:has(input:checked) { background: #5a8f68; border-color: #467451; color: white; }
+    .chips label:has(input:focus-visible) { outline: 2px solid #4b2e2e; outline-offset: 2px; }
+    .chips input { position: absolute; opacity: 0; pointer-events: none; }
+    .pip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; border: 1px solid #0005; }
+    .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; margin-top: 12px; }
+    .row input, .row select {
+      font: inherit; font-size: 16px; padding: 4px 6px;
+      border: 2px solid #bfa27a; border-radius: 8px; background: #fdf6e3; color: inherit;
+    }
+    .row input { width: 4.5em; }
+    button[type=submit], #more {
+      margin-top: 16px;
+      padding: 12px 28px;
+      font-size: 20px;
+      background-color: #5a8f68;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      box-shadow: 2px 2px 6px #4d4d4d;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button[type=submit]:hover, #more:hover { background-color: #467451; }
+
+    /* Results */
+    #status { font-size: 18px; color: #6a4d2e; margin: 24px 0 8px; }
+    .feature {
+      display: inline-block; margin: 3px; padding: 2px 10px;
+      background: #efe3cf; border: 1px solid #bfa27a; border-radius: 999px; font-size: 15px;
+    }
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 20px;
+      max-width: 1400px;
+      margin: 20px auto 0;
+    }
+    .card {
+      background: #fcf8f0;
+      padding: 10px;
+      border: 2px solid #bfa27a;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      transition: transform 0.3s, box-shadow 0.3s;
+      cursor: pointer;
+      color: inherit;
+      font: inherit;
+      animation: fadeInMoveUp 0.8s ease both;
+    }
+    .card:hover, .card:focus-visible { transform: scale(1.05); box-shadow: 0 6px 14px rgba(0,0,0,0.5); }
+    .card img { width: 100%; aspect-ratio: 488 / 680; border-radius: 8px; display: block; background: #e0d4b8; }
+    .card-name { display: block; margin: 8px 0 4px; font-size: 16px; }
+    .similarity { font-size: 14px; }
+    .progress-container { display: block; background-color: #e0d4b8; border-radius: 8px; margin-top: 4px; height: 12px; }
+    .progress-bar { display: block; height: 100%; background: linear-gradient(to right, #5a8f68, #8fbc8f); border-radius: 8px; }
+    @keyframes fadeInMoveUp { from { opacity: 0; translate: 0 20px; } }
+
+    /* Card details */
+    dialog {
+      background: #f5ebe0;
+      color: inherit;
+      border: none;
+      border-radius: 12px;
+      padding: 20px;
+      width: min(800px, 100% - 32px);
+      max-height: 85vh;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+    }
+    dialog::backdrop { background: rgba(0,0,0,0.7); }
+    dialog[open] { display: flex; flex-wrap: wrap; gap: 16px; animation: fadeInMoveUp 0.5s ease both; }
+    .modal-left { flex: 2 1 280px; display: flex; flex-direction: column; align-items: center; }
+    .modal-right { flex: 1 1 200px; overflow-y: auto; max-height: 70vh; }
+    .modal-right h3 { margin-top: 0; }
+    .close-button {
+      position: absolute; top: 4px; right: 10px;
+      background: none; border: none; font-size: 28px; cursor: pointer; color: inherit;
+    }
+    dialog form { display: contents; }
+    .foil-wrapper { position: relative; width: 100%; max-width: 300px; overflow: hidden; border-radius: 4.75% / 3.5%; }
+    .foil-wrapper img { width: 100%; aspect-ratio: 488 / 680; display: block; }
+    .price-line { font-size: 20px; margin: 8px 0; }
+    .foil-toggle { font-size: 16px; background: #fcf8f0; padding: 8px; border-radius: 10px; }
+    .version-button {
+      width: 95%;
+      margin-bottom: 8px;
+      padding: 6px 10px;
+      background-color: #5a8f68;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .version-button:hover, .version-button[aria-current] { background-color: #467451; }
+    .foil-shimmer::after {
+      content: "";
+      position: absolute;
+      top: -50%; left: -50%;
+      width: 200%; height: 200%;
+      background: linear-gradient(120deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 100%);
+      animation: shimmer 2s infinite linear;
+      pointer-events: none;
+    }
+    @keyframes shimmer {
+      0% { transform: translate(-100%, -100%) rotate(25deg); }
+      50% { transform: translate(100%, 100%) rotate(25deg); }
+      100% { transform: translate(200%, 200%) rotate(25deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .card, dialog[open] { animation: none; }
+      .foil-shimmer::after { animation: none; }
+    }
+
+    footer { font-size: 14px; color: #6a4d2e; max-width: 760px; margin: 48px auto 0; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>MTG Vec2Search</h1>
+
+  <form id="search">
+    <input type="search" name="q" placeholder="Describe the card you want…" aria-label="Describe the card you want">
+    <p class="examples">Try:
+      <a href="?q=flying+dragons">flying dragons</a> ·
+      <a href="?q=cheap+green+elves+that+ramp">cheap green elves that ramp</a> ·
+      <a href="?q=board+wipe&c=W&c=B">board wipe in W/B</a>
+    </p>
+
+    <fieldset>
+      <legend>Color identity within</legend>
+      <div class="chips">
+        <label><input type="checkbox" name="c" value="W"><span class="pip" style="background:#f8f3d6"></span>White</label>
+        <label><input type="checkbox" name="c" value="U"><span class="pip" style="background:#4a90d9"></span>Blue</label>
+        <label><input type="checkbox" name="c" value="B"><span class="pip" style="background:#2b2b2b"></span>Black</label>
+        <label><input type="checkbox" name="c" value="R"><span class="pip" style="background:#d9452b"></span>Red</label>
+        <label><input type="checkbox" name="c" value="G"><span class="pip" style="background:#3f8f4f"></span>Green</label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Card type</legend>
+      <div class="chips">
+        <label><input type="checkbox" name="t" value="Creature">Creature</label>
+        <label><input type="checkbox" name="t" value="Instant">Instant</label>
+        <label><input type="checkbox" name="t" value="Sorcery">Sorcery</label>
+        <label><input type="checkbox" name="t" value="Artifact">Artifact</label>
+        <label><input type="checkbox" name="t" value="Enchantment">Enchantment</label>
+        <label><input type="checkbox" name="t" value="Planeswalker">Planeswalker</label>
+        <label><input type="checkbox" name="t" value="Land">Land</label>
+        <label><input type="checkbox" name="t" value="Battle">Battle</label>
+      </div>
+    </fieldset>
+
+    <div class="row">
+      <label>Mana value
+        <input type="number" name="min" min="0" max="20" placeholder="min" aria-label="Minimum mana value"> –
+        <input type="number" name="max" min="0" max="20" placeholder="max" aria-label="Maximum mana value">
+      </label>
+      <label>Format
+        <select name="f" id="format"><option value="">Any</option></select>
+      </label>
+    </div>
+
+    <button type="submit">Search</button>
+  </form>
+
+  <div id="status" role="status"></div>
+  <div id="gallery" class="gallery"></div>
+  <button id="more" hidden>Load more</button>
+
+  <dialog id="modal" aria-labelledby="modal-name">
+    <form method="dialog"><button class="close-button" aria-label="Close">×</button></form>
+    <div class="modal-left">
+      <div class="foil-wrapper" id="foil-wrapper"><img id="modal-img" alt=""></div>
+      <h2 id="modal-name"></h2>
+      <p id="modal-set"></p>
+      <p class="price-line" id="price"></p>
+      <label class="foil-toggle" id="foil-label" hidden><input type="checkbox" id="foil"> Show foil price</label>
+      <p><a id="scryfall-link" target="_blank" rel="noopener">View on Scryfall</a></p>
+    </div>
+    <div class="modal-right">
+      <h3>All printings</h3>
+      <div id="printings"></div>
+    </div>
+  </dialog>
+
+  <footer>
+    <p>Search runs entirely in your browser. Card data and images from
+      <a href="https://scryfall.com">Scryfall</a><span id="updated"></span>. Prices are Scryfall's
+      USD prices, converted to CAD with <a href="https://frankfurter.dev">Frankfurter</a>.
+      <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">Source on GitHub</a>.</p>
+    <p>MTG Vec2Search is unofficial Fan Content permitted under the
+      <a href="https://company.wizards.com/en/legal/fancontentpolicy">Fan Content Policy</a>.
+      Not approved/endorsed by Wizards. Portions of the materials used are property of
+      Wizards of the Coast. ©Wizards of the Coast LLC.</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
