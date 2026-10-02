@@ -79,7 +79,6 @@ Tests: `python test_build_index.py` and `node --test` (Node 24).
 - `site/search.js`: query parsing and ranking
 - `site/currency.js`: currency detection, exchange rate and price formatting
 - `.github/workflows/deploy.yml`: weekly rebuild and GitHub Pages deploy
-- Earlier versions (including the original Flask app) are in the git history
 
 Card data and images come from [Scryfall](https://scryfall.com). MTG Vec2Search is
 unofficial Fan Content permitted under the Fan Content Policy. Not
