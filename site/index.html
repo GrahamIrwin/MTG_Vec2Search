@@ -350,9 +350,23 @@
     .term small { color: var(--ink-faint); margin-left: 4px; font-variant-numeric: tabular-nums; }
 
     /* ---------- Footer ---------- */
-    footer { max-width: 780px; margin: 70px auto 0; padding: 22px 0 40px; border-top: 1px solid var(--rule);
-      text-align: center; font-size: 14px; line-height: 1.6; color: var(--ink-faint); }
-    footer p { margin: 0 0 8px; }
+    .colophon { max-width: 980px; margin: 84px auto 0; padding-bottom: 44px; font-size: 15px; line-height: 1.6; color: var(--ink-soft); }
+    .ornament {
+      display: flex; align-items: center; gap: 16px; margin-bottom: 30px;
+      color: var(--brass); font-size: 11px;
+    }
+    .ornament::before, .ornament::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--rule)); }
+    .ornament::after { transform: scaleX(-1); }
+    .credits { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px 36px; }
+    .credits h2 { font: 16px/1.2 "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; color: var(--brass); margin-bottom: 6px; }
+    .credits p { margin: 0; }
+    .fine-print {
+      max-width: 700px; margin: 36px auto 0; padding-top: 18px; border-top: 1px solid var(--rule);
+      text-align: center; font-size: 13px; line-height: 1.6; color: var(--ink-faint);
+    }
+    .fine-print a { color: inherit; }
+    @media (max-width: 900px) { .credits { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 520px) { .credits { grid-template-columns: 1fr; gap: 20px; } .colophon { margin-top: 56px; } }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -476,12 +490,30 @@
       </section>
     </main>
 
-    <footer>
-      <p>Card data and images from <a href="https://scryfall.com">Scryfall</a><span id="updated"></span>.
-        Card function tags from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.
-        Prices are Scryfall's USD prices (on result tiles, each card's cheapest printing), converted with
-        <a href="https://frankfurter.dev">Frankfurter</a> (European Central Bank rates). <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">Source on GitHub</a>.</p>
-      <p>MTG Vec2Search is unofficial Fan Content permitted under the
+    <footer class="colophon">
+      <div class="ornament" aria-hidden="true">◆</div>
+      <div class="credits">
+        <section>
+          <h2 class="label">Card data</h2>
+          <p>Cards and images from <a href="https://scryfall.com">Scryfall</a>,
+            <span id="updated">updated weekly</span>.</p>
+        </section>
+        <section>
+          <h2 class="label">What cards do</h2>
+          <p>Function tags from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.</p>
+        </section>
+        <section>
+          <h2 class="label">Prices</h2>
+          <p>Scryfall's US prices (on tiles, each card's cheapest printing), converted with
+            <a href="https://frankfurter.dev">Frankfurter</a> at European Central Bank rates.</p>
+        </section>
+        <section>
+          <h2 class="label">This site</h2>
+          <p>Free, with nothing to install. The source is on
+            <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">GitHub</a>.</p>
+        </section>
+      </div>
+      <p class="fine-print">MTG Vec2Search is unofficial Fan Content permitted under the
         <a href="https://company.wizards.com/en/legal/fancontentpolicy">Fan Content Policy</a>.
         Not approved/endorsed by Wizards. Portions of the materials used are property of
         Wizards of the Coast. ©Wizards of the Coast LLC.</p>

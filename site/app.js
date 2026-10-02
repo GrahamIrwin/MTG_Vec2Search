@@ -110,7 +110,7 @@ if (currency !== "USD") $("price-label").textContent = `Max price (${currency})`
 let metaPromise;
 function getMeta() {
   metaPromise ??= getJson("index/meta.json").then(meta => {
-    $("updated").textContent = ` (updated ${meta.updated.slice(0, 10)})`;
+    $("updated").textContent = `updated ${new Date(meta.updated).toLocaleDateString(undefined, { dateStyle: "long", timeZone: "UTC" })}`;
     for (const f of meta.formats) $("format").append(el("option", { value: f, textContent: f[0].toUpperCase() + f.slice(1) }));
     $("format").value = params.get("f") ?? "";
     return meta;
