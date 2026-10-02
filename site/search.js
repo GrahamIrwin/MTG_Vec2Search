@@ -1,26 +1,5 @@
 // Query parsing and ranking. Pure functions, tested by search.test.mjs (node --test).
 
-// Plain-English phrases that map to the action concepts detected in card text
-const ACTION_PHRASES = {
-  "Life Gain": ["gain life", "lifelink", "equal to life"],
-  "Card Advantage": ["draw", "scry", "investigate", "loot"],
-  "Tap Effect": ["tap", "untap", "tap an untapped"],
-  "Direct Damage": ["deal damage", "deals damage", "burn", "damage"],
-  "Mana Ramp": ["search your library for land", "add mana", "put a land", "mana fixing", "ramp", "mana dork", "mana rock"],
-  "Graveyard Recursion": ["reanimate", "return from graveyard", "raise dead", "recursion"],
-  "Discard Effect": ["discard a card", "opponent discards", "discard"],
-  "Counter Effect": ["counterspell", "counter target spell"],
-  "Removal": ["destroy target creature", "destroy target permanent", "removal", "kill spell"],
-  "Exile Effect": ["exile target", "exile all"],
-  "Bounce Effect": ["return target to hand", "bounce"],
-  "Mass Removal": ["board wipe", "wrath", "sweeper", "destroy all creatures"],
-  "Fight Effect": ["fight another creature", "fights target"],
-  "Mill Effect": ["mill cards", "put top cards into graveyard"],
-  "Token Creation": ["create a token", "create tokens", "token maker"],
-  "Artifact Interaction": ["destroy artifact", "exile artifact"],
-  "Enchantment Interaction": ["destroy enchantment", "exile enchantment"],
-  "Landfall Effect": ["landfall"],
-};
 const COLOR_WORDS = { white: "W", blue: "U", black: "B", red: "R", green: "G", colorless: "Colorless" };
 const CMC_WORDS = [
   [["cheap", "small", "low mana", "low cost"], ["CMC_0", "CMC_1", "CMC_2", "CMC_3"]],
@@ -68,6 +47,9 @@ const PHRASES = [
   [/\bcan(?:no|')?t (?:cast|play)\b/g, "silence"], // opponents can't cast spells
   [/\bwins? the game\b/g, "win condition"],
   [/\bland destruction\b/g, "land removal"],
+  [/\bkill spells?\b/g, "creature removal"],
+  [/\b(?:mana )?dorks?\b/g, "mana dork"],
+  [/\btoken makers?\b/g, "makes tokens"],
   [/\bdiscards? (?:\w+ )?hands? and draws?\b/g, "wheel"],
   [/\bwhen(?:ever)?\b[^.]*?\bdies\b/g, "death trigger"],
 ];
@@ -129,7 +111,6 @@ export function buildIndex(meta, columns) {
 // Most groups are a single feature; related tags form one group, where the most specific
 // tag gets full credit ("instant tutors": tutor-instant 1, tutor 0.5).
 export function parseQuery(query, index) {
-  const text = normalize(query);
   const groups = [];
   const single = new Set();
 
@@ -185,9 +166,6 @@ export function parseQuery(query, index) {
     }
   }
 
-  for (const [concept, phrases] of Object.entries(ACTION_PHRASES)) {
-    if (phrases.some(p => has(text, p))) single.add(concept);
-  }
   for (const [word, code] of Object.entries(COLOR_WORDS)) if (has(cardText, word)) single.add(code);
   // A card has exactly one mana-value bucket, so requested buckets form one group
   const cmc = CMC_WORDS.filter(([ws]) => ws.some(w => has(cardText, w))).flatMap(([, buckets]) => buckets);

@@ -31,13 +31,6 @@ FORMATS = ["standard", "pioneer", "modern", "legacy", "vintage", "commander", "p
 COLORS = ["W", "U", "B", "R", "G", "Colorless"]
 TYPES = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Land", "Planeswalker",
          "Battle", "Legendary"]
-TEXT_TERMS = ["draw", "destroy", "counter target", "exile", "sacrifice", "life gain", "search your library"]
-ACTION_CONCEPTS = [
-    "Life Gain", "Card Advantage", "Tap Effect", "Direct Damage", "Mana Ramp",
-    "Graveyard Recursion", "Discard Effect", "Counter Effect", "Removal", "Exile Effect",
-    "Bounce Effect", "Mass Removal", "Fight Effect", "Mill Effect", "Token Creation",
-    "Artifact Interaction", "Landfall Effect", "Enchantment Interaction"
-]
 CMC_BUCKETS = ["CMC_0", "CMC_1", "CMC_2", "CMC_3", "CMC_4", "CMC_5", "CMC_6", "CMC_7_plus"]
 
 # Keywords/subtypes on fewer cards than this are mostly one-off flavor abilities
@@ -163,100 +156,14 @@ def build_term_space(cards, tags):
                        if 2 <= n <= len(cards) / 2 and not t.startswith("cycle"))  # card cycles aren't search targets
     categories = {
         "Colors": COLORS, "Card types": TYPES, "Keywords": keywords, "Subtypes": subs,
-        "Rules text": TEXT_TERMS, "Effects": ACTION_CONCEPTS, "Mana value": CMC_BUCKETS,
-        "Tokens it makes": tokens, "What it does (Scryfall Tagger)": tag_terms,
+        "Mana value": CMC_BUCKETS, "Tokens it makes": ["Token Creation"] + tokens,
+        "What it does (Scryfall Tagger)": tag_terms,
     }
     terms = list(dict.fromkeys(t for ts in categories.values() for t in ts))  # dedupe ("Food": keyword + subtype)
     return terms, keywords, categories
 
 
 # === Step 3: Vectorize ===
-def determine_cmc_bucket(cmc):
-    return f"CMC_{int(cmc)}" if cmc < 7 else "CMC_7_plus"
-
-
-def detect_action_concepts(oracle_text, is_land=False):
-    text = oracle_text.lower()
-    actions = set()
-
-    # Life Gain
-    if "gain life" in text or "lifelink" in text:
-        actions.add("Life Gain")
-
-    # Card Advantage
-    if any(term in text for term in ["draw a card", "scry", "investigate", "loot"]):
-        actions.add("Card Advantage")
-
-    # Tap Effects
-    if "tap target" in text or "untap target" in text or "tap an untapped" in text:
-        actions.add("Tap Effect")
-
-    # Direct Damage
-    if re.search(r"deals? (?:\d+|x|that much) damage", text) or "burn" in text:
-        actions.add("Direct Damage")
-
-    # Mana Ramp
-    if any(term in text for term in ["search your library for a land", "add mana", "put a land"]):
-        actions.add("Mana Ramp")
-    # Mana dorks/rocks ("{T}: Add {G}"); every land does this, so it's not ramp there
-    if not is_land and re.search(r"\badd (?:\{|\w+ mana)", text):
-        actions.add("Mana Ramp")
-
-    # Graveyard Recursion
-    if any(term in text for term in ["return target creature card", "reanimate", "raise dead"]):
-        actions.add("Graveyard Recursion")
-
-    # Discard
-    if "target opponent discards" in text or "discard a card" in text:
-        actions.add("Discard Effect")
-
-    # Counter Effects
-    if "counter target spell" in text or "counter an ability" in text:
-        actions.add("Counter Effect")
-
-    # Removal
-    if "destroy target creature" in text or "destroy target permanent" in text:
-        actions.add("Removal")
-
-    # Exile Effects
-    if "exile target" in text or "exile all" in text:
-        actions.add("Exile Effect")
-
-    # Bounce Effects
-    if "return target" in text and "to its owner's hand" in text:
-        actions.add("Bounce Effect")
-
-    # Mass Removal
-    if "destroy all creatures" in text or "each creature gets" in text:
-        actions.add("Mass Removal")
-
-    # Fight Effects
-    if "fights target" in text or "fight another target creature" in text:
-        actions.add("Fight Effect")
-
-    # Mill Effects
-    if "put the top" in text and "cards of your library into your graveyard" in text:
-        actions.add("Mill Effect")
-
-    # Token Creation
-    if "create a" in text and "token" in text:
-        actions.add("Token Creation")
-
-    # Artifact Interaction
-    if "destroy target artifact" in text or "exile target artifact" in text:
-        actions.add("Artifact Interaction")
-
-    # Enchantment Interaction
-    if "destroy target enchantment" in text or "exile target enchantment" in text:
-        actions.add("Enchantment Interaction")
-
-    # Landfall Effects
-    if "whenever a land enters" in text:
-        actions.add("Landfall Effect")
-
-    return actions
-
-
 def keyword_matcher(keywords):
     """Regex finding keyword names as whole words in rules text (e.g. cards that grant flying)."""
     alts = sorted((re.escape(k.lower()) for k in keywords), key=len, reverse=True)
@@ -275,9 +182,8 @@ def vectorize_card(card, index, find_keywords, card_tags=(), subtype_names=froze
     features |= {t for t in TYPES if t in type_words}
     features |= set(subtypes(type_line))
     features |= set(card.get("keywords", [])) | find_keywords(text)
-    features |= {t for t in TEXT_TERMS if re.search(r"\b" + t, text)}
-    features |= detect_action_concepts(text, "Land" in type_words)
-    features.add(determine_cmc_bucket(card.get("cmc", 0)))
+    cmc = card.get("cmc", 0)
+    features.add(f"CMC_{int(cmc)}" if cmc < 7 else "CMC_7_plus")
     tokens = token_features(card["oracle_text"], find_keywords, subtype_names)
     if tokens:
         features |= tokens | {"Token Creation"}
@@ -317,7 +223,7 @@ def load_printings():
 # Cards are in popularity order (EDHREC rank), so the top results sit in the first chunks.
 OUT_DIR = os.path.join("site", "index")
 CHUNK = 256
-FILTER_TYPES = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land", "Battle"]
+FILTER_TYPES = [t for t in TYPES if t != "Legendary"]
 NO_PRICE = -1
 EPOCH, NO_DATE = date(1993, 1, 1), -1
 

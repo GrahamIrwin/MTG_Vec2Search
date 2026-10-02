@@ -7,7 +7,7 @@ import {
 } from "./site/search.js";
 
 const terms = ["W", "R", "G", "Creature", "Instant", "Land", "Artifact", "Flying", "Ward", "Elf", "Dragon",
-  "Spirit", "draw", "Card Advantage", "Mana Ramp", "Token Creation", "CMC_0", "CMC_1", "CMC_2", "CMC_3",
+  "Spirit", "draw", "Card Advantage", "tag:ramp", "Token Creation", "CMC_0", "CMC_1", "CMC_2", "CMC_3",
   "CMC_6", "token:W", "token:Creature", "token:Flying", "token:Spirit",
   "tag:tutor", "tag:tutor-instant", "tag:hate", "tag:hate-nonbasic-land", "tag:hate-artifact",
   "tag:removal", "tag:removal-artifact", "tag:token-doubler", "tag:sweeper", "tag:wheel", "tag:draw-hate",
@@ -61,7 +61,7 @@ function names(q, filters = {}) {
 }
 
 test("parseQuery matches whole words and plurals", () => {
-  assert.deepEqual(parsed("cheap green elves that ramp"), ["CMC_0", "CMC_1", "CMC_2", "CMC_3", "Mana Ramp", "G", "Elf"]);
+  assert.deepEqual(parsed("cheap green elves that ramp"), ["tag:ramp", "CMC_0", "CMC_1", "CMC_2", "CMC_3", "G", "Elf"]);
   assert.deepEqual(parsed("red flying dragons"), ["R", "Flying", "Dragon"]);
   // "entered" contains "red", "toward" contains "ward", "midnight" contains "mid"
   assert.deepEqual(parsed("it entered toward midnight"), []);

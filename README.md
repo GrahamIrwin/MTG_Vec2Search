@@ -13,8 +13,7 @@ pieces of the index it needs (~200 KB the first time, a few KB after that).
 1. `build_index.py` downloads Scryfall's `oracle_cards`, `oracle_tags` and
    `default_cards` (every printing, for the cheapest price) bulk data and turns
    each card into a sparse binary vector over a term space:
-   - colors, types, keywords, subtypes, rules-text terms, action concepts
-     (removal, ramp, card advantage, …) and mana value
+   - colors, types, keywords, subtypes and mana value
    - the tokens it makes ("create two 1/1 white Spirit creature tokens with
      flying" → makes white / Spirit / creature / flying tokens)
    - **oracle tags** from the community [Scryfall Tagger](https://tagger.scryfall.com)
@@ -80,7 +79,7 @@ Tests: `python test_build_index.py` and `node --test` (Node 24).
 - `site/search.js`: query parsing and ranking
 - `site/currency.js`: currency detection, exchange rate and price formatting
 - `.github/workflows/deploy.yml`: weekly rebuild and GitHub Pages deploy
-- `archive/`: earlier versions, including the original Flask app
+- Earlier versions (including the original Flask app) are in the git history
 
 Card data and images come from [Scryfall](https://scryfall.com). MTG Vec2Search is
 unofficial Fan Content permitted under the Fan Content Policy. Not

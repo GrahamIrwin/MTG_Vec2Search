@@ -42,10 +42,6 @@ export function detectCurrency() {
   return "USD";
 }
 
-export function saveCurrency(currency) {
-  try { localStorage.setItem("currency", currency); } catch {}
-}
-
 // Units of `currency` per US dollar (1 for USD); null if the rate can't be fetched
 export async function usdRate(currency) {
   if (currency === "USD") return 1;

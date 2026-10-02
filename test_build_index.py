@@ -13,16 +13,11 @@ index = {t: i for i, t in enumerate(terms)}
 assert "tag:hate-artifact" in terms and "tag:only-one" not in terms  # tags on a single card are dropped
 vec = lambda c, card_tags=(): {terms[i] for i in vectorize_card(c, index, keyword_matcher(keywords), card_tags)}
 
-assert vec(card, ["hate-artifact"]) == {"R", "Legendary", "Creature", "Dragon", "Flying", "Trample", "Ward", "draw",
-                                        "Card Advantage", "Direct Damage", "CMC_5", "tag:hate-artifact"}, vec(card)
+assert vec(card, ["hate-artifact"]) == {"R", "Legendary", "Creature", "Dragon", "Flying", "Trample", "Ward",
+                                        "CMC_5", "tag:hate-artifact"}, vec(card)
 # "toward"/"reward" must not count as Ward; only the standalone "Ward" line does
 card["oracle_text"] = "Creatures move toward the reward."
 assert "Ward" not in vec(card)
-# Mana dorks are ramp; lands that tap for mana are not
-card["oracle_text"] = "{T}: Add {G}."
-assert "Mana Ramp" in vec(card)
-card["type_line"] = "Basic Land — Forest"
-assert "Mana Ramp" not in vec(card)
 
 # Token makers: the token's colors, types, subtypes and keywords
 find_kw = keyword_matcher(["Flying", "Haste"])

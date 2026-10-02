@@ -2,7 +2,7 @@ import {
   parseQuery, buildIndex, search, nameSearch, mainTerms, termsNeeded, decodePosting, parsePrice,
   isBudget, BUDGET_USD, SORTS, sortResults, randomSearches,
 } from "./search.js";
-import { CURRENCIES, detectCurrency, saveCurrency, usdRate, moneyFormatter } from "./currency.js";
+import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.js";
 
 const PAGE_SIZE = 30;
 const CHUNK = 256; // cards per index/c/<chunk>.json (CHUNK in build_index.py)
@@ -90,19 +90,6 @@ themeToggle.onclick = () => {
   document.documentElement.dataset.theme = theme;
   try { localStorage.setItem("theme", theme); } catch {}
   showThemeLabel();
-
-// Prices: shown in the visitor's currency (guessed from their browser, changeable, remembered).
-// The exchange rate is only fetched once a search needs it.
-const currency = detectCurrency();
-let money = moneyFormatter(currency, currency === "USD" ? 1 : null);
-$("currency").append(...CURRENCIES.map(c => el("option", { value: c, textContent: c })));
-$("currency").value = currency;
-$("currency").onchange = () => {
-  saveCurrency($("currency").value);
-  location.reload();
-};
-$("money").dataset.symbol = money.symbol;
-if (currency !== "USD") $("price-label").textContent = `Max price (${currency})`;
 };
 showThemeLabel();
 
@@ -113,7 +100,7 @@ let money = moneyFormatter(currency, currency === "USD" ? 1 : null);
 $("currency").append(...CURRENCIES.map(c => el("option", { value: c, textContent: c })));
 $("currency").value = currency;
 $("currency").onchange = () => {
-  saveCurrency($("currency").value);
+  try { localStorage.setItem("currency", $("currency").value); } catch {}
   location.reload();
 };
 $("money").dataset.symbol = money.symbol;
