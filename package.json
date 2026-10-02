@@ -4,8 +4,5 @@
   "type": "module",
   "scripts": {
     "test": "node --test"
-  },
-  "dependencies": {
-    "@huggingface/transformers": "^4.3.0"
   }
 }

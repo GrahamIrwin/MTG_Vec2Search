@@ -81,8 +81,6 @@
       border: 2px solid var(--border); border-radius: 8px; background: var(--input-bg); color: inherit;
     }
     .row input { width: 4.5em; }
-    .smart-toggle { display: block; margin-top: 14px; font-size: 15px; cursor: pointer; }
-    .smart-toggle input { accent-color: var(--accent); }
     button[type=submit], #more {
       margin-top: 16px;
       padding: 12px 28px;
@@ -201,10 +199,11 @@
   <form id="search">
     <input type="search" name="q" placeholder="Describe the card you want…" aria-label="Describe the card you want">
     <p class="examples">Try:
-      <a href="?q=flying+dragons">flying dragons</a> ·
-      <a href="?q=cheap+green+elves+that+ramp">cheap green elves that ramp</a> ·
-      <a href="?q=board+wipe&c=W&c=B">board wipe in W/B</a> ·
-      <a href="?q=double+the+number+of+tokens&smart=1">double the number of tokens</a> (smart)
+      <a href="?q=makes+flying+white+creatures">makes flying white creatures</a> ·
+      <a href="?q=punishes+non-basic+lands">punishes non-basic lands</a> ·
+      <a href="?q=artifact+hate&f=commander">artifact hate</a> ·
+      <a href="?q=instant+tutors">instant tutors</a> ·
+      <a href="?q=board+wipe&c=W&c=B">board wipe in W/B</a>
     </p>
 
     <fieldset>
@@ -242,10 +241,6 @@
       </label>
     </div>
 
-    <label class="smart-toggle"><input type="checkbox" name="smart" value="1">
-      <strong>Smart search</strong> (beta): understands descriptions like “copy a spell” or
-      “punish opponents for drawing”. Downloads about 35 MB the first time.</label>
-
     <button type="submit">Search</button>
   </form>
 
@@ -272,7 +267,8 @@
   <footer>
     <p>Search runs entirely in your browser. Card data and images from
       <a href="https://scryfall.com">Scryfall</a><span id="updated"></span>. Prices are Scryfall's
-      USD prices, converted to CAD with <a href="https://frankfurter.dev">Frankfurter</a>.
+      USD prices, converted to CAD with <a href="https://frankfurter.dev">Frankfurter</a>. Card function tags
+      from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.
       <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">Source on GitHub</a>.</p>
     <p>MTG Vec2Search is unofficial Fan Content permitted under the
       <a href="https://company.wizards.com/en/legal/fancontentpolicy">Fan Content Policy</a>.

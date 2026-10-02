@@ -35,23 +35,41 @@ function has(text, phrase) {
   return new RegExp(`(?<![\\w'-])${p}(?:s|es)?(?![\\w'-])`).test(text);
 }
 
-// Returns the terms (feature names) recognized in a plain-English query
-export function parseQuery(query, terms) {
-  const text = query.toLowerCase();
-  const found = new Set();
-  for (const [concept, phrases] of Object.entries(ACTION_PHRASES)) {
-    if (phrases.some(p => has(text, p))) found.add(concept);
-  }
-  for (const [word, code] of Object.entries(COLOR_WORDS)) if (has(text, word)) found.add(code);
-  for (const [words, buckets] of CMC_WORDS) {
-    if (words.some(w => has(text, w))) buckets.forEach(b => found.add(b));
-  }
-  // Types, keywords, subtypes and text terms match by name
-  for (const t of terms) {
-    if (t.length > 1 && !t.startsWith("CMC_") && has(text, t)) found.add(t);
-  }
-  return terms.filter(t => found.has(t));
+// === Word normalization, shared by queries and tag names ===
+const IRREGULAR = { elves: "elf", wolves: "wolf", dwarves: "dwarf", knives: "knife" };
+// Everyday words for what tags call things. Applied to both sides, so either word matches.
+const SYNONYMS = {
+  punish: "hate", punishing: "hate", hoser: "hate", hose: "hate", hosing: "hate",
+  steal: "theft", stealing: "theft", stolen: "theft", stole: "theft",
+  blink: "flicker", blinking: "flicker", wrath: "sweeper", boardwipe: "sweeper",
+  make: "create", making: "create", made: "create", creating: "create",
+  generate: "create", generating: "create", produce: "create", producing: "create",
+  double: "doubler", doubling: "doubler", tutoring: "tutor",
+};
+// Tag words a query word also stands for: "artifact hate" includes artifact removal
+const ALSO = { hate: ["removal"] };
+const FILLER = new Set(["a", "an", "the", "of", "to", "for", "with", "and", "or", "that", "my", "your",
+  "their", "its", "it", "is", "are", "on", "in"]);
+// Tag aliases too ambiguous on their own ("counter" usually means +1/+1 counters, not counterspells)
+const AMBIGUOUS_ALIASES = new Set(["counter"]);
+
+function stem(w) {
+  if (IRREGULAR[w]) return IRREGULAR[w];
+  if (w.length > 4 && w.endsWith("ies")) w = w.slice(0, -3) + "y";
+  else if (w.length > 4 && /(ss|sh|ch|x|z)es$/.test(w)) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith("s") && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
+  return SYNONYMS[w] ?? w;
 }
+
+function normalize(text) {
+  return text.toLowerCase()
+    .replace(/'/g, "")
+    .replace(/\bnon[- ]+(?=[a-z])/g, "non") // non-basic -> nonbasic
+    .replace(/\bsearch(?:es|ing)?\b[^.]*?\blibrar(?:y|ies)\b/g, "tutor"); // "search my library" -> tutor
+}
+
+const rawWords = text => normalize(text).split(/[^a-z0-9]+/).filter(Boolean);
+const words = text => rawWords(text).filter(w => !FILLER.has(w)).map(stem);
 
 const BITS = 7;
 
@@ -65,11 +83,91 @@ export function buildIndex(data) {
   const termIndex = new Map(data.terms.map((t, i) => [t, i]));
   const cards = data.cards.map(([name, type, cmc, id, identity, legal, rank, bits]) => ({
     name, type, cmc, id, identity, legal, rank: rank ?? Infinity, bits,
-    // Popularity prior for smart search: 1 for the top EDHREC card, falling to 0 (unranked)
-    pop: rank ? Math.max(0, 1 - Math.log(rank) / Math.log(40000)) : 0,
   }));
-  return { terms: data.terms, formats: data.formats, termIndex, weight, df, cards };
+  // Every name a tag goes by (slug, label, community aliases), as normalized word sets
+  const tagVariants = [];
+  for (const term of data.terms) {
+    if (!term.startsWith("tag:")) continue;
+    for (const name of [term.slice(4), ...(data.tag_names?.[term] ?? [])]) {
+      const ws = [...new Set(words(name))];
+      if (ws.length && !AMBIGUOUS_ALIASES.has(name)) tagVariants.push({ term, words: ws });
+    }
+  }
+  return { terms: data.terms, formats: data.formats, termIndex, weight, cards, tagVariants };
 }
+
+// Turns a plain-English query into feature groups: [[{term, credit}], ...].
+// A card earns a group's weight times the best credit among the group's terms it has.
+// Most groups are a single feature; related tags form one group, where the most specific
+// tag gets full credit ("instant tutors": tutor-instant 1, tutor 0.5).
+export function parseQuery(query, index) {
+  const text = query.toLowerCase();
+  const groups = [];
+  const single = new Set();
+
+  // Oracle tags whose words all appear in the query, grouped when they share words.
+  // Words added by ALSO ("hate" -> "removal") count half, and stand in for the word they came from.
+  const qwords = new Set(words(query));
+  const source = {};
+  for (const w of qwords) for (const extra of ALSO[w] ?? []) if (!qwords.has(extra)) source[extra] = w;
+  const matched = new Map();
+  for (const v of index.tagVariants) {
+    if (!v.words.every(w => qwords.has(w) || source[w])) continue;
+    const size = v.words.reduce((s, w) => s + (source[w] ? 0.5 : 1), 0);
+    if (v.words.some(w => !source[w]) && size > (matched.get(v.term)?.size ?? 0)) {
+      matched.set(v.term, { ...v, size, roots: v.words.map(w => source[w] ?? w) });
+    }
+  }
+  const clusters = [];
+  for (const m of matched.values()) {
+    const overlapping = clusters.filter(c => c.some(o => o.roots.some(w => m.roots.includes(w))));
+    const merged = [m, ...overlapping.flat()];
+    for (const c of overlapping) clusters.splice(clusters.indexOf(c), 1);
+    clusters.push(merged);
+  }
+  for (const c of clusters) {
+    const most = Math.max(...c.map(m => m.size));
+    groups.push(c.map(m => ({ term: m.term, credit: m.size / most })));
+  }
+
+  // Words in a matched multi-word tag describe its target ("artifact hate", "punishes nonbasic
+  // lands"), so they don't also count as the card's own type, color or keyword
+  const consumed = new Set([...matched.values()].filter(m => m.words.length > 1).flatMap(m => m.words));
+  const raw = rawWords(query).filter(w => !consumed.has(stem(w)));
+  let cardText = raw.join(" ");
+
+  // Tokens: after "makes"/"creates" (or before "tokens"), words describe the token, not the card
+  const verb = raw.findIndex(w => stem(w) === "create");
+  const noun = raw.findIndex(w => stem(w) === "token");
+  if (verb >= 0 || noun >= 0) {
+    const tokenText = (verb >= 0 ? raw.slice(verb + 1) : raw.slice(0, noun)).join(" ");
+    const tokenFeatures = [
+      ...Object.entries(COLOR_WORDS).filter(([word]) => has(tokenText, word)).map(([, code]) => "token:" + code),
+      ...index.terms.filter(t => t.startsWith("token:") && t.length > 7 && has(tokenText, t.slice(6))),
+    ];
+    if (verb >= 0 || tokenFeatures.length) {
+      cardText = (verb >= 0 ? raw.slice(0, verb) : raw.slice(noun)).join(" ");
+      [...tokenFeatures, "Token Creation"].forEach(t => single.add(t));
+    }
+  }
+
+  for (const [concept, phrases] of Object.entries(ACTION_PHRASES)) {
+    if (phrases.some(p => has(text, p))) single.add(concept);
+  }
+  for (const [word, code] of Object.entries(COLOR_WORDS)) if (has(cardText, word)) single.add(code);
+  // A card has exactly one mana-value bucket, so requested buckets form one group
+  const cmc = CMC_WORDS.filter(([ws]) => ws.some(w => has(cardText, w))).flatMap(([, buckets]) => buckets);
+  if (cmc.length) groups.push(cmc.map(term => ({ term, credit: 1 })));
+  // Types, keywords, subtypes and text terms match by name
+  for (const t of index.terms) {
+    if (t.length > 1 && !/^(CMC_|tag:|token:)/.test(t) && has(cardText, t)) single.add(t);
+  }
+  for (const t of single) if (index.termIndex.has(t)) groups.push([{ term: t, credit: 1 }]);
+  return groups;
+}
+
+// The most specific term of each group, for display
+export const mainTerms = groups => groups.flatMap(g => g.filter(o => o.credit === 1).map(o => o.term));
 
 // filters: { colors: ["W","U"], types: ["Creature"], format: "modern", min: 0, max: 3 }
 function filterFn(index, filters) {
@@ -86,30 +184,12 @@ function filterFn(index, filters) {
 const hasFilters = ({ colors = [], types = [], format = "", min = null, max = null }) =>
   colors.length || types.length || format || min !== null || max !== null;
 
-// Per-card IDF-weighted share of the query each card covers (query vector · card vector / query total).
-// Unlike cosine, a card isn't penalized for extra features the query didn't mention.
-function coverage(index, features) {
-  const scores = new Float64Array(index.cards.length);
-  if (!features.length) return scores;
-  const qw = new Float64Array(index.terms.length);
-  const ids = features.map(f => index.termIndex.get(f));
-  // A card has exactly one mana-value bucket, so requested buckets count once, as a group
-  const cmcIds = ids.filter(i => index.terms[i].startsWith("CMC_"));
-  const cmcWeight = Math.max(0, ...cmcIds.map(i => index.weight[i]));
-  for (const i of ids) qw[i] = cmcIds.includes(i) ? cmcWeight : index.weight[i];
-  const total = ids.reduce((s, i) => s + (cmcIds.includes(i) ? 0 : qw[i]), cmcWeight);
-  index.cards.forEach((card, ci) => {
-    let dot = 0;
-    for (const b of card.bits) dot += qw[b];
-    scores[ci] = Math.round((dot / total) * 1e6) / 1e6;
-  });
-  return scores;
-}
-
-export function search(index, features, filters = {}, query = "") {
+// Score = IDF-weighted share of the query each card covers. Unlike cosine, a card isn't
+// penalized for extra features the query didn't mention.
+export function search(index, groups, filters = {}, query = "") {
   const passes = filterFn(index, filters);
 
-  if (!features.length) {
+  if (!groups.length) {
     // Nothing recognized: fall back to a card-name search, ranked by popularity
     const q = query.trim().toLowerCase();
     if (!q && !hasFilters(filters)) return [];
@@ -119,76 +199,24 @@ export function search(index, features, filters = {}, query = "") {
       .sort((a, b) => a.card.rank - b.card.rank);
   }
 
-  const cov = coverage(index, features);
+  // A group weighs as much as its rarest term; term index -> [[group, credit], ...]
+  const groupWeight = groups.map(g => Math.max(...g.map(o => index.weight[index.termIndex.get(o.term)])));
+  const total = groupWeight.reduce((s, w) => s + w, 0);
+  const credits = new Map();
+  groups.forEach((g, gi) => g.forEach(({ term, credit }) => {
+    const i = index.termIndex.get(term);
+    credits.set(i, [...(credits.get(i) ?? []), [gi, credit]]);
+  }));
+
+  const best = new Float64Array(groups.length);
   const results = [];
-  index.cards.forEach((card, i) => {
-    if (cov[i] > 0 && passes(card)) results.push({ card, score: cov[i] });
-  });
+  for (const card of index.cards) {
+    best.fill(0);
+    for (const b of card.bits) for (const [gi, credit] of credits.get(b) ?? []) best[gi] = Math.max(best[gi], credit);
+    let dot = 0;
+    for (let gi = 0; gi < groups.length; gi++) dot += best[gi] * groupWeight[gi];
+    if (dot > 0 && passes(card)) results.push({ card, score: Math.round((dot / total) * 1e6) / 1e6 });
+  }
   // Ties go to the more popular card (EDHREC rank)
   return results.sort((a, b) => b.score - a.score || a.card.rank - b.card.rank);
-}
-
-// === Smart (semantic) search ===
-// Card rules text embedded at build time (embeddings.bin), compared with the embedded query.
-
-// Rules-text phrasing for concepts, so slang the parser knows ("board wipe")
-// also steers the embedding ("Destroy all creatures.")
-const CONCEPT_TEXT = {
-  "Life Gain": "You gain life.",
-  "Card Advantage": "Draw a card.",
-  "Tap Effect": "Tap target creature.",
-  "Direct Damage": "Deals damage to any target.",
-  "Mana Ramp": "Add one mana of any color. Search your library for a basic land card and put it onto the battlefield.",
-  "Graveyard Recursion": "Return target creature card from your graveyard to the battlefield.",
-  "Discard Effect": "Target opponent discards a card.",
-  "Counter Effect": "Counter target spell.",
-  "Removal": "Destroy target creature.",
-  "Exile Effect": "Exile target permanent.",
-  "Bounce Effect": "Return target permanent to its owner's hand.",
-  "Mass Removal": "Destroy all creatures.",
-  "Fight Effect": "Target creature you control fights target creature you don't control.",
-  "Mill Effect": "Target player mills cards.",
-  "Token Creation": "Create creature tokens.",
-  "Artifact Interaction": "Destroy target artifact.",
-  "Enchantment Interaction": "Destroy target enchantment.",
-  "Landfall Effect": "Whenever a land you control enters, ",
-};
-
-export function expandQuery(query, features) {
-  return [query, ...features.filter(f => CONCEPT_TEXT[f]).map(f => CONCEPT_TEXT[f])].join(" ");
-}
-
-// embeddings.bin: float32 scale, then one int8 vector per card (same order as cards.json)
-export function loadEmbeddings(buffer, cardCount) {
-  const scale = new Float32Array(buffer.slice(0, 4))[0];
-  const vectors = new Int8Array(buffer, 4);
-  const dims = vectors.length / cardCount;
-  if (!Number.isInteger(dims)) throw new Error("embeddings.bin doesn't match cards.json");
-  return { scale, vectors, dims };
-}
-
-export const SMART_MODEL = "Xenova/all-MiniLM-L6-v2";
-// Weights tuned on ~20 real queries (bakeoff/)
-export const SMART = { coverageWeight: 0.1, popularityWeight: 0.1, commonFeature: 0.25, limit: 300 };
-
-// Score = semantic similarity + small boosts for matching parsed features and for popularity.
-// Card names aren't embedded, so a query that's part of a card's name puts that card first.
-export function semanticSearch(index, emb, queryVector, features, filters = {}, query = "") {
-  const passes = filterFn(index, filters);
-  // Very common features (e.g. "Creature") would boost a quarter of all cards, so they don't count here
-  const n = index.cards.length;
-  const specific = features.filter(f => index.df[index.termIndex.get(f)] / n <= SMART.commonFeature);
-  const cov = coverage(index, specific);
-  const q = query.trim().toLowerCase();
-  const { scale, vectors, dims } = emb;
-  const results = [];
-  index.cards.forEach((card, i) => {
-    if (!passes(card)) return;
-    let dot = 0;
-    for (let d = 0, o = i * dims; d < dims; d++) dot += queryVector[d] * vectors[o + d];
-    const nameHit = q.length >= 3 && card.name.toLowerCase().includes(q) ? 1 : 0;
-    const score = dot / scale + SMART.coverageWeight * cov[i] + SMART.popularityWeight * card.pop + nameHit;
-    results.push({ card, score });
-  });
-  return results.sort((a, b) => b.score - a.score).slice(0, SMART.limit);
 }
