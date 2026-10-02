@@ -1,13 +1,13 @@
 import {
   parseQuery, buildIndex, search, nameSearch, mainTerms, termsNeeded, decodePosting, parsePrice,
-  isBudget, BUDGET_USD, SORTS, sortResults,
+  isBudget, BUDGET_USD, SORTS, sortResults, randomSearches,
 } from "./search.js";
 import { CURRENCIES, detectCurrency, saveCurrency, usdRate, moneyFormatter } from "./currency.js";
 
 const PAGE_SIZE = 30;
 const CHUNK = 256; // cards per index/c/<chunk>.json (CHUNK in build_index.py)
 const COLOR_NAMES = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green" };
-// Searches that show off what the engine understands: the placeholder and "Random search" pick from these
+// Searches that show off what the engine understands; the search box placeholder picks from these
 const EXAMPLES = [
   "makes flying white creatures", "punishes non-basic lands", "artifact hate", "instant tutors",
   "budget board wipe", "double the number of tokens", "punish opponents for drawing cards",
@@ -59,8 +59,10 @@ form.addEventListener("submit", e => {
 });
 
 $("q").placeholder = `Describe a card, e.g. ${pick(EXAMPLES)}`;
-$("random").onclick = () => {
-  location.search = new URLSearchParams({ q: pick(EXAMPLES.filter(q => q !== params.get("q"))) });
+// "Random search": any term the search knows, among ~2,000 (see randomSearches in search.js)
+$("random").onclick = async () => {
+  const choices = randomSearches(await getMeta()).filter(names => !names.includes(params.get("q")));
+  location.search = new URLSearchParams({ q: pick(pick(choices)) });
 };
 
 // "/" jumps to the search box

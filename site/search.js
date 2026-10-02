@@ -164,8 +164,9 @@ export function parseQuery(query, index) {
   // Words in a matched multi-word tag describe its target ("artifact hate", "punishes nonbasic
   // lands"), so they don't also count as the card's own type, color or keyword
   const consumed = new Set([...matched.values()].filter(m => m.words.length > 1).flatMap(m => m.words));
+  // Verb forms keep the original word too: "sacrificing" also matches "sacrifice", "fading" stays Fading
   const raw = rawWords(query)
-    .map(w => (verbBase(stem(w), index.vocab) === stem(w) ? w : verbBase(stem(w), index.vocab))) // sacrificing -> sacrifice
+    .flatMap(w => (verbBase(stem(w), index.vocab) === stem(w) ? [w] : [w, verbBase(stem(w), index.vocab)]))
     .filter(w => !consumed.has(stem(w)));
   let cardText = raw.join(" ");
 
@@ -310,4 +311,31 @@ export function sortResults(results, sort, index, { released = [], names = [] } 
   if (sort === "name") return list.sort((a, b) => names[a.card].localeCompare(names[b.card]));
   // Ties (and "match", already in order) go to the more popular card
   return key ? list.sort((a, b) => key(a.card) - key(b.card) || a.card - b.card) : list;
+}
+
+// === Random search ===
+// Every term on enough cards to make a good search, written the way a person would search for it:
+// a tag by its readable name or a community alias, "makes treasure tokens", "goad", "dragon".
+// Returns a list of choices per term, so each term is equally likely however many names it has.
+const RANDOM_MIN_CARDS = 15;
+const JARGON = /\b(cycle|synergy|pwdeck|deprecated|mv|cmc|typal|tribal|set|sets|mechanic|precon|named|errata|matters|self|card|oracle|unprinted|deck)\b|\d/;
+export function randomSearches(meta) {
+  const choices = [];
+  for (const [category, ids] of meta.categories) {
+    for (const i of ids) {
+      const term = meta.terms[i];
+      if (meta.counts[i] < RANDOM_MIN_CARDS) continue;
+      if (term.startsWith("tag:")) {
+        const readable = [term.slice(4), ...(meta.tag_names?.[term] ?? [])]
+          .map(n => n.replaceAll("-", " ").toLowerCase())
+          .filter(n => /^[a-z' ]+$/.test(n) && !JARGON.test(n) && !AMBIGUOUS_ALIASES.has(n) && n.split(" ").length <= 4);
+        if (readable.length) choices.push(readable);
+      } else if (term.startsWith("token:") && term.length > 7) {
+        choices.push([`makes ${term.slice(6).toLowerCase()} tokens`]);
+      } else if ((category === "Keywords" || category === "Subtypes") && /^[a-z' ]+$/i.test(term)) {
+        choices.push([term.toLowerCase()]);
+      }
+    }
+  }
+  return choices;
 }

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   parseQuery, buildIndex, search, nameSearch, mainTerms, decodePosting, parsePrice, isBudget, sortResults,
+  randomSearches,
 } from "./site/search.js";
 
 const terms = ["W", "R", "G", "Creature", "Instant", "Land", "Artifact", "Flying", "Ward", "Elf", "Dragon",
@@ -86,6 +87,8 @@ test("verb forms and common phrasings", () => {
   assert.deepEqual(parsed("punish opponents for drawing cards"), ["tag:draw-hate"]);
   // The phrase becomes "wheel", so it doesn't also trigger the discard/draw concepts
   assert.deepEqual(parsed("discard my hand and draw seven"), ["tag:wheel"]);
+  // Verb forms match both ways: "drawing" finds the rules-text term "draw", "flying" stays the keyword
+  assert.deepEqual(parsed("drawing flying"), ["Flying", "draw"]);
   // Every tag that says "nonbasic" also says "land", so "nonbasic hate" implies land
   assert.deepEqual(parsed("nonbasic hate"), ["tag:hate-nonbasic-land"]);
 });
@@ -138,4 +141,17 @@ test("sorting: by price, date and name, keeping only strong matches", () => {
   assert.deepEqual(order("mv-desc"), ["Blood Moon", "Wasteland"]);
   // Filter-only results (no score) are all kept
   assert.equal(sortResults(search(index, [], postings, {}), "price-asc", index).length, cards.length);
+});
+
+test("random searches: readable names for terms on enough cards, each of which finds its term", () => {
+  const meta = {
+    terms: ["Flying", "Dragon", "token:Treasure", "tag:mana-rock", "tag:cycle-thing", "tag:rare-thing", "W"],
+    counts: [500, 40, 60, 110, 30, 3, 900],
+    tag_names: { "tag:mana-rock": ["manarock", "manarock-ccc"] },
+    categories: [["Colors", [6]], ["Keywords", [0]], ["Subtypes", [1]], ["Tokens it makes", [2]], ["Tags", [3, 4, 5]]],
+  };
+  assert.deepEqual(randomSearches(meta), [["flying"], ["dragon"], ["makes treasure tokens"], ["mana rock", "manarock", "manarock ccc"]]);
+  // Each random search for a real tag/token parses back to it
+  assert.deepEqual(parsed("makes spirit tokens"), ["token:Spirit", "Token Creation"]);
+  assert.deepEqual(parsed("hate nonbasic land"), ["tag:hate-nonbasic-land"]);
 });

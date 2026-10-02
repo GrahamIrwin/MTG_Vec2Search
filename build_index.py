@@ -71,6 +71,9 @@ def download_bulk_data():
     return items[BULK_TYPE]["updated_at"]
 
 
+TRIVIA_TAGS = {"card-names", "un-design", "type-errata", "draft-signpost", "digital-only-mechanics"}
+
+
 def load_oracle_tags():
     """Return {slug: (oracle_ids, names)}. The bulk file only has direct taggings, so each card
     is also added to every ancestor tag (e.g. "tutor-instant" cards are also "tutor").
@@ -90,8 +93,14 @@ def load_oracle_tags():
     for t in raw:
         for parent in ancestors(t, set()):
             ids[parent] |= ids[t["id"]]
+
+    # Tags about card design history rather than what a card does ("misnomer", storylines)
+    def trivia(t):
+        family = {t["slug"], *(by_id[a]["slug"] for a in ancestors(t, set()))}
+        return bool(family & TRIVIA_TAGS) or "storyline" in t["slug"]
+
     return {t["slug"]: (ids[t["id"]], sorted({t["slug"], t["label"], *(t.get("aliases") or [])}))
-            for t in raw}
+            for t in raw if not trivia(t)}
 
 
 # === Step 2: Load cards ===
