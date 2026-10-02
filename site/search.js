@@ -91,30 +91,36 @@ function verbBase(w, vocab) {
   return w;
 }
 
-const BITS = 7;
+const TYPE_WORDS = ["land", "creature", "artifact", "enchantment", "instant", "sorcery", "planeswalker", "battle"];
+const COLOR_BITS = "WUBRG";
 
-// Turns cards.json into searchable card objects, with IDF weights so rare
-// features (e.g. "Rebound") count for more than common ones (e.g. "Creature").
-export function buildIndex(data) {
-  const n = data.cards.length;
-  const df = new Float64Array(data.terms.length);
-  for (const c of data.cards) for (const b of c[BITS]) df[b]++;
-  const weight = Array.from(df, d => (d ? (1 + Math.log(n / d)) ** 2 : 0));
-  const termIndex = new Map(data.terms.map((t, i) => [t, i]));
-  const cards = data.cards.map(([name, type, cmc, id, identity, legal, rank, bits]) => ({
-    name, type, cmc, id, identity, legal, rank: rank ?? Infinity, bits,
-  }));
+// Builds the in-browser index from meta.json + columns.json (see build_index.py), with IDF
+// weights so rare features (e.g. "Rebound") count for more than common ones (e.g. "Creature").
+// Which cards have which term is fetched per term later (postings).
+export function buildIndex(meta, columns) {
+  const n = columns.cmc.length;
+  const weight = meta.counts.map(d => (d ? (1 + Math.log(n / d)) ** 2 : 0));
+  const termIndex = new Map(meta.terms.map((t, i) => [t, i]));
   // Every name a tag goes by (slug, label, community aliases), as normalized word sets
   const tagVariants = [];
-  for (const term of data.terms) {
+  for (const term of meta.terms) {
     if (!term.startsWith("tag:")) continue;
-    for (const name of [term.slice(4), ...(data.tag_names?.[term] ?? [])]) {
+    for (const name of [term.slice(4), ...(meta.tag_names?.[term] ?? [])]) {
       const ws = [...new Set(words(name))];
       if (ws.length && !AMBIGUOUS_ALIASES.has(name)) tagVariants.push({ term, words: ws });
     }
   }
   const vocab = new Set(tagVariants.flatMap(v => v.words));
-  return { terms: data.terms, formats: data.formats, termIndex, weight, cards, tagVariants, vocab };
+  // Words that only ever describe one card type in tag names imply it: every tag mentioning
+  // "nonbasic" also says "land", so "nonbasic hate" means nonbasic land hate
+  const implies = {};
+  for (const w of vocab) {
+    if (TYPE_WORDS.includes(w)) continue;
+    const uses = tagVariants.filter(v => v.words.includes(w));
+    const always = TYPE_WORDS.filter(t => uses.every(v => v.words.includes(t)));
+    if (uses.length >= 3 && always.length) implies[w] = always;
+  }
+  return { ...meta, n, columns, weight, termIndex, tagVariants, vocab, implies };
 }
 
 // Turns a plain-English query into feature groups: [[{term, credit}], ...].
@@ -129,6 +135,7 @@ export function parseQuery(query, index) {
   // Oracle tags whose words all appear in the query, grouped when they share words.
   // Words added by ALSO ("hate" -> "removal") count half, and stand in for the word they came from.
   const qwords = new Set(words(query).map(w => verbBase(w, index.vocab)));
+  for (const w of [...qwords]) for (const implied of index.implies[w] ?? []) qwords.add(implied);
   const source = {};
   for (const w of qwords) for (const extra of ALSO[w] ?? []) if (!qwords.has(extra)) source[extra] = w;
   const matched = new Map();
@@ -194,54 +201,83 @@ export function parseQuery(query, index) {
 // The most specific term of each group, for display
 export const mainTerms = groups => groups.flatMap(g => g.filter(o => o.credit === 1).map(o => o.term));
 
-// filters: { colors: ["W","U"], types: ["Creature"], format: "modern", min: 0, max: 3 }
-function filterFn(index, filters) {
-  const { colors = [], types = [], format = "", min = null, max = null } = filters;
-  const formatBit = format ? 1 << index.formats.indexOf(format) : 0;
-  return c =>
-    (!colors.length || [...c.identity].every(x => colors.includes(x))) &&
-    (!types.length || types.some(t => c.type.includes(t))) &&
-    (!formatBit || c.legal & formatBit) &&
-    (min === null || c.cmc >= min) &&
-    (max === null || c.cmc <= max);
+// A price limit written in the query, in dollars: "under $5", "less than 2 dollars", "budget"
+export const BUDGET = 1;
+export function parsePrice(query) {
+  const m = query.toLowerCase().match(/(?:under|below|less than|cheaper than|max|<=?)\s*\$\s*(\d+(?:\.\d+)?)|\$(\d+(?:\.\d+)?)\s*(?:or less|or under|max)|(?:under|below|less than)\s*(\d+(?:\.\d+)?)\s*(?:dollars|bucks)/);
+  if (m) return Number(m[1] ?? m[2] ?? m[3]);
+  return /\bbudget\b/i.test(query) ? BUDGET : null;
 }
 
-const hasFilters = ({ colors = [], types = [], format = "", min = null, max = null }) =>
-  colors.length || types.length || format || min !== null || max !== null;
+// Term indices a parsed query needs postings for
+export const termsNeeded = (index, groups) =>
+  [...new Set(groups.flat().map(o => index.termIndex.get(o.term)))];
+
+// A t/<term>.json file stores gaps between card numbers; this turns it back into card numbers
+export function decodePosting(gaps) {
+  const cards = new Int32Array(gaps.length);
+  let card = 0;
+  gaps.forEach((gap, i) => (cards[i] = card += gap));
+  return cards;
+}
+
+// filters: { colors: ["W","U"], types: ["Creature"], format: "modern", min: 0, max: 3, maxPrice: 5 }
+function filterFn(index, filters) {
+  const { colors = [], types = [], format = "", min = null, max = null, maxPrice = null } = filters;
+  const { identity, types: typeBits, cmc, legal, price } = index.columns;
+  const colorMask = [...COLOR_BITS].reduce((m, c, i) => (colors.includes(c) ? m | (1 << i) : m), 0);
+  const typeMask = types.reduce((m, t) => m | (1 << index.types.indexOf(t)), 0);
+  const formatBit = format ? 1 << index.formats.indexOf(format) : 0;
+  const cents = maxPrice === null ? null : Math.round(maxPrice * 100);
+  return i =>
+    (!colors.length || (identity[i] & ~colorMask) === 0) &&
+    (!types.length || typeBits[i] & typeMask) &&
+    (!formatBit || legal[i] & formatBit) &&
+    (min === null || cmc[i] >= min) &&
+    (max === null || cmc[i] <= max) &&
+    (cents === null || (price[i] >= 0 && price[i] <= cents));
+}
+
+// Cards are numbered in popularity order, so sorting by card number = most popular first
+const byScoreThenPopularity = (a, b) => b.score - a.score || a.card - b.card;
 
 // Score = IDF-weighted share of the query each card covers. Unlike cosine, a card isn't
-// penalized for extra features the query didn't mention.
-export function search(index, groups, filters = {}, query = "") {
+// penalized for extra features the query didn't mention. postings: term index -> card numbers.
+// Returns [{card, score}], where card is the card's number.
+export function search(index, groups, postings, filters = {}) {
   const passes = filterFn(index, filters);
-
   if (!groups.length) {
-    // Nothing recognized: fall back to a card-name search, ranked by popularity
-    const q = query.trim().toLowerCase();
-    if (!q && !hasFilters(filters)) return [];
-    return index.cards
-      .filter(c => passes(c) && c.name.toLowerCase().includes(q))
-      .map(card => ({ card, score: null }))
-      .sort((a, b) => a.card.rank - b.card.rank);
+    // Filters only: every card that passes, most popular first
+    const all = [];
+    for (let card = 0; card < index.n; card++) if (passes(card)) all.push({ card, score: null });
+    return all;
   }
-
-  // A group weighs as much as its rarest term; term index -> [[group, credit], ...]
+  // A group weighs as much as its rarest term; a card earns it times its best credit in the group
   const groupWeight = groups.map(g => Math.max(...g.map(o => index.weight[index.termIndex.get(o.term)])));
   const total = groupWeight.reduce((s, w) => s + w, 0);
-  const credits = new Map();
-  groups.forEach((g, gi) => g.forEach(({ term, credit }) => {
-    const i = index.termIndex.get(term);
-    credits.set(i, [...(credits.get(i) ?? []), [gi, credit]]);
-  }));
-
-  const best = new Float64Array(groups.length);
-  const results = [];
-  for (const card of index.cards) {
+  const scores = new Float64Array(index.n);
+  const best = new Float64Array(index.n);
+  groups.forEach((g, gi) => {
     best.fill(0);
-    for (const b of card.bits) for (const [gi, credit] of credits.get(b) ?? []) best[gi] = Math.max(best[gi], credit);
-    let dot = 0;
-    for (let gi = 0; gi < groups.length; gi++) dot += best[gi] * groupWeight[gi];
-    if (dot > 0 && passes(card)) results.push({ card, score: Math.round((dot / total) * 1e6) / 1e6 });
+    for (const { term, credit } of g) {
+      for (const card of postings.get(index.termIndex.get(term)) ?? []) best[card] = Math.max(best[card], credit);
+    }
+    for (let card = 0; card < index.n; card++) scores[card] += best[card] * groupWeight[gi];
+  });
+  const results = [];
+  for (let card = 0; card < index.n; card++) {
+    if (scores[card] > 0 && passes(card)) results.push({ card, score: Math.round((scores[card] / total) * 1e6) / 1e6 });
   }
-  // Ties go to the more popular card (EDHREC rank)
-  return results.sort((a, b) => b.score - a.score || a.card.rank - b.card.rank);
+  return results.sort(byScoreThenPopularity);
+}
+
+// Nothing recognized in the query: cards whose name contains it, most popular first
+export function nameSearch(index, names, query, filters = {}) {
+  const passes = filterFn(index, filters);
+  const q = query.trim().toLowerCase();
+  const results = [];
+  names.forEach((name, card) => {
+    if (name.toLowerCase().includes(q) && passes(card)) results.push({ card, score: null });
+  });
+  return results;
 }

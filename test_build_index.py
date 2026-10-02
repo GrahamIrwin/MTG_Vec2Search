@@ -8,7 +8,7 @@ card = {
 }
 tags = {"hate-artifact": ({"o1", "o2"}, ["hate-artifact"]), "only-one": ({"o1"}, ["only-one"])}
 cards = [card, {**card, "keywords": ["Trample"], "oracle_id": "o2"}, {**card, "keywords": ["Ward"]}] * 3
-terms, keywords = build_term_space(cards, tags)
+terms, keywords, _ = build_term_space(cards, tags)
 index = {t: i for i, t in enumerate(terms)}
 assert "tag:hate-artifact" in terms and "tag:only-one" not in terms  # tags on a single card are dropped
 vec = lambda c, card_tags=(): {terms[i] for i in vectorize_card(c, index, keyword_matcher(keywords), card_tags)}

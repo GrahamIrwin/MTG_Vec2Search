@@ -1,4 +1,4 @@
-"""Download the latest Scryfall card data and build site/cards.json, the search index.
+"""Download the latest Scryfall card data and build site/index/, the search index.
 
 Run this whenever a new set comes out:  python build_index.py
 (GitHub Actions also runs it weekly and redeploys the site.)
@@ -17,7 +17,7 @@ SCRYFALL_BULK_LIST_URL = "https://api.scryfall.com/bulk-data"
 BULK_TYPE = "oracle_cards"
 BULK_FILE = "oracle_cards.jsonl.gz"
 TAGS_FILE = "oracle_tags.jsonl.gz"
-OUT_FILE = os.path.join("site", "cards.json")
+PRINTINGS_FILE = "default_cards.jsonl.gz"  # every printing, for the cheapest price
 # Scryfall requires a User-Agent and Accept header on API requests
 HEADERS = {"User-Agent": "MTG_Vec2Search/1.0", "Accept": "application/json;q=0.9,*/*;q=0.8"}
 SKIP_LAYOUTS = {"token", "double_faced_token", "emblem", "art_series", "augment", "host",
@@ -55,7 +55,7 @@ def fetch(url):
 # === Step 1: Download the bulk data ===
 # oracle_tags = Scryfall Tagger's community-curated tags for what cards do
 # ("tutor-instant", "hate-nonbasic-land", "removal-artifact", ...)
-BULK_FILES = {"oracle_cards": BULK_FILE, "oracle_tags": TAGS_FILE}
+BULK_FILES = {"oracle_cards": BULK_FILE, "oracle_tags": TAGS_FILE, "default_cards": PRINTINGS_FILE}
 
 
 def download_bulk_data():
@@ -151,8 +151,13 @@ def build_term_space(cards, tags):
     tag_counts = {t: len(oracle_ids & ids) for t, (ids, _) in tags.items()}
     tag_terms = sorted("tag:" + t for t, n in tag_counts.items()
                        if 2 <= n <= len(cards) / 2 and not t.startswith("cycle"))  # card cycles aren't search targets
-    terms = COLORS + TYPES + keywords + subs + TEXT_TERMS + ACTION_CONCEPTS + CMC_BUCKETS + tokens + tag_terms
-    return list(dict.fromkeys(terms)), keywords  # dedupe (e.g. "Food" is a keyword and a subtype)
+    categories = {
+        "Colors": COLORS, "Card types": TYPES, "Keywords": keywords, "Subtypes": subs,
+        "Rules text": TEXT_TERMS, "Effects": ACTION_CONCEPTS, "Mana value": CMC_BUCKETS,
+        "Tokens it makes": tokens, "What it does (Scryfall Tagger)": tag_terms,
+    }
+    terms = list(dict.fromkeys(t for ts in categories.values() for t in ts))  # dedupe ("Food": keyword + subtype)
+    return terms, keywords, categories
 
 
 # === Step 3: Vectorize ===
@@ -270,9 +275,44 @@ def vectorize_card(card, index, find_keywords, card_tags=(), subtype_names=froze
     return sorted(index[f] for f in features if f in index)
 
 
+def load_prices():
+    """Cheapest current USD price (nonfoil, foil or etched) across all paper printings, by oracle_id."""
+    prices = {}
+    with gzip.open(PRINTINGS_FILE, "rt", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            c = json.loads(line)
+            oracle_id = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
+            p = c.get("prices") or {}
+            usd = [float(v) for v in (p.get("usd"), p.get("usd_foil"), p.get("usd_etched")) if v]
+            if oracle_id and usd and not c.get("digital"):
+                prices[oracle_id] = min(prices.get(oracle_id, usd[0]), *usd)
+    return prices
+
+
 # === Step 4: Write the index ===
-def build_index(cards, updated, tags):
-    terms, keywords = build_term_space(cards, tags)
+# The index is split so a search only downloads what it needs (site/index/):
+#   meta.json      terms, card counts and tag names, for parsing queries (small, always loaded)
+#   columns.json   per-card filter data: colors, types, mana value, formats, price
+#   t/<term>.json  the cards with each term (one file per term, fetched when a query uses it)
+#   c/<chunk>.json name + Scryfall id for each block of CHUNK cards, fetched to show results
+#   names.json     all card names, only fetched for card-name searches
+# Cards are in popularity order (EDHREC rank), so the top results sit in the first chunks.
+OUT_DIR = os.path.join("site", "index")
+CHUNK = 256
+FILTER_TYPES = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land", "Battle"]
+NO_PRICE = -1
+
+
+def write_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+
+
+def build_index(cards, updated, tags, prices):
+    terms, keywords, categories = build_term_space(cards, tags)
     index = {t: i for i, t in enumerate(terms)}
     find_keywords = keyword_matcher(keywords)
     subtype_names = {t for t in terms if SUBTYPE_RE.match(t)}
@@ -281,28 +321,42 @@ def build_index(cards, updated, tags):
         for oracle_id in ids:
             tags_by_card.setdefault(oracle_id, []).append(tag)
 
-    rows = []
-    for c in cards:
+    cards = sorted(cards, key=lambda c: (c.get("edhrec_rank") is None, c.get("edhrec_rank") or 0, c["name"]))
+    postings = [[] for _ in terms]
+    columns = {"identity": [], "types": [], "cmc": [], "legal": [], "price": []}
+    for i, c in enumerate(cards):
+        for t in vectorize_card(c, index, find_keywords, tags_by_card.get(c.get("oracle_id"), ()), subtype_names):
+            postings[t].append(i)
+        type_words = set(c.get("type_line", "").replace("//", " ").split())
+        columns["identity"].append(sum(1 << j for j, color in enumerate("WUBRG") if color in c.get("color_identity", [])))
+        columns["types"].append(sum(1 << j for j, t in enumerate(FILTER_TYPES) if t in type_words))
         cmc = c.get("cmc", 0)
-        legal = sum(1 << i for i, f in enumerate(FORMATS) if c.get("legalities", {}).get(f) in ("legal", "restricted"))
-        rows.append([
-            c["name"], c.get("type_line", ""), int(cmc) if cmc == int(cmc) else cmc, c["id"],
-            "".join(c.get("color_identity", [])), legal, c.get("edhrec_rank"),
-            vectorize_card(c, index, find_keywords, tags_by_card.get(c.get("oracle_id"), ()), subtype_names),
-        ])
+        columns["cmc"].append(int(cmc) if cmc == int(cmc) else cmc)
+        columns["legal"].append(sum(1 << j for j, f in enumerate(FORMATS)
+                                    if c.get("legalities", {}).get(f) in ("legal", "restricted")))
+        price = prices.get(c.get("oracle_id"))
+        columns["price"].append(round(price * 100) if price is not None else NO_PRICE)  # cents
 
-    os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
-    with open(OUT_FILE, "w", encoding="utf-8") as f:
-        json.dump({
-            "updated": updated, "terms": terms, "formats": FORMATS,
-            # Other names a tag goes by (label, community aliases), for matching queries
-            "tag_names": {t: [n for n in tags[t[4:]][1] if n != t[4:]] for t in terms if t.startswith("tag:")},
-            # Each card: [name, type_line, cmc, scryfall_id, color_identity, legal_bitmask, edhrec_rank, term_indices]
-            "cards": rows,
-        }, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"Wrote {OUT_FILE}: {len(rows)} cards, {len(terms)} terms, {os.path.getsize(OUT_FILE) / 1e6:.1f} MB")
+    if os.path.isdir(OUT_DIR):
+        shutil.rmtree(OUT_DIR)
+    write_json(os.path.join(OUT_DIR, "meta.json"), {
+        "updated": updated, "terms": terms, "formats": FORMATS, "types": FILTER_TYPES,
+        "counts": [len(p) for p in postings],
+        # Other names a tag goes by (label, community aliases), for matching queries
+        "tag_names": {t: [n for n in tags[t[4:]][1] if n != t[4:]] for t in terms if t.startswith("tag:")},
+        "categories": [[name, [index[t] for t in ts if t in index]] for name, ts in categories.items()],
+    })
+    write_json(os.path.join(OUT_DIR, "columns.json"), columns)
+    write_json(os.path.join(OUT_DIR, "names.json"), [c["name"] for c in cards])
+    for t, cards_with_term in enumerate(postings):
+        # Gaps between card numbers are small numbers, which keeps the files short
+        write_json(os.path.join(OUT_DIR, "t", f"{t}.json"), [b - a for a, b in zip([0] + cards_with_term, cards_with_term)])
+    for k in range(0, len(cards), CHUNK):
+        write_json(os.path.join(OUT_DIR, "c", f"{k // CHUNK}.json"), [[c["name"], c["id"]] for c in cards[k:k + CHUNK]])
+    size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(OUT_DIR) for f in fs)
+    print(f"Wrote {OUT_DIR}: {len(cards)} cards, {len(terms)} terms, {size / 1e6:.1f} MB in total")
 
 
 if __name__ == "__main__":
     updated = download_bulk_data()
-    build_index(load_cards(), updated, load_oracle_tags())
+    build_index(load_cards(), updated, load_oracle_tags(), load_prices())

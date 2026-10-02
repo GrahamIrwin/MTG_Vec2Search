@@ -1,7 +1,9 @@
 // Run with: node --test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseQuery, buildIndex, search, mainTerms } from "./site/search.js";
+import {
+  parseQuery, buildIndex, search, nameSearch, mainTerms, decodePosting, parsePrice,
+} from "./site/search.js";
 
 const terms = ["W", "R", "G", "Creature", "Instant", "Land", "Artifact", "Flying", "Ward", "Elf", "Dragon",
   "Spirit", "draw", "Card Advantage", "Mana Ramp", "Token Creation", "CMC_0", "CMC_1", "CMC_2", "CMC_3",
@@ -13,21 +15,21 @@ const data = {
   terms, formats: ["standard", "modern"],
   tag_names: {
     "tag:sweeper": ["boardwipe", "wipe", "mass removal"], "tag:token-doubler": ["token doubler"],
-    "tag:pure-draw": ["draw card"],
+    "tag:pure-draw": ["draw card"], "tag:hate-nonbasic-land": ["nonbasic land hate", "punish nonbasic land"],
   },
   cards: [
-    // [name, type_line, cmc, id, color_identity, legal_bitmask, edhrec_rank, term_indices]
-    ["Common Flyer", "Creature — Bird", 2, "a", "W", 3, 50, [0, 3, 7, 18]],
+    // [name, type_line, cmc, id, color_identity, legal_bitmask, edhrec_rank, term_indices, price_cents]
+    ["Common Flyer", "Creature — Bird", 2, "a", "W", 3, 50, [0, 3, 7, 18], 10],
     ["Popular Flyer", "Creature — Bird", 2, "b", "W", 2, 1, [0, 3, 7, 18]],
     ["Elf Dork", "Creature — Elf", 1, "c", "G", 3, 5, [2, 3, 9, 14, 17]],
     ["Big Dragon", "Creature — Dragon", 6, "d", "R", 3, 9, [1, 3, 7, 10, 20]],
     ["Opt", "Instant", 1, "e", "", 3, 2, [4, 12, 13, 17]],
     ["Mystical Tutor", "Instant", 1, "f", "U", 3, 3, [4, 17, 25, 26]],
     ["Demonic Tutor", "Sorcery", 2, "g", "B", 3, 4, [18, 25]],
-    ["Blood Moon", "Enchantment", 3, "h", "R", 3, 6, [19, 27, 28]],
-    ["Wasteland", "Land", 0, "i", "", 3, 7, [5, 16, 27, 28, 30]],
+    ["Blood Moon", "Enchantment", 3, "h", "R", 3, 6, [19, 27, 28], 900],
+    ["Wasteland", "Land", 0, "i", "", 3, 7, [5, 16, 27, 28, 30], 1500],
     ["Collector Ouphe", "Creature — Ouphe", 2, "j", "G", 3, 8, [2, 3, 18, 27, 29]],
-    ["Shatter", "Instant", 2, "k", "R", 3, 10, [1, 4, 18, 30, 31]],
+    ["Shatter", "Instant", 2, "k", "R", 3, 10, [1, 4, 18, 30, 31], 25],
     ["Spirit Maker", "Sorcery", 3, "l", "W", 3, 11, [0, 15, 19, 21, 22, 23, 24]],
     ["Doubling Season", "Enchantment", 5, "m", "G", 3, 12, [2, 32]],
     ["Wrath", "Sorcery", 4, "n", "W", 3, 13, [0, 30, 33]],
@@ -37,9 +39,25 @@ const data = {
     ["Windfall", "Sorcery", 3, "r", "U", 3, 17, [12, 13, 19, 34]],
   ],
 };
-const index = buildIndex(data);
+// Builds the split index (meta, columns, postings) the way build_index.py does, cards in popularity order
+const cards = [...data.cards].sort((a, b) => a[6] - b[6]);
+const types = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land", "Battle"];
+const postings = new Map(terms.map((_, t) => [t, Int32Array.from(cards.flatMap((c, i) => (c[7].includes(t) ? [i] : [])))]));
+const index = buildIndex({
+  ...data, types, updated: "", categories: [], counts: terms.map((_, t) => postings.get(t).length),
+}, {
+  identity: cards.map(c => [..."WUBRG"].reduce((m, x, i) => (c[4].includes(x) ? m | (1 << i) : m), 0)),
+  types: cards.map(c => types.reduce((m, t, i) => (c[1].includes(t) ? m | (1 << i) : m), 0)),
+  cmc: cards.map(c => c[2]), legal: cards.map(c => c[5]), price: cards.map(c => c[8] ?? -1),
+});
 const parsed = q => mainTerms(parseQuery(q, index));
-const names = (q, filters) => search(index, parseQuery(q, index), filters, q).map(r => r.card.name);
+// Same flow as app.js: features -> ranked search; otherwise a card-name search
+function names(q, filters = {}) {
+  const groups = parseQuery(q, index);
+  const results = groups.length ? search(index, groups, postings, filters)
+    : q.trim() ? nameSearch(index, cards.map(c => c[0]), q, filters) : [];
+  return results.map(r => cards[r.card][0]);
+}
 
 test("parseQuery matches whole words and plurals", () => {
   assert.deepEqual(parsed("cheap green elves that ramp"), ["CMC_0", "CMC_1", "CMC_2", "CMC_3", "Mana Ramp", "G", "Elf"]);
@@ -68,6 +86,19 @@ test("verb forms and common phrasings", () => {
   assert.deepEqual(parsed("punish opponents for drawing cards"), ["tag:draw-hate"]);
   // The phrase becomes "wheel", so it doesn't also trigger the discard/draw concepts
   assert.deepEqual(parsed("discard my hand and draw seven"), ["tag:wheel"]);
+  // Every tag that says "nonbasic" also says "land", so "nonbasic hate" implies land
+  assert.deepEqual(parsed("nonbasic hate"), ["tag:hate-nonbasic-land"]);
+});
+
+test("prices: query limits, filter, and index files", () => {
+  assert.equal(parsePrice("artifact hate under $2"), 2);
+  assert.equal(parsePrice("removal less than 5 dollars"), 5);
+  assert.equal(parsePrice("budget board wipe"), 1);
+  assert.equal(parsePrice("board wipe"), null);
+  // Cards without a known price are left out when there's a limit
+  assert.deepEqual(names("punishes nonbasic lands", { maxPrice: 10 }), ["Blood Moon"]);
+  assert.deepEqual(names("artifact hate", { maxPrice: 1 }), ["Shatter"]);
+  assert.deepEqual([...decodePosting([3, 1, 4])], [3, 4, 8]);
 });
 
 test("token makers: words after makes/creates describe the token", () => {

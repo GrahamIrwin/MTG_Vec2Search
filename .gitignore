@@ -2,7 +2,7 @@
 *.db
 *.jsonl.gz
 all_cards.json
-site/cards.json
+site/index/
 node_modules/
 
 __pycache__/

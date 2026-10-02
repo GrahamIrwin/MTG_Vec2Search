@@ -2,16 +2,17 @@
 
 Search Magic: The Gathering cards by describing them in plain English
 ("cheap green elves that ramp"), with filters for color identity, card type,
-mana value, and format. Dark mode by default. It's a static site: all the
-heavy lifting happens at build time, and the browser just downloads a small
-index (~2.4 MB gzipped) and searches it.
+mana value, format and price. Dark mode by default. It's a static site: all the
+heavy lifting happens at build time, and a search only downloads the small
+pieces of the index it needs (~200 KB the first time, a few KB after that).
 
 **Live site:** https://grahamirwin.github.io/MTG_Vec2Search/
 
 ## How it works
 
-1. `build_index.py` downloads Scryfall's `oracle_cards` and `oracle_tags` bulk
-   data and turns each card into a sparse binary vector over a term space:
+1. `build_index.py` downloads Scryfall's `oracle_cards`, `oracle_tags` and
+   `default_cards` (every printing, for the cheapest price) bulk data and turns
+   each card into a sparse binary vector over a term space:
    - colors, types, keywords, subtypes, rules-text terms, action concepts
      (removal, ramp, card advantage, …) and mana value
    - the tokens it makes ("create two 1/1 white Spirit creature tokens with
@@ -21,7 +22,14 @@ index (~2.4 MB gzipped) and searches it.
      `removal-artifact`, `token-doubler`, … (~3,000 tags, with their aliases)
 
    Keywords, subtypes and tags come from the data itself, so new mechanics are
-   picked up automatically. The output is `site/cards.json`.
+   picked up automatically. The output, `site/index/`, is split so a search
+   only fetches what it uses:
+   - `meta.json`: the terms, card counts and tag aliases (for parsing queries)
+   - `columns.json`: per-card colors, types, mana value, formats and price (for filters)
+   - `t/<term>.json`: which cards have each term (only the query's terms are fetched)
+   - `c/<chunk>.json`: names and image ids, 256 cards each; cards are in
+     popularity order, so top results come from the first few chunks
+   - `names.json`: all names, only fetched for card-name searches
 2. In the browser, `site/search.js` maps the query to the same terms:
    - a tag matches when all its words (or an alias's) are in the query, after
      folding plurals, verb forms ("drawing" → draw) and a little slang
@@ -35,6 +43,10 @@ index (~2.4 MB gzipped) and searches it.
 
    Cards are ranked by IDF-weighted query coverage, so rare features count for
    more than common ones. Ties go to the more popular card, by EDHREC rank.
+   "under $5", "less than 2 dollars" or "budget" (under $1) in a query sets
+   the price limit; prices are each card's cheapest printing.
+
+   **Browse all search terms** on the page lists every term with its card count.
 
 ## Updating card data
 
@@ -46,7 +58,7 @@ away (e.g. on a set's release day), open **Actions → Build and deploy → Run 
 Python 3.11+ (standard library only):
 
 ```
-python build_index.py              # download data + build site/cards.json (~1 min)
+python build_index.py              # download data + build site/index/ (~1 min)
 python -m http.server -d site      # http://localhost:8000
 ```
 

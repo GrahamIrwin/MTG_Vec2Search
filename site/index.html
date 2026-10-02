@@ -124,6 +124,27 @@
     .card img { width: 100%; aspect-ratio: 488 / 680; border-radius: 8px; display: block; background: var(--track); }
     .card-name { display: block; margin: 8px 0 4px; font-size: 16px; }
     .similarity { font-size: 14px; }
+    .card-price { display: block; font-size: 14px; color: var(--muted); margin-bottom: 2px; }
+    .link-button {
+      background: none; border: none; padding: 0; margin-top: 6px; font: inherit; font-size: 15px;
+      color: var(--link); text-decoration: underline; cursor: pointer;
+    }
+    #terms { max-width: 1000px; overflow-y: auto; text-align: left; }
+    #terms h2, #terms > p { text-align: center; }
+    #term-filter {
+      display: block; width: 100%; margin: 8px 0 12px; padding: 8px 10px; font: inherit; color: inherit;
+      border: 2px solid var(--border); border-radius: 8px; background: var(--input-bg);
+    }
+    #term-list summary { cursor: pointer; font-family: 'Beleren Bold', Garamond, serif; font-size: 18px; margin: 10px 0 6px; }
+    .term-items { display: flex; flex-wrap: wrap; gap: 6px; }
+    .term {
+      padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px;
+      background: var(--chip); color: inherit; text-decoration: none; font-size: 15px;
+    }
+    .term:hover { background: var(--accent); color: white; }
+    .term[hidden] { display: none; }
+    .term small { color: var(--muted); }
+    .term:hover small { color: inherit; }
     .progress-container { display: block; background-color: var(--track); border-radius: 8px; margin-top: 4px; height: 12px; }
     .progress-bar { display: block; height: 100%; background: linear-gradient(to right, var(--accent), #8fbc8f); border-radius: 8px; }
     @keyframes fadeInMoveUp { from { opacity: 0; translate: 0 20px; } }
@@ -140,7 +161,8 @@
       box-shadow: 0 8px 16px rgba(0,0,0,0.5);
     }
     dialog::backdrop { background: rgba(0,0,0,0.7); }
-    dialog[open] { display: flex; flex-wrap: wrap; gap: 16px; animation: fadeInMoveUp 0.5s ease both; }
+    dialog[open] { animation: fadeInMoveUp 0.5s ease both; }
+    #modal[open] { display: flex; flex-wrap: wrap; gap: 16px; }
     .modal-left { flex: 2 1 280px; display: flex; flex-direction: column; align-items: center; }
     .modal-right { flex: 1 1 200px; overflow-y: auto; max-height: 70vh; }
     .modal-right h3 { margin-top: 0; }
@@ -203,7 +225,9 @@
       <a href="?q=punishes+non-basic+lands">punishes non-basic lands</a> ·
       <a href="?q=artifact+hate&f=commander">artifact hate</a> ·
       <a href="?q=instant+tutors">instant tutors</a> ·
-      <a href="?q=board+wipe&c=W&c=B">board wipe in W/B</a>
+      <a href="?q=board+wipe&c=W&c=B">board wipe in W/B</a> ·
+      <a href="?q=budget+removal&f=commander">budget removal</a>
+      <br><button type="button" id="browse-terms" class="link-button">Browse all search terms</button>
     </p>
 
     <fieldset>
@@ -239,6 +263,9 @@
       <label>Format
         <select name="f" id="format"><option value="">Any</option></select>
       </label>
+      <label>Max price $
+        <input type="number" name="price" min="0" step="any" placeholder="any" aria-label="Maximum price in US dollars">
+      </label>
     </div>
 
     <button type="submit">Search</button>
@@ -264,10 +291,19 @@
     </div>
   </dialog>
 
+  <dialog id="terms" aria-labelledby="terms-title">
+    <form method="dialog"><button class="close-button" aria-label="Close">×</button></form>
+    <h2 id="terms-title">All search terms</h2>
+    <p>Everything a card can be matched on. The number is how many cards have it; click one to search for it.</p>
+    <input type="search" id="term-filter" placeholder="Filter terms…" aria-label="Filter terms">
+    <div id="term-list"></div>
+  </dialog>
+
   <footer>
     <p>Search runs entirely in your browser. Card data and images from
       <a href="https://scryfall.com">Scryfall</a><span id="updated"></span>. Prices are Scryfall's
-      USD prices, converted to CAD with <a href="https://frankfurter.dev">Frankfurter</a>. Card function tags
+      USD prices (on result tiles, each card's cheapest printing), converted to CAD with
+      <a href="https://frankfurter.dev">Frankfurter</a>. Card function tags
       from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.
       <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">Source on GitHub</a>.</p>
     <p>MTG Vec2Search is unofficial Fan Content permitted under the
