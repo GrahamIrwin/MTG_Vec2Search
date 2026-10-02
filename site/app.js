@@ -166,7 +166,8 @@ async function runSearch() {
     results = search(index, [], new Map(), filters); // filters only
   }
 
-  const chips = mainTerms(groups).map(featureLabel);
+  // A keyword and a tag can share a name ("metalcraft"), so show each label once
+  const chips = [...new Set(mainTerms(groups).map(featureLabel))];
   if (filters.maxPrice !== null) chips.push(`under ${money.formatUsd(filters.maxPrice)}`);
   if (chips.length) {
     $("recognized").replaceChildren(el("span", { className: "label", textContent: "Matched" }),
