@@ -67,6 +67,7 @@ const PHRASES = [
   [/\bsearch(?:es|ing)?\b[^.]*?\blibrar(?:y|ies)\b/g, "tutor"], // search my library
   [/\bcan(?:no|')?t (?:cast|play)\b/g, "silence"], // opponents can't cast spells
   [/\bwins? the game\b/g, "win condition"],
+  [/\bland destruction\b/g, "land removal"],
   [/\bdiscards? (?:\w+ )?hands? and draws?\b/g, "wheel"],
   [/\bwhen(?:ever)?\b[^.]*?\bdies\b/g, "death trigger"],
 ];
@@ -201,13 +202,15 @@ export function parseQuery(query, index) {
 // The most specific term of each group, for display
 export const mainTerms = groups => groups.flatMap(g => g.filter(o => o.credit === 1).map(o => o.term));
 
-// A price limit written in the query, in dollars: "under $5", "less than 2 dollars", "budget"
-export const BUDGET = 1;
+// A price limit written in the query, in the visitor's currency: "under $5", "less than 3 euros".
+// Needs a currency sign or word, so "creatures under 3 mana" isn't read as a price.
 export function parsePrice(query) {
-  const m = query.toLowerCase().match(/(?:under|below|less than|cheaper than|max|<=?)\s*\$\s*(\d+(?:\.\d+)?)|\$(\d+(?:\.\d+)?)\s*(?:or less|or under|max)|(?:under|below|less than)\s*(\d+(?:\.\d+)?)\s*(?:dollars|bucks)/);
-  if (m) return Number(m[1] ?? m[2] ?? m[3]);
-  return /\bbudget\b/i.test(query) ? BUDGET : null;
+  const m = query.toLowerCase().match(/(?:under|below|less than|cheaper than|max|<=?)\s*(?:[a-z]{0,2}[$€£¥])\s*(\d+(?:\.\d+)?)|[$€£¥](\d+(?:\.\d+)?)\s*(?:or less|or under|max)|(?:under|below|less than)\s*(\d+(?:\.\d+)?)\s*(?:dollars|bucks|euros|pounds|yen)/);
+  return m ? Number(m[1] ?? m[2] ?? m[3]) : null;
 }
+// "budget" means under US$1 (converted to the visitor's currency for display)
+export const BUDGET_USD = 1;
+export const isBudget = query => /\bbudget\b/i.test(query);
 
 // Term indices a parsed query needs postings for
 export const termsNeeded = (index, groups) =>

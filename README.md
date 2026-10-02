@@ -44,8 +44,12 @@ pieces of the index it needs (~200 KB the first time, a few KB after that).
 
    Cards are ranked by IDF-weighted query coverage, so rare features count for
    more than common ones. Ties go to the more popular card, by EDHREC rank.
-   "under $5", "less than 2 dollars" or "budget" (under $1) in a query sets
+   "under $5", "less than 3 euros" or "budget" (under US$1) in a query sets
    the price limit; prices are each card's cheapest printing.
+
+   Prices are shown in the visitor's currency: guessed from their time zone
+   (then browser language), changeable in the top corner, and converted from
+   Scryfall's USD prices with [Frankfurter](https://frankfurter.dev).
 
    **Sort by** reorders results by best match, popularity, release date (first
    printing), price or mana value. Sorted by anything but match, only cards at
@@ -74,6 +78,7 @@ Tests: `python test_build_index.py` and `node --test` (Node 24).
 - `build_index.py`: downloads data from Scryfall, vectorizes the cards, writes the index
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
+- `site/currency.js`: currency detection, exchange rate and price formatting
 - `.github/workflows/deploy.yml`: weekly rebuild and GitHub Pages deploy
 - `archive/`: earlier versions, including the original Flask app
 

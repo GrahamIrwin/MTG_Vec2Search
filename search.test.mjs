@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  parseQuery, buildIndex, search, nameSearch, mainTerms, decodePosting, parsePrice, sortResults,
+  parseQuery, buildIndex, search, nameSearch, mainTerms, decodePosting, parsePrice, isBudget, sortResults,
 } from "./site/search.js";
 
 const terms = ["W", "R", "G", "Creature", "Instant", "Land", "Artifact", "Flying", "Ward", "Elf", "Dragon",
@@ -93,8 +93,11 @@ test("verb forms and common phrasings", () => {
 test("prices: query limits, filter, and index files", () => {
   assert.equal(parsePrice("artifact hate under $2"), 2);
   assert.equal(parsePrice("removal less than 5 dollars"), 5);
-  assert.equal(parsePrice("budget board wipe"), 1);
+  assert.equal(parsePrice("burn under C$3"), 3);
+  assert.equal(parsePrice("ramp under €2.50"), 2.5);
+  assert.equal(parsePrice("creatures under 3 mana"), null);
   assert.equal(parsePrice("board wipe"), null);
+  assert.ok(isBudget("budget board wipe") && !isBudget("board wipe"));
   // Cards without a known price are left out when there's a limit
   assert.deepEqual(names("punishes nonbasic lands", { maxPrice: 10 }), ["Blood Moon"]);
   assert.deepEqual(names("artifact hate", { maxPrice: 1 }), ["Shatter"]);

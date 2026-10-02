@@ -91,15 +91,17 @@
     }
     .tagline::after { transform: scaleX(-1); }
 
-    .theme-toggle {
-      position: absolute; top: 14px; right: 16px; z-index: 2;
-      display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer;
-      background: var(--paper); border: 1px solid var(--rule); border-radius: 999px;
+    .top-controls { position: absolute; top: 14px; right: 16px; z-index: 2; display: flex; gap: 8px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer; min-height: 0;
+      background-color: var(--paper); border: 1px solid var(--rule); border-radius: 999px;
       font-size: 14px; color: var(--ink-soft); box-shadow: var(--shadow-sm);
     }
-    .theme-toggle:hover { color: var(--ink); border-color: var(--brass); }
+    .pill:hover { color: var(--ink); border-color: var(--brass); }
+    select.pill { padding-right: 28px !important; background-position: right 14px center, right 9px center; }
     @media (max-width: 600px) {
-      .theme-toggle { top: 10px; right: 12px; padding: 4px 10px; font-size: 13px; }
+      .top-controls { top: 10px; right: 12px; }
+      .pill { padding: 4px 10px; font-size: 13px; }
       .masthead { padding-top: 52px; }
       .tagline { font-size: 15px; letter-spacing: .1em; gap: 10px; white-space: nowrap; }
       .tagline::before, .tagline::after { width: 28px; }
@@ -145,9 +147,10 @@
       text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
     }
 
-    .examples { margin: 14px 4px 0; font-size: 15.5px; color: var(--ink-soft); line-height: 1.9; text-align: center; }
-    .examples a { margin: 0 2px; white-space: nowrap; }
-    .examples .sep { color: var(--rule); margin: 0 4px; }
+    .examples { margin: 14px 4px 0; font-size: 15.5px; color: var(--ink-soft); text-align: center; }
+    .examples .sep { color: var(--ink-faint); margin: 0 10px; }
+    #random span { display: inline-block; font-size: 1.15em; line-height: 1; text-decoration: none; transition: transform .3s; }
+    #random:hover span { transform: rotate(90deg); }
 
     /* ---------- Filters ---------- */
     .filters {
@@ -211,7 +214,7 @@
     .range { display: flex; align-items: center; gap: 8px; color: var(--ink-faint); }
     .range input { width: 74px; }
     .money { position: relative; }
-    .money::before { content: "$"; position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); }
+    .money::before { content: attr(data-symbol); position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); }
     .money input { width: 110px; padding-left: 22px; }
     select { appearance: none; padding-right: 32px !important; cursor: pointer;
       background-image: linear-gradient(45deg, transparent 50%, var(--ink-faint) 50%), linear-gradient(-45deg, transparent 50%, var(--ink-faint) 50%);
@@ -358,7 +361,10 @@
 </head>
 <body>
   <a class="skip" href="#results">Skip to results</a>
-  <button id="theme-toggle" class="theme-toggle" type="button"></button>
+  <div class="top-controls">
+    <select id="currency" class="pill" aria-label="Currency for prices" title="Currency for prices"></select>
+    <button id="theme-toggle" class="pill" type="button"></button>
+  </div>
 
   <div class="page">
     <header class="masthead">
@@ -376,13 +382,9 @@
           <button type="submit" class="btn-primary">Search</button>
         </div>
         <p class="examples">
-          Try
-          <a href="?q=makes+flying+white+creatures">makes flying white creatures</a><span class="sep">·</span>
-          <a href="?q=punishes+non-basic+lands">punishes non-basic lands</a><span class="sep">·</span>
-          <a href="?q=artifact+hate&f=commander">artifact hate</a><span class="sep">·</span>
-          <a href="?q=instant+tutors">instant tutors</a><span class="sep">·</span>
-          <a href="?q=budget+board+wipe">budget board wipe</a>
-          <br><button type="button" id="browse-terms" class="link-button">Browse all search terms</button>
+          <button type="button" id="random" class="link-button"><span aria-hidden="true">⚄</span> Random search</button>
+          <span class="sep" aria-hidden="true">·</span>
+          <button type="button" id="browse-terms" class="link-button">Browse all search terms</button>
         </p>
 
         <details class="filters" id="filters">
@@ -423,8 +425,8 @@
                 </span>
               </div>
               <label class="field">
-                <span class="label">Max price</span>
-                <span class="money"><input type="number" name="price" min="0" step="any" inputmode="decimal" placeholder="any"></span>
+                <span class="label" id="price-label">Max price</span>
+                <span class="money" id="money" data-symbol="$"><input type="number" name="price" min="0" step="any" inputmode="decimal" placeholder="any"></span>
               </label>
               <label class="field">
                 <span class="label">Format</span>
@@ -477,8 +479,8 @@
     <footer>
       <p>Card data and images from <a href="https://scryfall.com">Scryfall</a><span id="updated"></span>.
         Card function tags from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.
-        Prices are Scryfall's USD prices (on result tiles, each card's cheapest printing), converted to CAD with
-        <a href="https://frankfurter.dev">Frankfurter</a>. <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">Source on GitHub</a>.</p>
+        Prices are Scryfall's USD prices (on result tiles, each card's cheapest printing), converted with
+        <a href="https://frankfurter.dev">Frankfurter</a> (European Central Bank rates). <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">Source on GitHub</a>.</p>
       <p>MTG Vec2Search is unofficial Fan Content permitted under the
         <a href="https://company.wizards.com/en/legal/fancontentpolicy">Fan Content Policy</a>.
         Not approved/endorsed by Wizards. Portions of the materials used are property of

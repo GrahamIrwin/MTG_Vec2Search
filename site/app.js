@@ -1,11 +1,23 @@
 import {
   parseQuery, buildIndex, search, nameSearch, mainTerms, termsNeeded, decodePosting, parsePrice,
-  SORTS, sortResults,
+  isBudget, BUDGET_USD, SORTS, sortResults,
 } from "./search.js";
+import { CURRENCIES, detectCurrency, saveCurrency, usdRate, moneyFormatter } from "./currency.js";
 
 const PAGE_SIZE = 30;
 const CHUNK = 256; // cards per index/c/<chunk>.json (CHUNK in build_index.py)
 const COLOR_NAMES = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green" };
+// Searches that show off what the engine understands: the placeholder and "Random search" pick from these
+const EXAMPLES = [
+  "makes flying white creatures", "punishes non-basic lands", "artifact hate", "instant tutors",
+  "budget board wipe", "double the number of tokens", "punish opponents for drawing cards",
+  "opponents can't cast spells during my turn", "win the game", "discard my hand and draw seven",
+  "cheap green elves that ramp", "steal an opponent's creature", "graveyard hate", "lifelink angels",
+  "extra turns", "mana rocks", "copy a spell", "sacrifice outlet", "flying dragons", "blink creatures",
+  "counterspell under $1", "creatures that untap lands", "reanimate creatures", "extra combat",
+  "goblins that make treasure", "fog effects", "tap down creatures", "land destruction",
+];
+const pick = list => list[Math.floor(Math.random() * list.length)];
 const $ = id => document.getElementById(id);
 const form = $("search");
 const params = new URLSearchParams(location.search);
@@ -46,6 +58,11 @@ form.addEventListener("submit", e => {
   location.search = next;
 });
 
+$("q").placeholder = `Describe a card, e.g. ${pick(EXAMPLES)}`;
+$("random").onclick = () => {
+  location.search = new URLSearchParams({ q: pick(EXAMPLES.filter(q => q !== params.get("q"))) });
+};
+
 // "/" jumps to the search box
 document.addEventListener("keydown", e => {
   if (e.key !== "/" || e.ctrlKey || e.metaKey || document.querySelector("dialog[open]")) return;
@@ -71,8 +88,34 @@ themeToggle.onclick = () => {
   document.documentElement.dataset.theme = theme;
   try { localStorage.setItem("theme", theme); } catch {}
   showThemeLabel();
+
+// Prices: shown in the visitor's currency (guessed from their browser, changeable, remembered).
+// The exchange rate is only fetched once a search needs it.
+const currency = detectCurrency();
+let money = moneyFormatter(currency, currency === "USD" ? 1 : null);
+$("currency").append(...CURRENCIES.map(c => el("option", { value: c, textContent: c })));
+$("currency").value = currency;
+$("currency").onchange = () => {
+  saveCurrency($("currency").value);
+  location.reload();
+};
+$("money").dataset.symbol = money.symbol;
+if (currency !== "USD") $("price-label").textContent = `Max price (${currency})`;
 };
 showThemeLabel();
+
+// Prices: shown in the visitor's currency (guessed from their browser, changeable, remembered).
+// The exchange rate is only fetched once a search needs it.
+const currency = detectCurrency();
+let money = moneyFormatter(currency, currency === "USD" ? 1 : null);
+$("currency").append(...CURRENCIES.map(c => el("option", { value: c, textContent: c })));
+$("currency").value = currency;
+$("currency").onchange = () => {
+  saveCurrency($("currency").value);
+  location.reload();
+};
+$("money").dataset.symbol = money.symbol;
+if (currency !== "USD") $("price-label").textContent = `Max price (${currency})`;
 
 // === Index files: each is downloaded only when something needs it (see build_index.py) ===
 let metaPromise;
@@ -104,9 +147,12 @@ const sortData = {};
 async function runSearch() {
   const query = params.get("q") ?? "";
   const num = k => (params.get(k) ? Number(params.get(k)) : null);
+  // Price limits are typed in the visitor's currency; cards are filtered on US dollars
+  const limit = num("price") ?? parsePrice(query);
   const filters = {
     colors: params.getAll("c"), types: params.getAll("t"), format: params.get("f") ?? "",
-    min: num("min"), max: num("max"), maxPrice: num("price") ?? parsePrice(query),
+    min: num("min"), max: num("max"),
+    maxPrice: limit !== null ? limit / (money.rate ?? 1) : isBudget(query) ? BUDGET_USD : null,
   };
   const groups = parseQuery(query, index);
   if (groups.length) {
@@ -119,7 +165,7 @@ async function runSearch() {
   }
 
   const chips = mainTerms(groups).map(featureLabel);
-  if (filters.maxPrice !== null) chips.push(`under $${filters.maxPrice}`);
+  if (filters.maxPrice !== null) chips.push(`under ${money.formatUsd(filters.maxPrice)}`);
   if (chips.length) {
     $("recognized").replaceChildren(el("span", { className: "label", textContent: "Matched" }),
       ...chips.map(c => el("span", { className: "term-chip", textContent: c })));
@@ -187,7 +233,7 @@ async function showMore() {
       el("span", { className: "card-art" }, img),
       el("span", { className: "card-name", textContent: name }),
       el("span", { className: "card-meta" },
-        el("span", { textContent: price >= 0 ? `$${(price / 100).toFixed(2)}` : "No price" }),
+        el("span", { textContent: price >= 0 ? money.formatUsd(price / 100) : "No price" }),
         el("span", { textContent: detail })));
     if (score !== null && sort === "match") {
       tile.append(el("span", { className: "match-bar" }, el("span", { style: `width:${score * 100}%` })));
@@ -252,7 +298,6 @@ for (const dialog of document.querySelectorAll("dialog")) {
 const modal = $("modal");
 const foil = $("foil");
 let current = null;
-let cadRate = null;
 foil.onchange = updatePrice;
 
 async function openCard(id) {
@@ -263,8 +308,6 @@ async function openCard(id) {
   $("modal-img").src = imageUrl(id);
   modal.showModal();
   try {
-    cadRate ??= getJson("https://api.frankfurter.dev/v1/latest?base=USD&symbols=CAD")
-      .then(d => d.rates.CAD).catch(() => null);
     showPrinting(await getJson(`https://api.scryfall.com/cards/${id}`));
     const prints = await getJson(current.prints_search_uri);
     $("printings").replaceChildren(...prints.data.map(p => {
@@ -281,7 +324,8 @@ async function openCard(id) {
   }
 }
 
-const printPrice = p => (p.prices.usd ? `$${p.prices.usd}` : p.prices.usd_foil ? `$${p.prices.usd_foil} foil` : "—");
+const printPrice = p => (p.prices.usd ? money.formatUsd(+p.prices.usd)
+  : p.prices.usd_foil ? `${money.formatUsd(+p.prices.usd_foil)} foil` : "—");
 
 function showPrinting(card) {
   current = card;
@@ -302,25 +346,21 @@ function markCurrent() {
   for (const b of $("printings").querySelectorAll("button")) b.toggleAttribute("aria-current", b.dataset.id === current.id);
 }
 
-async function updatePrice() {
+function updatePrice() {
   $("foil-wrapper").classList.toggle("foil-shimmer", foil.checked);
   const usd = foil.checked ? current.prices.usd_foil : current.prices.usd;
-  if (!usd) {
-    $("price").textContent = "No current price";
-    return;
-  }
-  const text = `$${usd}` + (foil.checked ? " foil" : "");
-  $("price").textContent = text;
-  const rate = await cadRate;
-  // Skip if the user switched printing/foil while the rate was loading
-  if (rate && $("price").textContent === text) $("price").textContent += `  ·  $${(usd * rate).toFixed(2)} CAD`;
+  // In the visitor's currency, with Scryfall's US price alongside when they differ
+  $("price").textContent = !usd ? "No current price"
+    : money.formatUsd(+usd) + (foil.checked ? " foil" : "")
+      + (money.currency !== "USD" && money.rate ? `  ·  US$${usd}` : "");
 }
 
 // === Start: everything above is set up, so run the search in the URL ===
 if (searching) {
   message("Searching…");
   try {
-    const [meta, columns] = await Promise.all([getMeta(), getJson("index/columns.json")]);
+    const [meta, columns, rate] = await Promise.all([getMeta(), getJson("index/columns.json"), usdRate(currency)]);
+    money = moneyFormatter(currency, rate);
     index = buildIndex(meta, columns);
     await runSearch();
   } catch (err) {
