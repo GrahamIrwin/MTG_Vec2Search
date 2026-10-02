@@ -24,8 +24,9 @@ index (~2.4 MB gzipped) and searches it.
    picked up automatically. The output is `site/cards.json`.
 2. In the browser, `site/search.js` maps the query to the same terms:
    - a tag matches when all its words (or an alias's) are in the query, after
-     folding plurals and a little slang ("punishes" → hate, "makes" → create,
-     "steal" → theft, "non-basic" → nonbasic)
+     folding plurals, verb forms ("drawing" → draw) and a little slang
+     ("punishes" → hate, "makes" → create, "steal" → theft, "non-basic" →
+     nonbasic, "can't cast" → silence, "win the game" → win condition)
    - related tags form one group where the most specific gets full credit
      ("instant tutors": `tutor-instant` 100%, `tutor` 50%)
    - words that a tag uses describe its target, not the card ("**artifact** hate"

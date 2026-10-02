@@ -7,10 +7,14 @@ const terms = ["W", "R", "G", "Creature", "Instant", "Land", "Artifact", "Flying
   "Spirit", "draw", "Card Advantage", "Mana Ramp", "Token Creation", "CMC_0", "CMC_1", "CMC_2", "CMC_3",
   "CMC_6", "token:W", "token:Creature", "token:Flying", "token:Spirit",
   "tag:tutor", "tag:tutor-instant", "tag:hate", "tag:hate-nonbasic-land", "tag:hate-artifact",
-  "tag:removal", "tag:removal-artifact", "tag:token-doubler", "tag:sweeper"];
+  "tag:removal", "tag:removal-artifact", "tag:token-doubler", "tag:sweeper", "tag:wheel", "tag:draw-hate",
+  "tag:pure-draw"];
 const data = {
   terms, formats: ["standard", "modern"],
-  tag_names: { "tag:sweeper": ["boardwipe", "wipe", "mass removal"], "tag:token-doubler": ["token doubler"] },
+  tag_names: {
+    "tag:sweeper": ["boardwipe", "wipe", "mass removal"], "tag:token-doubler": ["token doubler"],
+    "tag:pure-draw": ["draw card"],
+  },
   cards: [
     // [name, type_line, cmc, id, color_identity, legal_bitmask, edhrec_rank, term_indices]
     ["Common Flyer", "Creature — Bird", 2, "a", "W", 3, 50, [0, 3, 7, 18]],
@@ -27,6 +31,10 @@ const data = {
     ["Spirit Maker", "Sorcery", 3, "l", "W", 3, 11, [0, 15, 19, 21, 22, 23, 24]],
     ["Doubling Season", "Enchantment", 5, "m", "G", 3, 12, [2, 32]],
     ["Wrath", "Sorcery", 4, "n", "W", 3, 13, [0, 30, 33]],
+    ["Tithe", "Enchantment", 2, "o", "W", 3, 14, [0, 27, 35]],
+    ["Divination", "Sorcery", 3, "p", "U", 3, 15, [12, 13, 19, 36]],
+    ["Inspiration", "Instant", 4, "q", "U", 3, 16, [4, 12, 36]],
+    ["Windfall", "Sorcery", 3, "r", "U", 3, 17, [12, 13, 19, 34]],
   ],
 };
 const index = buildIndex(data);
@@ -53,6 +61,13 @@ test("oracle tags: slang, plurals, specificity, and tag words not counted as car
   // Aliases: "board wipe" -> sweeper
   assert.equal(names("board wipe")[0], "Wrath");
   assert.equal(names("double the number of tokens")[0], "Doubling Season");
+});
+
+test("verb forms and common phrasings", () => {
+  // "drawing" -> draw; of two equally long matches, the rarer tag (draw-hate) wins over pure-draw
+  assert.deepEqual(parsed("punish opponents for drawing cards"), ["tag:draw-hate"]);
+  // The phrase becomes "wheel", so it doesn't also trigger the discard/draw concepts
+  assert.deepEqual(parsed("discard my hand and draw seven"), ["tag:wheel"]);
 });
 
 test("token makers: words after makes/creates describe the token", () => {

@@ -61,15 +61,35 @@ function stem(w) {
   return SYNONYMS[w] ?? w;
 }
 
+// Common phrasings for things tags have a name for
+const PHRASES = [
+  [/\bnon[- ]+(?=[a-z])/g, "non"], // non-basic -> nonbasic
+  [/\bsearch(?:es|ing)?\b[^.]*?\blibrar(?:y|ies)\b/g, "tutor"], // search my library
+  [/\bcan(?:no|')?t (?:cast|play)\b/g, "silence"], // opponents can't cast spells
+  [/\bwins? the game\b/g, "win condition"],
+  [/\bdiscards? (?:\w+ )?hands? and draws?\b/g, "wheel"],
+  [/\bwhen(?:ever)?\b[^.]*?\bdies\b/g, "death trigger"],
+];
+
 function normalize(text) {
-  return text.toLowerCase()
-    .replace(/'/g, "")
-    .replace(/\bnon[- ]+(?=[a-z])/g, "non") // non-basic -> nonbasic
-    .replace(/\bsearch(?:es|ing)?\b[^.]*?\blibrar(?:y|ies)\b/g, "tutor"); // "search my library" -> tutor
+  return PHRASES.reduce((t, [re, to]) => t.replace(re, to), text.toLowerCase()).replace(/'/g, "");
 }
 
 const rawWords = text => normalize(text).split(/[^a-z0-9]+/).filter(Boolean);
 const words = text => rawWords(text).filter(w => !FILLER.has(w)).map(stem);
+
+// "drawing" -> draw, "sacrificing" -> sacrifice, "untapped" -> untap, but only when the
+// result is a word tags actually use (so "nothing" doesn't become "noth")
+function verbBase(w, vocab) {
+  if (vocab.has(w)) return w;
+  for (const suffix of ["ing", "ed"]) {
+    if (!w.endsWith(suffix) || w.length < suffix.length + 3) continue;
+    const base = w.slice(0, -suffix.length);
+    const match = [base, base + "e", base.slice(0, -1)].find(b => vocab.has(stem(b)));
+    if (match) return stem(match);
+  }
+  return w;
+}
 
 const BITS = 7;
 
@@ -93,7 +113,8 @@ export function buildIndex(data) {
       if (ws.length && !AMBIGUOUS_ALIASES.has(name)) tagVariants.push({ term, words: ws });
     }
   }
-  return { terms: data.terms, formats: data.formats, termIndex, weight, cards, tagVariants };
+  const vocab = new Set(tagVariants.flatMap(v => v.words));
+  return { terms: data.terms, formats: data.formats, termIndex, weight, cards, tagVariants, vocab };
 }
 
 // Turns a plain-English query into feature groups: [[{term, credit}], ...].
@@ -101,13 +122,13 @@ export function buildIndex(data) {
 // Most groups are a single feature; related tags form one group, where the most specific
 // tag gets full credit ("instant tutors": tutor-instant 1, tutor 0.5).
 export function parseQuery(query, index) {
-  const text = query.toLowerCase();
+  const text = normalize(query);
   const groups = [];
   const single = new Set();
 
   // Oracle tags whose words all appear in the query, grouped when they share words.
   // Words added by ALSO ("hate" -> "removal") count half, and stand in for the word they came from.
-  const qwords = new Set(words(query));
+  const qwords = new Set(words(query).map(w => verbBase(w, index.vocab)));
   const source = {};
   for (const w of qwords) for (const extra of ALSO[w] ?? []) if (!qwords.has(extra)) source[extra] = w;
   const matched = new Map();
@@ -125,15 +146,19 @@ export function parseQuery(query, index) {
     for (const c of overlapping) clusters.splice(clusters.indexOf(c), 1);
     clusters.push(merged);
   }
+  // Credit goes to the tag covering the most query words, then to the rarer (more specific) one
+  const specificity = m => m.size * index.weight[index.termIndex.get(m.term)];
   for (const c of clusters) {
-    const most = Math.max(...c.map(m => m.size));
-    groups.push(c.map(m => ({ term: m.term, credit: m.size / most })));
+    const most = Math.max(...c.map(specificity));
+    groups.push(c.map(m => ({ term: m.term, credit: most ? specificity(m) / most : 1 })));
   }
 
   // Words in a matched multi-word tag describe its target ("artifact hate", "punishes nonbasic
   // lands"), so they don't also count as the card's own type, color or keyword
   const consumed = new Set([...matched.values()].filter(m => m.words.length > 1).flatMap(m => m.words));
-  const raw = rawWords(query).filter(w => !consumed.has(stem(w)));
+  const raw = rawWords(query)
+    .map(w => (verbBase(stem(w), index.vocab) === stem(w) ? w : verbBase(stem(w), index.vocab))) // sacrificing -> sacrifice
+    .filter(w => !consumed.has(stem(w)));
   let cardText = raw.join(" ");
 
   // Tokens: after "makes"/"creates" (or before "tokens"), words describe the token, not the card
