@@ -10,6 +10,7 @@ import re
 import shutil
 import urllib.request
 from collections import Counter
+from datetime import date
 
 # === Settings ===
 SCRYFALL_BULK_LIST_URL = "https://api.scryfall.com/bulk-data"
@@ -275,20 +276,25 @@ def vectorize_card(card, index, find_keywords, card_tags=(), subtype_names=froze
     return sorted(index[f] for f in features if f in index)
 
 
-def load_prices():
-    """Cheapest current USD price (nonfoil, foil or etched) across all paper printings, by oracle_id."""
-    prices = {}
+def load_printings():
+    """From every paper printing, by oracle_id: the cheapest current USD price (nonfoil, foil or
+    etched) and the first release date (YYYY-MM-DD)."""
+    prices, released = {}, {}
     with gzip.open(PRINTINGS_FILE, "rt", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
                 continue
             c = json.loads(line)
             oracle_id = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
+            if not oracle_id or c.get("digital"):
+                continue
             p = c.get("prices") or {}
             usd = [float(v) for v in (p.get("usd"), p.get("usd_foil"), p.get("usd_etched")) if v]
-            if oracle_id and usd and not c.get("digital"):
+            if usd:
                 prices[oracle_id] = min(prices.get(oracle_id, usd[0]), *usd)
-    return prices
+            if c.get("released_at"):
+                released[oracle_id] = min(released.get(oracle_id, c["released_at"]), c["released_at"])
+    return prices, released
 
 
 # === Step 4: Write the index ===
@@ -297,12 +303,14 @@ def load_prices():
 #   columns.json   per-card filter data: colors, types, mana value, formats, price
 #   t/<term>.json  the cards with each term (one file per term, fetched when a query uses it)
 #   c/<chunk>.json name + Scryfall id for each block of CHUNK cards, fetched to show results
-#   names.json     all card names, only fetched for card-name searches
+#   names.json     all card names, only fetched for card-name searches and sorting by name
+#   released.json  first release date per card (days since 1993-01-01), only fetched to sort by date
 # Cards are in popularity order (EDHREC rank), so the top results sit in the first chunks.
 OUT_DIR = os.path.join("site", "index")
 CHUNK = 256
 FILTER_TYPES = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land", "Battle"]
 NO_PRICE = -1
+EPOCH, NO_DATE = date(1993, 1, 1), -1
 
 
 def write_json(path, data):
@@ -311,7 +319,8 @@ def write_json(path, data):
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
 
 
-def build_index(cards, updated, tags, prices):
+def build_index(cards, updated, tags, printings):
+    prices, released = printings
     terms, keywords, categories = build_term_space(cards, tags)
     index = {t: i for i, t in enumerate(terms)}
     find_keywords = keyword_matcher(keywords)
@@ -348,6 +357,9 @@ def build_index(cards, updated, tags, prices):
     })
     write_json(os.path.join(OUT_DIR, "columns.json"), columns)
     write_json(os.path.join(OUT_DIR, "names.json"), [c["name"] for c in cards])
+    first = [released.get(c.get("oracle_id")) or c.get("released_at") for c in cards]
+    write_json(os.path.join(OUT_DIR, "released.json"),
+               [(date.fromisoformat(d) - EPOCH).days if d else NO_DATE for d in first])
     for t, cards_with_term in enumerate(postings):
         # Gaps between card numbers are small numbers, which keeps the files short
         write_json(os.path.join(OUT_DIR, "t", f"{t}.json"), [b - a for a, b in zip([0] + cards_with_term, cards_with_term)])
@@ -359,4 +371,4 @@ def build_index(cards, updated, tags, prices):
 
 if __name__ == "__main__":
     updated = download_bulk_data()
-    build_index(load_cards(), updated, load_oracle_tags(), load_prices())
+    build_index(load_cards(), updated, load_oracle_tags(), load_printings())

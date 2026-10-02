@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  parseQuery, buildIndex, search, nameSearch, mainTerms, decodePosting, parsePrice,
+  parseQuery, buildIndex, search, nameSearch, mainTerms, decodePosting, parsePrice, sortResults,
 } from "./site/search.js";
 
 const terms = ["W", "R", "G", "Creature", "Instant", "Land", "Artifact", "Flying", "Ward", "Elf", "Dragon",
@@ -118,4 +118,21 @@ test("search ranks by IDF-weighted coverage, then popularity, and applies filter
   // Unrecognized query falls back to name search
   assert.deepEqual(names("dork"), ["Elf Dork"]);
   assert.deepEqual(names(""), []);
+});
+
+test("sorting: by price, date and name, keeping only strong matches", () => {
+  const ranked = search(index, parseQuery("punishes nonbasic lands", index), postings);
+  const order = (sort, extra) => sortResults(ranked, sort, index, extra).map(r => cards[r.card][0]);
+  assert.deepEqual(order("match").slice(0, 2), ["Blood Moon", "Wasteland"]);
+  // Only cards within 75% of the best match are kept (the plain-"hate" partial matches drop out);
+  // unknown prices sort last
+  assert.deepEqual(order("price-asc"), ["Blood Moon", "Wasteland"]);
+  assert.deepEqual(order("price-desc"), ["Wasteland", "Blood Moon"]);
+  const released = cards.map((_, i) => 1000 - i); // later in popularity order = older here
+  assert.deepEqual(order("newest", { released }), ["Blood Moon", "Wasteland"]);
+  assert.deepEqual(order("oldest", { released }), ["Wasteland", "Blood Moon"]);
+  assert.deepEqual(order("name", { names: cards.map(c => c[0]) }), ["Blood Moon", "Wasteland"]);
+  assert.deepEqual(order("mv-desc"), ["Blood Moon", "Wasteland"]);
+  // Filter-only results (no score) are all kept
+  assert.equal(sortResults(search(index, [], postings, {}), "price-asc", index).length, cards.length);
 });

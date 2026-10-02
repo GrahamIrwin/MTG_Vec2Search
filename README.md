@@ -29,7 +29,8 @@ pieces of the index it needs (~200 KB the first time, a few KB after that).
    - `t/<term>.json`: which cards have each term (only the query's terms are fetched)
    - `c/<chunk>.json`: names and image ids, 256 cards each; cards are in
      popularity order, so top results come from the first few chunks
-   - `names.json`: all names, only fetched for card-name searches
+   - `names.json`, `released.json`: names and first-release dates, only fetched
+     for card-name searches and the name/date sorts
 2. In the browser, `site/search.js` maps the query to the same terms:
    - a tag matches when all its words (or an alias's) are in the query, after
      folding plurals, verb forms ("drawing" → draw) and a little slang
@@ -45,6 +46,10 @@ pieces of the index it needs (~200 KB the first time, a few KB after that).
    more than common ones. Ties go to the more popular card, by EDHREC rank.
    "under $5", "less than 2 dollars" or "budget" (under $1) in a query sets
    the price limit; prices are each card's cheapest printing.
+
+   **Sort by** reorders results by best match, popularity, release date (first
+   printing), price or mana value. Sorted by anything but match, only cards at
+   least 75% as good a match as the best one are kept.
 
    **Browse all search terms** on the page lists every term with its card count.
 

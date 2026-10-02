@@ -281,3 +281,30 @@ export function nameSearch(index, names, query, filters = {}) {
   });
   return results;
 }
+
+// === Sorting ===
+export const SORTS = {
+  match: "Best match", popular: "Most popular", newest: "Newest first", oldest: "Oldest first",
+  "price-asc": "Price: low to high", "price-desc": "Price: high to low",
+  "mv-asc": "Mana value: low to high", "mv-desc": "Mana value: high to low", name: "Name (A–Z)",
+};
+// Sorted by anything but match quality, only cards this close to the best match are kept,
+// so "price: low to high" isn't led by cards that barely match
+export const STRONG_MATCH = 0.75;
+
+// released (days since 1993) and names are only needed, and loaded, for the date and name sorts
+export function sortResults(results, sort, index, { released = [], names = [] } = {}) {
+  const top = Math.max(0, ...results.map(r => r.score ?? 0));
+  const list = sort === "match" || !top ? [...results] : results.filter(r => r.score >= top * STRONG_MATCH);
+  const { price, cmc } = index.columns;
+  const last = v => (v < 0 ? Infinity : v); // unknown price/date sorts last
+  const key = {
+    popular: c => c,
+    newest: c => (released[c] < 0 ? Infinity : -released[c]), oldest: c => last(released[c]),
+    "price-asc": c => last(price[c]), "price-desc": c => (price[c] < 0 ? Infinity : -price[c]),
+    "mv-asc": c => cmc[c], "mv-desc": c => -cmc[c],
+  }[sort];
+  if (sort === "name") return list.sort((a, b) => names[a.card].localeCompare(names[b.card]));
+  // Ties (and "match", already in order) go to the more popular card
+  return key ? list.sort((a, b) => key(a.card) - key(b.card) || a.card - b.card) : list;
+}

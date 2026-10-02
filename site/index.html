@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MTG Vec2Search</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
-  <meta name="description" content="Search Magic: The Gathering cards by describing them in plain English.">
+  <meta name="description" content="Search Magic: The Gathering cards by describing what they do, in plain English.">
   <script>
     // Dark by default; the toggle's choice is remembered
     try { document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark"; }
@@ -15,302 +15,503 @@
     @font-face {
       font-family: 'Beleren Bold';
       src: url('fonts/Beleren2016-Bold.ttf') format('truetype');
+      font-display: swap;
     }
+
+    /* ---------- Palette: aged paper by day, lamplit library by night ---------- */
     :root {
-      --bg1: #f8f1e7; --bg2: #e9d8c7; --text: #4b2e2e; --muted: #6a4d2e; --title-shadow: #d2a679;
-      --link: #3f6e4c; --border: #bfa27a; --input-bg: #fdf6e3; --input-shadow: #e0cda9;
-      --surface: #fcf8f0; --chip: #efe3cf; --track: #e0d4b8; --dialog: #f5ebe0; --pip-border: #0005;
-      --accent: #5a8f68; --accent-hover: #467451;
+      --bg-top: #f6eedc; --bg: #eee3cb; --bg-edge: #e2d3b2;
+      --paper: #faf4e6; --paper-2: #f1e7d2; --paper-3: #e7dabe;
+      --ink: #2b1e14; --ink-soft: #6a5440; --ink-faint: #8f7a63;
+      --rule: #d5c19b; --brass: #a8834a;
+      --accent: #3f6b4c; --accent-hover: #345a40; --on-accent: #f7f1e3; --accent-soft: #dfe7d6;
+      --link: #3a6447; --focus: #a8642a;
+      --shadow-sm: 0 1px 2px rgb(60 40 20 / .12);
+      --shadow-md: 0 2px 4px rgb(60 40 20 / .10), 0 10px 24px -8px rgb(60 40 20 / .28);
+      --grain: .07;
+      --backdrop: rgb(30 20 10 / .55);
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
-      --bg1: #1c1613; --bg2: #2a201a; --text: #ecdcc6; --muted: #c4a988; --title-shadow: #000;
-      --link: #93c9a2; --border: #6e5640; --input-bg: #251d18; --input-shadow: #120d0b;
-      --surface: #2c231d; --chip: #3a2e25; --track: #3d3128; --dialog: #241c17; --pip-border: #fff6;
-      --accent: #4f8a5f; --accent-hover: #5f9d6f;
+      --bg-top: #221a14; --bg: #18120e; --bg-edge: #0f0b08;
+      --paper: #231b15; --paper-2: #2b2119; --paper-3: #36291f;
+      --ink: #ecdfc8; --ink-soft: #bba586; --ink-faint: #8c7860;
+      --rule: #4a3929; --brass: #c29a5c;
+      --accent: #4c8459; --accent-hover: #589767; --on-accent: #f6f0e2; --accent-soft: #2c3a2b;
+      --link: #8cc39b; --focus: #d9a35b;
+      --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+      --shadow-md: 0 2px 4px rgb(0 0 0 / .35), 0 14px 30px -10px rgb(0 0 0 / .7);
+      --grain: .05;
+      --backdrop: rgb(5 3 2 / .7);
     }
-    * { box-sizing: border-box; }
+
+    /* ---------- Base ---------- */
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
-      font-family: Garamond, serif;
-      background: linear-gradient(var(--bg1), var(--bg2)) fixed;
-      color: var(--text);
-      text-align: center;
       margin: 0;
-      padding: 32px 16px;
+      min-height: 100vh;
+      color: var(--ink);
+      background: radial-gradient(120% 70% at 50% 0%, var(--bg-top), var(--bg) 55%, var(--bg-edge)) fixed;
+      font: 17px/1.55 "Palatino Linotype", Palatino, "Book Antiqua", "URW Palladio L", Georgia, serif;
+      -webkit-font-smoothing: antialiased;
     }
-    h1, h2, h3, button, legend, .card-name { font-family: 'Beleren Bold', Garamond, serif; }
-    h1 {
-      font-size: clamp(32px, 7vw, 48px);
-      text-shadow: 2px 2px 4px var(--title-shadow);
-      margin: 0 0 20px;
+    /* Paper grain, drawn in CSS (no image download) */
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: var(--grain);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .25 0 0 0 0 .15 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     }
-    a { color: var(--link); }
+    a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { text-decoration-thickness: 2px; }
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+    button, input, select { font: inherit; color: inherit; }
+    h1, h2, h3 { font-family: 'Beleren Bold', Georgia, serif; font-weight: normal; margin: 0; }
+    [hidden] { display: none !important; }
+    .label {
+      font-variant-caps: all-small-caps; letter-spacing: .08em; font-size: 17px; color: var(--ink-soft);
+    }
+    .muted { color: var(--ink-soft); }
+    .skip { position: absolute; left: -999px; top: 8px; background: var(--paper); padding: 8px 12px; border-radius: 8px; }
+    .skip:focus { left: 8px; z-index: 10; }
 
-    /* Search form */
-    form { max-width: 760px; margin: 0 auto; }
-    input[type=search] {
-      width: 100%;
-      padding: 14px;
-      font-size: 18px;
-      border: 2px solid var(--border);
-      border-radius: 12px;
-      background-color: var(--input-bg);
-      box-shadow: inset 0 0 10px var(--input-shadow);
-      font-family: Garamond, serif;
-      color: inherit;
-    }
-    .examples { font-size: 15px; margin: 8px 0 4px; }
-    fieldset { border: none; margin: 10px 0 0; padding: 0; }
-    legend { font-size: 15px; margin: 0 auto 6px; }
-    .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
-    .chips label {
-      padding: 5px 12px;
-      border: 2px solid var(--border);
-      border-radius: 999px;
-      background: var(--surface);
-      cursor: pointer;
-      user-select: none;
-    }
-    .chips label:has(input:checked) { background: var(--accent); border-color: var(--accent-hover); color: white; }
-    .chips label:has(input:focus-visible) { outline: 2px solid var(--text); outline-offset: 2px; }
-    .chips input { position: absolute; opacity: 0; pointer-events: none; }
-    .pip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; border: 1px solid var(--pip-border); }
-    .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; margin-top: 12px; }
-    .row input, .row select {
-      font: inherit; font-size: 16px; padding: 4px 6px;
-      border: 2px solid var(--border); border-radius: 8px; background: var(--input-bg); color: inherit;
-    }
-    .row input { width: 4.5em; }
-    button[type=submit], #more {
-      margin-top: 16px;
-      padding: 12px 28px;
-      font-size: 20px;
-      background-color: var(--accent);
-      color: white;
-      border: none;
-      border-radius: 10px;
-      box-shadow: 2px 2px 6px #4d4d4d;
-      cursor: pointer;
-      transition: background 0.3s;
-    }
-    button[type=submit]:hover, #more:hover { background-color: var(--accent-hover); }
+    .page { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+    @media (max-width: 600px) { .page { padding: 0 16px; } body { font-size: 16px; } }
 
-    /* Results */
-    #status { font-size: 18px; color: var(--muted); margin: 24px 0 8px; }
-    .feature {
-      display: inline-block; margin: 3px; padding: 2px 10px;
-      background: var(--chip); border: 1px solid var(--border); border-radius: 999px; font-size: 15px;
+    /* ---------- Masthead ---------- */
+    .masthead { text-align: center; padding: 44px 0 26px; }
+    .masthead h1 { font-size: clamp(34px, 6.2vw, 58px); line-height: 1.05; letter-spacing: .01em; }
+    .masthead h1 a { color: var(--ink); text-decoration: none; }
+    .tagline {
+      display: flex; align-items: center; justify-content: center; gap: 14px; margin: 10px 0 0;
+      font-variant-caps: all-small-caps; letter-spacing: .14em; font-size: 18px; color: var(--ink-soft);
     }
+    .tagline::before, .tagline::after {
+      content: ""; height: 1px; width: min(90px, 14vw);
+      background: linear-gradient(90deg, transparent, var(--brass));
+    }
+    .tagline::after { transform: scaleX(-1); }
+
+    .theme-toggle {
+      position: absolute; top: 14px; right: 16px; z-index: 2;
+      display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer;
+      background: var(--paper); border: 1px solid var(--rule); border-radius: 999px;
+      font-size: 14px; color: var(--ink-soft); box-shadow: var(--shadow-sm);
+    }
+    .theme-toggle:hover { color: var(--ink); border-color: var(--brass); }
+    @media (max-width: 600px) {
+      .theme-toggle { top: 10px; right: 12px; padding: 4px 10px; font-size: 13px; }
+      .masthead { padding-top: 52px; }
+      .tagline { font-size: 15px; letter-spacing: .1em; gap: 10px; white-space: nowrap; }
+      .tagline::before, .tagline::after { width: 28px; }
+    }
+
+    /* ---------- Search ---------- */
+    #search { max-width: 820px; margin: 0 auto; }
+    .searchbar {
+      display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 16px;
+      background: var(--paper); border: 1px solid var(--rule); border-radius: 14px;
+      box-shadow: var(--shadow-md); transition: border-color .2s, box-shadow .2s;
+    }
+    .searchbar:focus-within { border-color: var(--brass); box-shadow: 0 0 0 3px rgb(168 131 74 / .25), var(--shadow-md); }
+    .searchbar svg { flex: none; color: var(--ink-faint); }
+    .searchbar input {
+      flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+      padding: 10px 4px; font-size: 19px;
+    }
+    .searchbar input::placeholder { color: var(--ink-faint); font-style: italic; }
+    .searchbar input::-webkit-search-cancel-button { cursor: pointer; }
+    .kbd {
+      flex: none; font: 13px/1 Georgia, serif; color: var(--ink-faint); padding: 4px 7px;
+      border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 6px;
+    }
+    .searchbar:focus-within .kbd { display: none; }
+    @media (max-width: 600px) { .kbd { display: none; } .searchbar input { font-size: 17px; } }
+
+    .btn-primary {
+      flex: none; cursor: pointer; padding: 10px 22px; border-radius: 10px;
+      background: var(--accent); color: var(--on-accent); border: 1px solid rgb(0 0 0 / .15);
+      font-family: 'Beleren Bold', Georgia, serif; font-size: 18px; letter-spacing: .02em;
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / .14), var(--shadow-sm);
+      transition: background .15s;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-quiet {
+      cursor: pointer; padding: 9px 20px; border-radius: 10px; background: var(--paper);
+      border: 1px solid var(--rule); color: var(--ink); box-shadow: var(--shadow-sm);
+    }
+    .btn-quiet:hover { border-color: var(--brass); }
+    .link-button {
+      background: none; border: 0; padding: 0; cursor: pointer; color: var(--link);
+      text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+    }
+
+    .examples { margin: 14px 4px 0; font-size: 15.5px; color: var(--ink-soft); line-height: 1.9; text-align: center; }
+    .examples a { margin: 0 2px; white-space: nowrap; }
+    .examples .sep { color: var(--rule); margin: 0 4px; }
+
+    /* ---------- Filters ---------- */
+    .filters {
+      margin-top: 18px; background: var(--paper-2); border: 1px solid var(--rule); border-radius: 12px;
+    }
+    .filters > summary {
+      display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer;
+      list-style: none; user-select: none; border-radius: 12px;
+    }
+    .filters > summary::-webkit-details-marker { display: none; }
+    .filters > summary::after {
+      content: ""; margin-left: auto; width: 8px; height: 8px; transform: rotate(45deg) translateY(-3px);
+      border-right: 2px solid var(--ink-faint); border-bottom: 2px solid var(--ink-faint); transition: transform .2s;
+    }
+    .filters[open] > summary::after { transform: rotate(225deg) translateY(-1px); }
+    .filters > summary:hover .label { color: var(--ink); }
+    .badge {
+      min-width: 22px; padding: 1px 7px; border-radius: 999px; text-align: center;
+      background: var(--accent); color: var(--on-accent); font-size: 13px; font-variant-numeric: tabular-nums;
+    }
+    .filter-body { display: grid; gap: 18px; padding: 16px; border-top: 1px solid var(--rule); }
+    fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+    legend { padding: 0; margin-bottom: 8px; }
+    .legend-note { font-variant-caps: normal; letter-spacing: 0; font-style: italic; font-size: 14px; color: var(--ink-faint); }
+
+    /* Mana pips, in the colors printed on cards */
+    .pips { display: flex; gap: 10px; flex-wrap: wrap; }
+    .pip { position: relative; cursor: pointer; }
+    .pip input, .chip input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+    .pip span {
+      display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+      font: 17px/1 'Beleren Bold', Georgia, serif; color: var(--ink-soft);
+      background: color-mix(in srgb, var(--pip) 12%, transparent); box-shadow: inset 0 0 0 2px var(--pip);
+      transition: background .15s, color .15s, transform .15s, box-shadow .15s;
+    }
+    .pip:hover span { background: color-mix(in srgb, var(--pip) 30%, transparent); color: var(--ink); }
+    .pip input:checked + span {
+      background: var(--pip); color: #1b1712; transform: translateY(-1px);
+      box-shadow: inset 0 -2px 0 rgb(0 0 0 / .18), 0 0 0 2px var(--paper-2), 0 0 0 4px var(--brass);
+    }
+    .pip input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 4px; }
+    .pip-w { --pip: #f8f2d6; } .pip-u { --pip: #a9d7f2; } .pip-b { --pip: #c6bcb7; }
+    .pip-r { --pip: #f3a68c; } .pip-g { --pip: #9cd0ad; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip span {
+      display: inline-block; cursor: pointer; padding: 5px 14px; border-radius: 999px;
+      border: 1px solid var(--rule); background: var(--paper); font-size: 15.5px; transition: background .15s, border-color .15s;
+    }
+    .chip:hover span { border-color: var(--brass); }
+    .chip input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+    .chip input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    .field-row { display: flex; flex-wrap: wrap; gap: 18px 28px; align-items: end; }
+    .field { display: grid; gap: 6px; }
+    .field input, .field select, .sort select {
+      padding: 7px 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper);
+      font-size: 16px; min-height: 38px;
+    }
+    .field input:focus, .field select:focus, .sort select:focus { border-color: var(--brass); outline: none; box-shadow: 0 0 0 3px rgb(168 131 74 / .22); }
+    .range { display: flex; align-items: center; gap: 8px; color: var(--ink-faint); }
+    .range input { width: 74px; }
+    .money { position: relative; }
+    .money::before { content: "$"; position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); }
+    .money input { width: 110px; padding-left: 22px; }
+    select { appearance: none; padding-right: 32px !important; cursor: pointer;
+      background-image: linear-gradient(45deg, transparent 50%, var(--ink-faint) 50%), linear-gradient(-45deg, transparent 50%, var(--ink-faint) 50%);
+      background-position: right 16px center, right 11px center; background-size: 5px 5px; background-repeat: no-repeat; }
+    .filter-actions { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
+
+    /* ---------- Intro (before the first search) ---------- */
+    .intro { max-width: 980px; margin: 48px auto 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+    .intro section { padding-top: 14px; border-top: 1px solid var(--rule); }
+    .intro .numeral {
+      font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; font-weight: normal;
+      color: var(--brass); margin-right: 10px; letter-spacing: .04em;
+    }
+    .intro h2 { font-size: 21px; margin-bottom: 6px; }
+    .intro p { margin: 0; color: var(--ink-soft); }
+    @media (max-width: 760px) { .intro { grid-template-columns: 1fr; gap: 18px; margin-top: 32px; } }
+
+    /* ---------- Results ---------- */
+    .results { margin-top: 34px; }
+    .results-head {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px;
+      padding-bottom: 14px; border-bottom: 1px solid var(--rule);
+    }
+    .recognized { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .term-chip {
+      padding: 2px 11px; border-radius: 999px; font-size: 15px;
+      background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink);
+    }
+    .toolbar { display: flex; align-items: center; gap: 18px; margin-left: auto; white-space: nowrap; }
+    @media (max-width: 600px) {
+      .toolbar { width: 100%; justify-content: space-between; gap: 12px; }
+      .sort select { max-width: 200px; }
+    }
+    .count { color: var(--ink-soft); font-size: 15.5px; font-variant-numeric: tabular-nums; }
+    .sort { display: flex; align-items: center; gap: 10px; }
+    .message { text-align: center; color: var(--ink-soft); font-style: italic; margin: 42px 0; }
+
     .gallery {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 20px;
-      max-width: 1400px;
-      margin: 20px auto 0;
+      display: grid; gap: 26px 20px; margin-top: 24px;
+      grid-template-columns: repeat(auto-fill, minmax(min(176px, 42vw), 1fr));
     }
     .card {
-      background: var(--surface);
-      padding: 10px;
-      border: 2px solid var(--border);
-      border-radius: 12px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-      transition: transform 0.3s, box-shadow 0.3s;
-      cursor: pointer;
-      color: inherit;
-      font: inherit;
-      animation: fadeInMoveUp 0.8s ease both;
+      display: flex; flex-direction: column; gap: 7px; padding: 0; margin: 0; text-align: left;
+      background: none; border: 0; cursor: pointer; border-radius: 12px;
+      animation: rise .45s ease both; animation-delay: calc(var(--i, 0) * 25ms);
     }
-    .card:hover, .card:focus-visible { transform: scale(1.05); box-shadow: 0 6px 14px rgba(0,0,0,0.5); }
-    .card img { width: 100%; aspect-ratio: 488 / 680; border-radius: 8px; display: block; background: var(--track); }
-    .card-name { display: block; margin: 8px 0 4px; font-size: 16px; }
-    .similarity { font-size: 14px; }
-    .card-price { display: block; font-size: 14px; color: var(--muted); margin-bottom: 2px; }
-    .link-button {
-      background: none; border: none; padding: 0; margin-top: 6px; font: inherit; font-size: 15px;
-      color: var(--link); text-decoration: underline; cursor: pointer;
+    .card-art {
+      position: relative; aspect-ratio: 488 / 680; overflow: hidden; border-radius: 4.75% / 3.4%;
+      background: linear-gradient(110deg, var(--paper-2) 30%, var(--paper-3) 50%, var(--paper-2) 70%) 0 0 / 300% 100%;
+      animation: shimmer 1.6s linear infinite;
+      box-shadow: 0 1px 1px rgb(0 0 0 / .25), 0 8px 16px -8px rgb(0 0 0 / .5);
+      transition: transform .25s ease, box-shadow .25s ease;
     }
-    #terms { max-width: 1000px; overflow-y: auto; text-align: left; }
-    #terms h2, #terms > p { text-align: center; }
-    #term-filter {
-      display: block; width: 100%; margin: 8px 0 12px; padding: 8px 10px; font: inherit; color: inherit;
-      border: 2px solid var(--border); border-radius: 8px; background: var(--input-bg);
+    .card-art img { display: block; width: 100%; height: 100%; opacity: 0; transition: opacity .35s; }
+    .card-art img.loaded { opacity: 1; }
+    .card-art:has(img.loaded) { animation: none; }
+    .card:hover .card-art, .card:focus-visible .card-art {
+      transform: translateY(-4px); box-shadow: 0 2px 3px rgb(0 0 0 / .25), 0 18px 28px -12px rgb(0 0 0 / .6);
     }
-    #term-list summary { cursor: pointer; font-family: 'Beleren Bold', Garamond, serif; font-size: 18px; margin: 10px 0 6px; }
-    .term-items { display: flex; flex-wrap: wrap; gap: 6px; }
-    .term {
-      padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px;
-      background: var(--chip); color: inherit; text-decoration: none; font-size: 15px;
-    }
-    .term:hover { background: var(--accent); color: white; }
-    .term[hidden] { display: none; }
-    .term small { color: var(--muted); }
-    .term:hover small { color: inherit; }
-    .progress-container { display: block; background-color: var(--track); border-radius: 8px; margin-top: 4px; height: 12px; }
-    .progress-bar { display: block; height: 100%; background: linear-gradient(to right, var(--accent), #8fbc8f); border-radius: 8px; }
-    @keyframes fadeInMoveUp { from { opacity: 0; translate: 0 20px; } }
+    .card:focus-visible { outline: none; }
+    .card:focus-visible .card-art { outline: 2px solid var(--focus); outline-offset: 3px; }
+    .card-name { font-family: 'Beleren Bold', Georgia, serif; font-size: 15px; line-height: 1.25; color: var(--ink); }
+    .card-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+    .match-bar { height: 3px; border-radius: 2px; background: var(--paper-3); overflow: hidden; }
+    .match-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--brass)); }
+    #sentinel { height: 1px; }
+    .more-wrap { display: flex; justify-content: center; margin: 28px 0 0; }
+    @keyframes rise { from { opacity: 0; translate: 0 10px; } }
+    @keyframes shimmer { to { background-position: -300% 0; } }
 
-    /* Card details */
+    /* ---------- Dialogs ---------- */
     dialog {
-      background: var(--dialog);
-      color: inherit;
-      border: none;
-      border-radius: 12px;
-      padding: 20px;
-      width: min(800px, 100% - 32px);
-      max-height: 85vh;
-      box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+      max-height: min(88vh, 900px); width: min(920px, calc(100% - 32px)); padding: 28px;
+      background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 16px;
+      box-shadow: 0 24px 60px -12px rgb(0 0 0 / .55); overflow: auto;
     }
-    dialog::backdrop { background: rgba(0,0,0,0.7); }
-    dialog[open] { animation: fadeInMoveUp 0.5s ease both; }
-    #modal[open] { display: flex; flex-wrap: wrap; gap: 16px; }
-    .modal-left { flex: 2 1 280px; display: flex; flex-direction: column; align-items: center; }
-    .modal-right { flex: 1 1 200px; overflow-y: auto; max-height: 70vh; }
-    .modal-right h3 { margin-top: 0; }
-    .close-button {
-      position: absolute; top: 4px; right: 10px;
-      background: none; border: none; font-size: 28px; cursor: pointer; color: inherit;
-    }
+    dialog[open] { animation: rise .25s ease both; }
+    dialog::backdrop { background: var(--backdrop); backdrop-filter: blur(2px); }
     dialog form { display: contents; }
-    .foil-wrapper { position: relative; width: 100%; max-width: 300px; overflow: hidden; border-radius: 4.75% / 3.5%; }
-    .foil-wrapper img { width: 100%; aspect-ratio: 488 / 680; display: block; }
-    .price-line { font-size: 20px; margin: 8px 0; }
-    .foil-toggle { font-size: 16px; background: var(--surface); padding: 8px; border-radius: 10px; }
-    .version-button {
-      width: 95%;
-      margin-bottom: 8px;
-      padding: 6px 10px;
-      background-color: var(--accent);
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      cursor: pointer;
+    .close {
+      position: absolute; top: 12px; right: 12px; width: 38px; height: 38px; border-radius: 50%;
+      display: grid; place-items: center; cursor: pointer; font-size: 24px; line-height: 1;
+      background: transparent; border: 1px solid transparent; color: var(--ink-soft);
     }
-    .version-button:hover, .version-button[aria-current] { background-color: var(--accent-hover); }
-    .foil-shimmer::after {
-      content: "";
-      position: absolute;
-      top: -50%; left: -50%;
-      width: 200%; height: 200%;
-      background: linear-gradient(120deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 100%);
-      animation: shimmer 2s infinite linear;
-      pointer-events: none;
-    }
-    @keyframes shimmer {
-      0% { transform: translate(-100%, -100%) rotate(25deg); }
-      50% { transform: translate(100%, 100%) rotate(25deg); }
-      100% { transform: translate(200%, 200%) rotate(25deg); }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .card, dialog[open] { animation: none; }
-      .foil-shimmer::after { animation: none; }
-    }
+    .close:hover { background: var(--paper-2); border-color: var(--rule); color: var(--ink); }
 
-    #theme-toggle {
-      position: absolute; top: 12px; right: 12px;
-      background: var(--surface); color: var(--text); border: 2px solid var(--border);
-      border-radius: 999px; padding: 6px 12px; font-size: 14px; cursor: pointer;
+    #modal[open] { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 30px; }
+    @media (max-width: 700px) { #modal[open] { grid-template-columns: 1fr; } .card-sheet-art { max-width: 300px; margin: 0 auto; } }
+    .foil-wrapper { position: relative; overflow: hidden; border-radius: 4.75% / 3.4%; box-shadow: var(--shadow-md); background: var(--paper-2); }
+    .foil-wrapper img { display: block; width: 100%; aspect-ratio: 488 / 680; }
+    .card-sheet-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-right: 30px; }
+    .card-sheet-info h2 { font-size: 28px; line-height: 1.15; }
+    .price-row { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 10px 0 16px; }
+    .price-line { font-size: 22px; font-variant-numeric: tabular-nums; }
+    .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 15px; color: var(--ink-soft); }
+    .switch input { accent-color: var(--accent); width: 16px; height: 16px; }
+    .printings { list-style: none; margin: 6px 0 14px; padding: 0; max-height: 300px; overflow: auto;
+      border: 1px solid var(--rule); border-radius: 10px; background: var(--paper-2); }
+    .printings button {
+      display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; width: 100%; padding: 9px 14px; text-align: left;
+      background: none; border: 0; border-bottom: 1px solid var(--rule); cursor: pointer;
     }
-    footer { font-size: 14px; color: var(--muted); max-width: 760px; margin: 48px auto 0; line-height: 1.5; }
+    .printings li:last-child button { border-bottom: 0; }
+    .printings button:hover { background: var(--paper-3); }
+    .printings button[aria-current] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+    .printings .set { font-size: 15.5px; }
+    .printings .detail { grid-column: 1; font-size: 13.5px; color: var(--ink-faint); }
+    .printings .cost { grid-row: span 2; align-self: center; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+    .foil-shimmer::after {
+      content: ""; position: absolute; inset: -50%; pointer-events: none;
+      background: linear-gradient(120deg, transparent 40%, rgb(255 255 255 / .35) 50%, transparent 60%);
+      animation: foil 2.4s infinite linear;
+    }
+    @keyframes foil { from { transform: translate(-60%, -60%); } to { transform: translate(60%, 60%); } }
+
+    #terms { width: min(1040px, calc(100% - 32px)); }
+    #terms h2 { font-size: 26px; text-align: center; }
+    #terms .lede { text-align: center; margin: 6px 0 16px; }
+    #term-filter {
+      display: block; width: 100%; padding: 10px 14px; margin-bottom: 8px; font-size: 17px;
+      border: 1px solid var(--rule); border-radius: 10px; background: var(--paper-2);
+    }
+    #term-filter:focus { outline: none; border-color: var(--brass); box-shadow: 0 0 0 3px rgb(168 131 74 / .22); }
+    #term-list details { border-bottom: 1px solid var(--rule); padding: 4px 0; }
+    #term-list summary { cursor: pointer; padding: 8px 2px; font-family: 'Beleren Bold', Georgia, serif; font-size: 18px; }
+    #term-list summary small { font-family: Georgia, serif; color: var(--ink-faint); font-size: 14px; margin-left: 6px; }
+    .term-items { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 14px; }
+    .term {
+      padding: 3px 11px; border-radius: 999px; font-size: 15px; text-decoration: none;
+      background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink) !important;
+    }
+    .term:hover { border-color: var(--accent); background: var(--accent-soft); }
+    .term small { color: var(--ink-faint); margin-left: 4px; font-variant-numeric: tabular-nums; }
+
+    /* ---------- Footer ---------- */
+    footer { max-width: 780px; margin: 70px auto 0; padding: 22px 0 40px; border-top: 1px solid var(--rule);
+      text-align: center; font-size: 14px; line-height: 1.6; color: var(--ink-faint); }
+    footer p { margin: 0 0 8px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
   </style>
 </head>
 <body>
-  <button id="theme-toggle" type="button"></button>
-  <h1>MTG Vec2Search</h1>
+  <a class="skip" href="#results">Skip to results</a>
+  <button id="theme-toggle" class="theme-toggle" type="button"></button>
 
-  <form id="search">
-    <input type="search" name="q" placeholder="Describe the card you want…" aria-label="Describe the card you want">
-    <p class="examples">Try:
-      <a href="?q=makes+flying+white+creatures">makes flying white creatures</a> ·
-      <a href="?q=punishes+non-basic+lands">punishes non-basic lands</a> ·
-      <a href="?q=artifact+hate&f=commander">artifact hate</a> ·
-      <a href="?q=instant+tutors">instant tutors</a> ·
-      <a href="?q=board+wipe&c=W&c=B">board wipe in W/B</a> ·
-      <a href="?q=budget+removal&f=commander">budget removal</a>
-      <br><button type="button" id="browse-terms" class="link-button">Browse all search terms</button>
-    </p>
+  <div class="page">
+    <header class="masthead">
+      <h1><a href="./">MTG Vec2Search</a></h1>
+      <p class="tagline">A plain-English card catalogue</p>
+    </header>
 
-    <fieldset>
-      <legend>Color identity within</legend>
-      <div class="chips">
-        <label><input type="checkbox" name="c" value="W"><span class="pip" style="background:#f8f3d6"></span>White</label>
-        <label><input type="checkbox" name="c" value="U"><span class="pip" style="background:#4a90d9"></span>Blue</label>
-        <label><input type="checkbox" name="c" value="B"><span class="pip" style="background:#2b2b2b"></span>Black</label>
-        <label><input type="checkbox" name="c" value="R"><span class="pip" style="background:#d9452b"></span>Red</label>
-        <label><input type="checkbox" name="c" value="G"><span class="pip" style="background:#3f8f4f"></span>Green</label>
+    <main>
+      <form id="search" role="search">
+        <div class="searchbar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input type="search" name="q" id="q" autocomplete="off" spellcheck="false"
+                 placeholder="Describe a card, e.g. makes flying white creatures" aria-label="Describe the card you want">
+          <kbd class="kbd" title="Press / to search">/</kbd>
+          <button type="submit" class="btn-primary">Search</button>
+        </div>
+        <p class="examples">
+          Try
+          <a href="?q=makes+flying+white+creatures">makes flying white creatures</a><span class="sep">·</span>
+          <a href="?q=punishes+non-basic+lands">punishes non-basic lands</a><span class="sep">·</span>
+          <a href="?q=artifact+hate&f=commander">artifact hate</a><span class="sep">·</span>
+          <a href="?q=instant+tutors">instant tutors</a><span class="sep">·</span>
+          <a href="?q=budget+board+wipe">budget board wipe</a>
+          <br><button type="button" id="browse-terms" class="link-button">Browse all search terms</button>
+        </p>
+
+        <details class="filters" id="filters">
+          <summary><span class="label">Filters</span><span class="badge" id="filter-count" hidden></span></summary>
+          <div class="filter-body">
+            <fieldset>
+              <legend class="label">Color identity <span class="legend-note">— cards that fit within these colors</span></legend>
+              <div class="pips">
+                <label class="pip pip-w" title="White"><input type="checkbox" name="c" value="W" aria-label="White"><span aria-hidden="true">W</span></label>
+                <label class="pip pip-u" title="Blue"><input type="checkbox" name="c" value="U" aria-label="Blue"><span aria-hidden="true">U</span></label>
+                <label class="pip pip-b" title="Black"><input type="checkbox" name="c" value="B" aria-label="Black"><span aria-hidden="true">B</span></label>
+                <label class="pip pip-r" title="Red"><input type="checkbox" name="c" value="R" aria-label="Red"><span aria-hidden="true">R</span></label>
+                <label class="pip pip-g" title="Green"><input type="checkbox" name="c" value="G" aria-label="Green"><span aria-hidden="true">G</span></label>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend class="label">Card type</legend>
+              <div class="chips">
+                <label class="chip"><input type="checkbox" name="t" value="Creature"><span>Creature</span></label>
+                <label class="chip"><input type="checkbox" name="t" value="Instant"><span>Instant</span></label>
+                <label class="chip"><input type="checkbox" name="t" value="Sorcery"><span>Sorcery</span></label>
+                <label class="chip"><input type="checkbox" name="t" value="Artifact"><span>Artifact</span></label>
+                <label class="chip"><input type="checkbox" name="t" value="Enchantment"><span>Enchantment</span></label>
+                <label class="chip"><input type="checkbox" name="t" value="Planeswalker"><span>Planeswalker</span></label>
+                <label class="chip"><input type="checkbox" name="t" value="Land"><span>Land</span></label>
+                <label class="chip"><input type="checkbox" name="t" value="Battle"><span>Battle</span></label>
+              </div>
+            </fieldset>
+
+            <div class="field-row">
+              <div class="field">
+                <span class="label" id="mv-label">Mana value</span>
+                <span class="range" role="group" aria-labelledby="mv-label">
+                  <input type="number" name="min" min="0" max="20" inputmode="numeric" placeholder="min" aria-label="Minimum mana value">
+                  to
+                  <input type="number" name="max" min="0" max="20" inputmode="numeric" placeholder="max" aria-label="Maximum mana value">
+                </span>
+              </div>
+              <label class="field">
+                <span class="label">Max price</span>
+                <span class="money"><input type="number" name="price" min="0" step="any" inputmode="decimal" placeholder="any"></span>
+              </label>
+              <label class="field">
+                <span class="label">Format</span>
+                <select name="f" id="format"><option value="">Any format</option></select>
+              </label>
+            </div>
+
+            <div class="filter-actions">
+              <a href="./" id="clear-filters">Clear filters</a>
+              <button type="submit" class="btn-primary">Apply</button>
+            </div>
+          </div>
+        </details>
+      </form>
+
+      <div class="intro" id="intro" hidden>
+        <section>
+          <h2><span class="numeral">I.</span>Describe it</h2>
+          <p>Say what the card does, the way you would at the table:
+            <a href="?q=punish+opponents+for+drawing+cards">punish opponents for drawing cards</a>,
+            <a href="?q=double+the+number+of+tokens">double the number of tokens</a>.</p>
+        </section>
+        <section>
+          <h2><span class="numeral">II.</span>Narrow it</h2>
+          <p>Filter by color identity, type, mana value, format and price, or just write
+            “budget” or “under $5” in your search.</p>
+        </section>
+        <section>
+          <h2><span class="numeral">III.</span>Sort it</h2>
+          <p>Order results by best match, popularity, release date, price or mana value.
+            Pick any card to see every printing and its price.</p>
+        </section>
       </div>
-    </fieldset>
 
-    <fieldset>
-      <legend>Card type</legend>
-      <div class="chips">
-        <label><input type="checkbox" name="t" value="Creature">Creature</label>
-        <label><input type="checkbox" name="t" value="Instant">Instant</label>
-        <label><input type="checkbox" name="t" value="Sorcery">Sorcery</label>
-        <label><input type="checkbox" name="t" value="Artifact">Artifact</label>
-        <label><input type="checkbox" name="t" value="Enchantment">Enchantment</label>
-        <label><input type="checkbox" name="t" value="Planeswalker">Planeswalker</label>
-        <label><input type="checkbox" name="t" value="Land">Land</label>
-        <label><input type="checkbox" name="t" value="Battle">Battle</label>
-      </div>
-    </fieldset>
+      <section class="results" id="results" hidden>
+        <div class="results-head">
+          <div class="recognized" id="recognized"></div>
+          <div class="toolbar">
+            <span class="count" id="count" role="status"></span>
+            <label class="sort"><span class="label">Sort by</span><select id="sort"></select></label>
+          </div>
+        </div>
+        <p class="message" id="message" hidden></p>
+        <div class="gallery" id="gallery"></div>
+        <div id="sentinel"></div>
+        <div class="more-wrap"><button id="more" class="btn-quiet" type="button" hidden>Show more</button></div>
+      </section>
+    </main>
 
-    <div class="row">
-      <label>Mana value
-        <input type="number" name="min" min="0" max="20" placeholder="min" aria-label="Minimum mana value"> –
-        <input type="number" name="max" min="0" max="20" placeholder="max" aria-label="Maximum mana value">
-      </label>
-      <label>Format
-        <select name="f" id="format"><option value="">Any</option></select>
-      </label>
-      <label>Max price $
-        <input type="number" name="price" min="0" step="any" placeholder="any" aria-label="Maximum price in US dollars">
-      </label>
-    </div>
-
-    <button type="submit">Search</button>
-  </form>
-
-  <div id="status" role="status"></div>
-  <div id="gallery" class="gallery"></div>
-  <button id="more" hidden>Load more</button>
+    <footer>
+      <p>Card data and images from <a href="https://scryfall.com">Scryfall</a><span id="updated"></span>.
+        Card function tags from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.
+        Prices are Scryfall's USD prices (on result tiles, each card's cheapest printing), converted to CAD with
+        <a href="https://frankfurter.dev">Frankfurter</a>. <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">Source on GitHub</a>.</p>
+      <p>MTG Vec2Search is unofficial Fan Content permitted under the
+        <a href="https://company.wizards.com/en/legal/fancontentpolicy">Fan Content Policy</a>.
+        Not approved/endorsed by Wizards. Portions of the materials used are property of
+        Wizards of the Coast. ©Wizards of the Coast LLC.</p>
+    </footer>
+  </div>
 
   <dialog id="modal" aria-labelledby="modal-name">
-    <form method="dialog"><button class="close-button" aria-label="Close">×</button></form>
-    <div class="modal-left">
+    <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+    <div class="card-sheet-art">
       <div class="foil-wrapper" id="foil-wrapper"><img id="modal-img" alt=""></div>
-      <h2 id="modal-name"></h2>
-      <p id="modal-set"></p>
-      <p class="price-line" id="price"></p>
-      <label class="foil-toggle" id="foil-label" hidden><input type="checkbox" id="foil"> Show foil price</label>
-      <p><a id="scryfall-link" target="_blank" rel="noopener">View on Scryfall</a></p>
     </div>
-    <div class="modal-right">
-      <h3>All printings</h3>
-      <div id="printings"></div>
+    <div class="card-sheet-info">
+      <h2 id="modal-name"></h2>
+      <p class="muted" id="modal-type" style="margin:0"></p>
+      <p class="muted" id="modal-set" style="margin:0;font-size:15px"></p>
+      <div class="price-row">
+        <span class="price-line" id="price"></span>
+        <label class="switch" id="foil-label" hidden><input type="checkbox" id="foil"> Foil</label>
+      </div>
+      <span class="label">Printings</span>
+      <ul class="printings" id="printings"></ul>
+      <a id="scryfall-link" target="_blank" rel="noopener">View on Scryfall ↗</a>
     </div>
   </dialog>
 
   <dialog id="terms" aria-labelledby="terms-title">
-    <form method="dialog"><button class="close-button" aria-label="Close">×</button></form>
+    <form method="dialog"><button class="close" aria-label="Close">×</button></form>
     <h2 id="terms-title">All search terms</h2>
-    <p>Everything a card can be matched on. The number is how many cards have it; click one to search for it.</p>
-    <input type="search" id="term-filter" placeholder="Filter terms…" aria-label="Filter terms">
+    <p class="muted lede">Everything a card can be matched on, with how many cards have it. Pick one to search for it.</p>
+    <input type="search" id="term-filter" placeholder="Filter terms, e.g. tutor" aria-label="Filter terms">
     <div id="term-list"></div>
   </dialog>
-
-  <footer>
-    <p>Search runs entirely in your browser. Card data and images from
-      <a href="https://scryfall.com">Scryfall</a><span id="updated"></span>. Prices are Scryfall's
-      USD prices (on result tiles, each card's cheapest printing), converted to CAD with
-      <a href="https://frankfurter.dev">Frankfurter</a>. Card function tags
-      from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.
-      <a href="https://github.com/GrahamIrwin/MTG_Vec2Search">Source on GitHub</a>.</p>
-    <p>MTG Vec2Search is unofficial Fan Content permitted under the
-      <a href="https://company.wizards.com/en/legal/fancontentpolicy">Fan Content Policy</a>.
-      Not approved/endorsed by Wizards. Portions of the materials used are property of
-      Wizards of the Coast. ©Wizards of the Coast LLC.</p>
-  </footer>
 
   <script type="module" src="app.js"></script>
 </body>
