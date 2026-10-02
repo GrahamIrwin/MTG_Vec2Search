@@ -51,6 +51,16 @@ for (const input of form.elements) {
   if (input.type === "checkbox") input.checked = params.getAll(input.name).includes(input.value);
   else if (input.name && params.has(input.name)) input.value = params.get(input.name);
 }
+// Colorless excludes every color, so checking it clears and grays out the color pips
+const colorless = form.querySelector('[name="c"][value="C"]');
+const syncColorless = () => {
+  for (const pip of form.querySelectorAll('[name="c"]:not([value="C"])')) {
+    pip.disabled = colorless.checked;
+    if (colorless.checked) pip.checked = false;
+  }
+};
+colorless.addEventListener("change", syncColorless);
+syncColorless();
 form.addEventListener("submit", e => {
   e.preventDefault();
   const next = new URLSearchParams([...new FormData(form)].filter(([, v]) => v));

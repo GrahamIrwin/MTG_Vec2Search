@@ -192,8 +192,9 @@
       box-shadow: inset 0 -2px 0 rgb(0 0 0 / .18), 0 0 0 2px var(--paper-2), 0 0 0 4px var(--brass);
     }
     .pip input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 4px; }
+    .pip:has(input:disabled) { opacity: .35; pointer-events: none; }
     .pip-w { --pip: #f8f2d6; } .pip-u { --pip: #a9d7f2; } .pip-b { --pip: #c6bcb7; }
-    .pip-r { --pip: #f3a68c; } .pip-g { --pip: #9cd0ad; }
+    .pip-r { --pip: #f3a68c; } .pip-g { --pip: #9cd0ad; } .pip-c { --pip: #d4cfca; }
 
     .chips { display: flex; flex-wrap: wrap; gap: 8px; }
     .chip span {
@@ -412,6 +413,7 @@
                 <label class="pip pip-b" title="Black"><input type="checkbox" name="c" value="B" aria-label="Black"><span aria-hidden="true">B</span></label>
                 <label class="pip pip-r" title="Red"><input type="checkbox" name="c" value="R" aria-label="Red"><span aria-hidden="true">R</span></label>
                 <label class="pip pip-g" title="Green"><input type="checkbox" name="c" value="G" aria-label="Green"><span aria-hidden="true">G</span></label>
+                <label class="pip pip-c" title="Colorless"><input type="checkbox" name="c" value="C" aria-label="Colorless"><span aria-hidden="true">C</span></label>
               </div>
             </fieldset>
 
