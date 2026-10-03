@@ -107,6 +107,17 @@ python build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any ti
 gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber
 ```
 
+To fill in commanders the corpus barely has, top up the most played ones (by
+EDHREC rank) to a number of decks each, several at a time. Run one crawl at a
+time: they share the corpus file, and Archidekt answers 429 (everything pauses)
+past about 3 requests a second.
+
+```
+python build_decks.py crawl --top 3500 --per-commander 5 --rate 2    # enough for every commander first
+python build_decks.py crawl --top 3500 --per-commander 20 --rate 2   # then more
+gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber
+```
+
 ## The deck link Worker
 
 Deploy it once to a free Cloudflare account, then put the URL it prints in

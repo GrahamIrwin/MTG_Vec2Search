@@ -2,6 +2,7 @@
 it into site/decks/, the data behind "Find similar decks".
 
     python build_decks.py crawl --hours 5     # resumable: stop and restart any time
+    python build_decks.py crawl --top 3500 --per-commander 20 --rate 3   # fill in popular commanders
     python build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
@@ -10,6 +11,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -31,14 +33,17 @@ STATE = "crawl_state.json"  # when each commander was last crawled, so crawls ta
 
 
 _last = 0.0
+_lock = threading.Lock()
 
 
 def get_json(path):
-    """GET an Archidekt API path, at most one request per DELAY seconds, retrying on errors."""
+    """GET an Archidekt API path, at most one request per DELAY seconds (across threads), retrying on errors."""
     global _last
     for attempt in range(5):
-        time.sleep(max(0.0, _last + DELAY - time.time()))
-        _last = time.time()
+        with _lock:
+            _last = max(_last + DELAY, time.time())
+            wait = _last - time.time()
+        time.sleep(wait)
         try:
             with urllib.request.urlopen(urllib.request.Request(ARCHIDEKT + path, headers=HEADERS), timeout=60) as r:
                 body = r.read()
@@ -54,8 +59,9 @@ def get_json(path):
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             problem = f"didn't answer ({getattr(e, 'reason', e)})"
         wait = 30 * 2 ** attempt  # back off: 30s, 1m, 2m, 4m, 8m
+        with _lock:  # every thread backs off, not just this one
+            _last = max(_last, time.time() + wait)
         print(f"  ! Archidekt {problem}; trying again in {duration(wait)}", flush=True)
-        time.sleep(wait)
     raise RuntimeError(f"Archidekt keeps failing for {path}")
 
 
@@ -123,6 +129,18 @@ def card_names(oracle_file="oracle_cards.jsonl.gz"):
         return {c["oracle_id"]: c["name"] for c in map(json.loads, f) if c.get("oracle_id")}
 
 
+def top_commanders(n, oracle_file="oracle_cards.jsonl.gz"):
+    """(oracle id, name) of the n most played cards that can lead a Commander deck, by EDHREC rank."""
+    def can_lead(c):
+        front = c.get("type_line", "").split(" // ")[0]
+        text = c.get("oracle_text") or " ".join(f.get("oracle_text", "") for f in c.get("card_faces") or [])
+        return c.get("edhrec_rank") and c.get("legalities", {}).get("commander") == "legal" and (
+            ("Legendary" in front and "Creature" in front) or "can be your commander" in text)
+    with gzip.open(oracle_file, "rt", encoding="utf-8") as f:
+        cards = sorted((c for c in map(json.loads, f) if can_lead(c)), key=lambda c: c["edhrec_rank"])
+    return [(c["oracle_id"], c["name"]) for c in cards[:n]]
+
+
 def duration(seconds):
     """3725 -> "1h 2m", 95 -> "1m 35s"."""
     m, s = divmod(int(seconds), 60)
@@ -130,11 +148,15 @@ def duration(seconds):
     return f"{h}h {m}m" if h else f"{m}m {s}s" if m else f"{s}s"
 
 
-def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
+def crawl(per_commander, only=None, hours=None, top=None, path=CORPUS, state_path=STATE):
     """First the decks updated most recently (new decks, and new versions of ones we have), then up
     to per_commander more decks for each commander: commanders never crawled first (most common
-    in the corpus first), then the ones crawled longest ago, until `hours` run out."""
+    in the corpus first), then the ones crawled longest ago, until `hours` run out.
+    With `top`: instead, the `top` most played commanders, each topped up to per_commander decks,
+    several at once (as fast as DELAY allows)."""
     deadline = time.time() + hours * 3600 if hours else float("inf")
+    stop = threading.Event()  # Ctrl+C: threads finish their request but save nothing more
+    lock = threading.Lock()  # around the corpus, the file and the counts
     corpus = load_corpus(path)
     # Rewritten first too: decks appended after one cut off by a stopped crawl couldn't be read
     save_corpus(corpus, path)
@@ -159,13 +181,16 @@ def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
         def fetch(found, limit):
             added = 0
             for deck_id, updated in found:
-                if added >= limit or time.time() > deadline:
+                if added >= limit or time.time() > deadline or stop.is_set():
                     break
-                if have.get(deck_id, "") >= updated:  # already have this version
-                    continue
-                have[deck_id] = updated
+                with lock:
+                    if have.get(deck_id, "") >= updated:  # already have this version
+                        continue
+                    have[deck_id] = updated
                 deck = slim_deck(get_json(f"/decks/{deck_id}/") or {})
-                if deck:
+                with lock:
+                    if not deck or stop.is_set():
+                        continue
                     out.write(gzip.compress((json.dumps(deck, separators=(",", ":")) + "\n").encode()))
                     out.flush()
                     kind = "updated" if deck_id in corpus else "new"
@@ -177,12 +202,38 @@ def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
                           f"{lead[:40]:<40}  archidekt.com/decks/{deck_id}", flush=True)
             return added
 
+        def take_turns(queue):  # threads take commanders off the queue: [(name, decks wanted)]
+            jobs = iter(enumerate(queue, 1))
+
+            def work():
+                for i, (commander, want) in jobs:
+                    if time.time() > deadline or stop.is_set():
+                        return
+                    added = fetch(search_decks(commander), want)
+                    with lock:
+                        state[commander] = date.today().isoformat()
+                        with open(state_path, "w", encoding="utf-8") as f:
+                            json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
+                        print(f"[{i:,}/{len(queue):,}] {commander}: +{added} decks ({progress()})", flush=True)
+            # ponytail: 8 threads keep up with a few requests a second; DELAY is the real limit
+            threads = [threading.Thread(target=work, daemon=True) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                while t.is_alive():
+                    t.join(1)  # with a timeout, so Ctrl+C gets through on Windows
+
         try:
-            if not only:
+            if top:
+                count = Counter(o for d in corpus.values() for o in d["commanders"])
+                queue = [(name, per_commander - count[o]) for o, name in top_commanders(top) if count[o] < per_commander]
+                print(f"{len(queue):,} of the top {top:,} commanders have fewer than {per_commander} decks\n", flush=True)
+                take_turns(queue)
+            elif not only:
                 print("Recently updated decks on Archidekt:", flush=True)
                 print(f"Recently updated: +{fetch(search_decks(), float('inf'))} decks ({progress()})\n", flush=True)
             done = set()
-            while per_commander and time.time() < deadline:
+            while not top and per_commander and time.time() < deadline:
                 if only:
                     queue = [c for c in only if c not in done]
                 else:  # recounted each time: crawling one commander turns up decks for others
@@ -199,6 +250,8 @@ def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
                     json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
                 print(f"[{len(done)}] {commander}: +{added} decks ({progress()})\n", flush=True)
         except KeyboardInterrupt:
+            with lock:  # waits out a deck being written, and no thread writes another
+                stop.set()
             print("\nStopped. Everything fetched so far is saved.", flush=True)
 
     save_corpus(corpus, path)
@@ -274,10 +327,13 @@ if __name__ == "__main__":
                    help="new decks to fetch per commander (0: only recently updated decks)")
     c.add_argument("--only", nargs="*", help="crawl just these commanders (exact names)")
     c.add_argument("--hours", type=float, help="stop after this long")
+    c.add_argument("--top", type=int, help="instead: top up the N most played commanders to --per-commander decks each")
+    c.add_argument("--rate", type=float, default=1 / DELAY, help="requests a second (default: %(default)g)")
     sub.add_parser("build", help="write site/decks/ from the corpus")
     args = p.parse_args()
     sys.stdout.reconfigure(errors="replace")  # deck names with emoji can't crash a non-UTF-8 console
     if args.cmd == "crawl":
-        crawl(args.per_commander, args.only, args.hours)
+        DELAY = 1 / args.rate
+        crawl(args.per_commander, args.only, args.hours, args.top)
     else:
         build(load_corpus(), by_popularity(load_cards()))
