@@ -9,6 +9,7 @@ import gzip
 import json
 import os
 import shutil
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -49,9 +50,12 @@ def get_json(path):
                 return None
             if e.code not in (429, 500, 502, 503, 504):
                 raise
-        except (urllib.error.URLError, TimeoutError, ConnectionError):
-            pass
-        time.sleep(30 * 2 ** attempt)  # back off: 30s, 1m, 2m, 4m, 8m
+            problem = f"answered {e.code}"
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            problem = f"didn't answer ({getattr(e, 'reason', e)})"
+        wait = 30 * 2 ** attempt  # back off: 30s, 1m, 2m, 4m, 8m
+        print(f"  ! Archidekt {problem}; trying again in {duration(wait)}", flush=True)
+        time.sleep(wait)
     raise RuntimeError(f"Archidekt keeps failing for {path}")
 
 
@@ -119,6 +123,13 @@ def card_names(oracle_file="oracle_cards.jsonl.gz"):
         return {c["oracle_id"]: c["name"] for c in map(json.loads, f) if c.get("oracle_id")}
 
 
+def duration(seconds):
+    """3725 -> "1h 2m", 95 -> "1m 35s"."""
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m" if h else f"{m}m {s}s" if m else f"{s}s"
+
+
 def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
     """First the decks updated most recently (new decks, and new versions of ones we have), then up
     to per_commander more decks for each commander: commanders never crawled first (most common
@@ -132,7 +143,16 @@ def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
     if os.path.exists(state_path):
         with open(state_path, encoding="utf-8") as f:
             state = json.load(f)
-    print(f"{len(have)} decks already in {path}", flush=True)
+    names = card_names() if os.path.exists("oracle_cards.jsonl.gz") else {}  # from build_index.py
+    start, before = time.time(), len(corpus)
+    counts = {"new": 0, "updated": 0}
+    print(f"{len(corpus):,} decks in {path}" + (f"; crawling for {hours:g} hours" if hours else "")
+          + "\n  + new deck   ~ newer version of a deck we had\n", flush=True)
+
+    def progress():
+        rate = (counts["new"] + counts["updated"]) / max(time.time() - start, 1) * 3600
+        left = f", {duration(max(0, deadline - time.time()))} left" if hours else ""
+        return f"{len(corpus):,} decks, {rate:,.0f}/hour{left}"
 
     # Each deck is its own gzip member, so stopping the crawl can only cut off the last one
     with open(path, "ab") as out:
@@ -148,31 +168,43 @@ def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
                 if deck:
                     out.write(gzip.compress((json.dumps(deck, separators=(",", ":")) + "\n").encode()))
                     out.flush()
+                    kind = "updated" if deck_id in corpus else "new"
+                    counts[kind] += 1
                     corpus[deck_id] = deck
                     added += 1
+                    lead = " & ".join(names.get(o, "?") for o in deck["commanders"])
+                    print(f"  {'~' if kind == 'updated' else '+'} {len(corpus):>7,}  {deck['name'][:40]:<40}  "
+                          f"{lead[:40]:<40}  archidekt.com/decks/{deck_id}", flush=True)
             return added
 
-        if not only:
-            print(f"Recently updated: +{fetch(search_decks(), float('inf'))} decks", flush=True)
-            names = card_names()
-        done = set()
-        while per_commander and time.time() < deadline:
-            if only:
-                queue = [c for c in only if c not in done]
-            else:  # recounted each time: crawling one commander turns up decks for others
-                counts = Counter(names[o] for d in corpus.values() for o in d["commanders"] if o in names)
-                queue = sorted((c for c in counts if c not in done), key=lambda c: (state.get(c, ""), -counts[c]))
-            if not queue:
-                break
-            commander = queue[0]
-            done.add(commander)
-            added = fetch(search_decks(commander), per_commander)
-            state[commander] = date.today().isoformat()
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
-            print(f"[{len(done)}] {commander}: +{added} decks ({len(corpus)} in all)", flush=True)
+        try:
+            if not only:
+                print("Recently updated decks on Archidekt:", flush=True)
+                print(f"Recently updated: +{fetch(search_decks(), float('inf'))} decks ({progress()})\n", flush=True)
+            done = set()
+            while per_commander and time.time() < deadline:
+                if only:
+                    queue = [c for c in only if c not in done]
+                else:  # recounted each time: crawling one commander turns up decks for others
+                    by_lead = Counter(names[o] for d in corpus.values() for o in d["commanders"] if o in names)
+                    queue = sorted((c for c in by_lead if c not in done), key=lambda c: (state.get(c, ""), -by_lead[c]))
+                if not queue:
+                    break
+                commander = queue[0]
+                done.add(commander)
+                print(f"[{len(done)}] {commander}" + (f" (last crawled {state[commander]})" if commander in state else ""), flush=True)
+                added = fetch(search_decks(commander), per_commander)
+                state[commander] = date.today().isoformat()
+                with open(state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
+                print(f"[{len(done)}] {commander}: +{added} decks ({progress()})\n", flush=True)
+        except KeyboardInterrupt:
+            print("\nStopped. Everything fetched so far is saved.", flush=True)
 
     save_corpus(corpus, path)
+    print(f"Done in {duration(time.time() - start)}: {counts['new']:,} new decks, {counts['updated']:,} updated; "
+          f"{len(corpus):,} in {path} (was {before:,}).\n"
+          f"Share it with the site: gh release upload deck-corpus {path} {state_path} --clobber", flush=True)
 
 
 # === Build site/decks/ ===
@@ -244,6 +276,7 @@ if __name__ == "__main__":
     c.add_argument("--hours", type=float, help="stop after this long")
     sub.add_parser("build", help="write site/decks/ from the corpus")
     args = p.parse_args()
+    sys.stdout.reconfigure(errors="replace")  # deck names with emoji can't crash a non-UTF-8 console
     if args.cmd == "crawl":
         crawl(args.per_commander, args.only, args.hours)
     else:
