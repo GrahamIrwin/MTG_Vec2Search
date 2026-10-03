@@ -230,6 +230,11 @@ NO_PRICE = -1
 EPOCH, NO_DATE = date(1993, 1, 1), -1
 
 
+def by_popularity(cards):
+    """Card numbers in the index: most played first (EDHREC rank). build_decks.py uses them too."""
+    return sorted(cards, key=lambda c: (c.get("edhrec_rank") is None, c.get("edhrec_rank") or 0, c["name"]))
+
+
 def write_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -247,7 +252,7 @@ def build_index(cards, updated, tags, printings):
         for oracle_id in ids:
             tags_by_card.setdefault(oracle_id, []).append(tag)
 
-    cards = sorted(cards, key=lambda c: (c.get("edhrec_rank") is None, c.get("edhrec_rank") or 0, c["name"]))
+    cards = by_popularity(cards)
     postings = [[] for _ in terms]
     columns = {"identity": [], "types": [], "cmc": [], "legal": [], "price": []}
     for i, c in enumerate(cards):

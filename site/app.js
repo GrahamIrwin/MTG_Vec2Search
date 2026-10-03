@@ -3,6 +3,9 @@ import {
   isBudget, BUDGET_USD, SORTS, sortResults, randomSearches,
 } from "./search.js";
 import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.js";
+import {
+  nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
+} from "./deck.js";
 
 const PAGE_SIZE = 30;
 const CHUNK = 256; // cards per index/c/<chunk>.json (CHUNK in build_index.py)
@@ -21,7 +24,8 @@ const pick = list => list[Math.floor(Math.random() * list.length)];
 const $ = id => document.getElementById(id);
 const form = $("search");
 const params = new URLSearchParams(location.search);
-const searching = [...params.keys()].some(k => k !== "sort");
+const deckMode = params.has("deck");
+const searching = !deckMode && [...params.keys()].some(k => k !== "sort");
 
 function el(tag, props = {}, ...children) {
   const node = Object.assign(document.createElement(tag), props);
@@ -134,8 +138,11 @@ const message = text => {
   $("message").textContent = text;
   $("message").hidden = !text;
 };
-$("intro").hidden = searching;
+$("intro").hidden = searching || deckMode;
 $("results").hidden = !searching;
+form.hidden = deckMode;
+$("deck-view").hidden = !deckMode;
+$(deckMode ? "mode-deck" : "mode-cards").setAttribute("aria-current", "page");
 
 let index;
 let results = [];
@@ -209,6 +216,23 @@ async function cardInfo(card) {
   return { name, id };
 }
 
+// A card in a results gallery: image, name, price, a detail line and an optional bar (0 to 1)
+function cardTile(card, { name, id }, detail, bar, i) {
+  const price = index.columns.price[card];
+  const img = el("img", { alt: name, loading: "lazy", decoding: "async" });
+  img.onload = () => img.classList.add("loaded");
+  img.src = imageUrl(id);
+  const tile = el("button", { className: "card", type: "button", onclick: () => openCard(id) },
+    el("span", { className: "card-art" }, img),
+    el("span", { className: "card-name", textContent: name }),
+    el("span", { className: "card-meta" },
+      el("span", { textContent: price >= 0 ? money.formatUsd(price / 100) : "No price" }),
+      el("span", { textContent: detail })));
+  if (bar !== null) tile.append(el("span", { className: "match-bar" }, el("span", { style: `width:${bar * 100}%` })));
+  tile.style.setProperty("--i", i);
+  return tile;
+}
+
 let shown = 0;
 let loading = false;
 async function showMore() {
@@ -222,24 +246,9 @@ async function showMore() {
     return showMore();
   }
   page.forEach(({ card, score }, i) => {
-    const { name, id } = infos[i];
-    const price = index.columns.price[card];
-    const img = el("img", { alt: name, loading: "lazy", decoding: "async" });
-    img.onload = () => img.classList.add("loaded");
-    img.src = imageUrl(id);
     const detail = sortData.released && (sort === "newest" || sort === "oldest") ? String(year(sortData.released[card]))
       : score !== null ? `${Math.round(score * 100)}% match` : "";
-    const tile = el("button", { className: "card", type: "button", onclick: () => openCard(id) },
-      el("span", { className: "card-art" }, img),
-      el("span", { className: "card-name", textContent: name }),
-      el("span", { className: "card-meta" },
-        el("span", { textContent: price >= 0 ? money.formatUsd(price / 100) : "No price" }),
-        el("span", { textContent: detail })));
-    if (score !== null && sort === "match") {
-      tile.append(el("span", { className: "match-bar" }, el("span", { style: `width:${score * 100}%` })));
-    }
-    tile.style.setProperty("--i", i);
-    $("gallery").append(tile);
+    $("gallery").append(cardTile(card, infos[i], detail, score !== null && sort === "match" ? score : null, i));
   });
   shown += page.length;
   $("more").hidden = shown >= sorted.length;
@@ -353,6 +362,133 @@ function updatePrice() {
   $("price").textContent = !usd ? "No current price"
     : money.formatUsd(+usd) + (foil.checked ? " foil" : "")
       + (money.currency !== "USD" && money.rate ? `  ·  US$${usd}` : "");
+}
+
+// === Find similar decks (deck.js does the math, build_decks.py makes the data) ===
+const BASIC = /^(Snow-Covered )?(Plains|Island|Swamp|Mountain|Forest|Wastes)$/;
+const SHOW_DECKS = 20;
+const SHOW_ADDS = 30;
+const SHOW_CUTS = 16;
+const CUT_BELOW = 0.1; // played by under 10% of similar decks
+const deckMessage = text => {
+  $("deck-message").textContent = text;
+  $("deck-message").hidden = !text;
+};
+
+let deckData;
+function loadDeckData() {
+  deckData ??= Promise.all([getMeta(), getJson("index/columns.json"), getJson("index/names.json"),
+    getJson("decks/index.json"), usdRate(currency)])
+    .then(([meta, columns, names, decks, rate]) => {
+      money = moneyFormatter(currency, rate);
+      index = buildIndex(meta, columns);
+      return { names, lookup: nameLookup(names), decks, files: new Set(decks.commanders.map(c => c[0])) };
+    });
+  deckData.catch(() => (deckData = null)); // try again next time
+  return deckData;
+}
+const commanderNames = (key, names) => key.split("-").map(n => names[n]).join(" & ");
+const cardButton = (card, names, label = names[card]) =>
+  el("button", { type: "button", className: "term", textContent: label, onclick: async () => openCard((await cardInfo(card)).id) });
+
+// key: compare with this commander's decks instead of the pasted deck's own commander
+async function findSimilar(key) {
+  const text = $("decklist").value;
+  try { localStorage.setItem("decklist", text); } catch {}
+  $("deck-results").hidden = true;
+  deckMessage("Loading decks…");
+  const { names, lookup, decks, files } = await loadDeckData();
+  const parsed = parseDecklist(text, lookup);
+  // The commander: as marked in the list, or else the most-played commander among its cards
+  let commanders = parsed.commanders;
+  const guessed = !commanders.length && decks.commanders.find(([k]) => !k.includes("-") && parsed.cards.has(+k));
+  if (guessed) commanders = [+guessed[0]];
+  const mine = [...parsed.cards].filter(c => !BASIC.test(names[c]) && !commanders.includes(c));
+  if (!mine.length) return deckMessage("Couldn't find any card names in that list. Paste one card per line, like “1 Sol Ring”.");
+
+  const ownKey = commanders.length ? [...commanders].sort((a, b) => a - b).join("-") : null;
+  const closest = closestCommanders(decks, mine, 8);
+  key ??= files.has(ownKey) ? ownKey : closest[0]?.key;
+  if (!key) return deckMessage("Couldn't find any decks like this one yet.");
+  const count = decks.commanders.find(c => c[0] === key)[1];
+  const shard = decodeShard(await getJson(`decks/${key}.json`));
+  const similar = similarDecks(shard, mine);
+  const { adds, cuts, neighbors } = recommend(shard, similar, mine);
+
+  // Summary: whose decks these are, and what was (and wasn't) recognized
+  const lead = commanderNames(key, names);
+  const summary = [el("span", { className: "label", textContent: "Compared with" }),
+    el("span", { className: "term-chip", textContent: `${count.toLocaleString()} ${lead} decks` })];
+  const note = text => summary.push(el("span", { className: "muted", textContent: text }));
+  if (ownKey && key !== ownKey && !files.has(ownKey)) {
+    note(`There aren't enough ${commanderNames(ownKey, names)} decks yet, so these are the closest commander's.`);
+  } else if (!ownKey) {
+    note("No commander found in your list. Mark it with *CMDR* to compare with its decks.");
+  } else if (guessed && key === ownKey) {
+    note("Guessed your commander. Mark it with *CMDR* if that's wrong.");
+  }
+  if (parsed.unknown.length) {
+    summary.push(el("span", { className: "muted", title: parsed.unknown.join("\n"),
+      textContent: `${parsed.unknown.length} unrecognized ${parsed.unknown.length === 1 ? "line" : "lines"}` }));
+  }
+  $("deck-summary").replaceChildren(...summary);
+
+  // Similar decks, each opening to the cards they play that yours doesn't
+  const have = new Set(mine);
+  $("similar").replaceChildren(...foldCopies(similar.filter(r => r.similarity > 0), SHOW_DECKS).map(r => {
+    const meta = `${r.shared} cards in common · updated ${r.deck.updated}`
+      + (r.copies ? ` · ${r.copies} near-${r.copies === 1 ? "copy" : "copies"}` : "");
+    const details = el("details", {},
+      el("summary", {},
+        el("span", { className: "sim", textContent: `${Math.round(r.similarity * 100)}%` }),
+        el("span", { className: "deck-name", textContent: r.deck.name || "Untitled deck" }),
+        el("a", { className: "open", href: `https://archidekt.com/decks/${r.deck.id}`, target: "_blank", rel: "noopener", textContent: "Archidekt ↗" }),
+        el("span", { className: "deck-meta", textContent: meta })));
+    details.addEventListener("toggle", () => {
+      const theirs = [...r.deck.cards].map(p => shard.cards[p]).filter(c => !have.has(c)).sort((a, b) => a - b);
+      details.append(el("div", { className: "deck-body" },
+        el("p", { textContent: theirs.length ? `${theirs.length} cards they play that you don't, most popular first:` : "They play no cards you don't." }),
+        el("div", { className: "term-items" }, ...theirs.map(c => cardButton(c, names)))));
+    }, { once: true });
+    return el("li", {}, details);
+  }));
+
+  // Recommendations, within the deck's color identity
+  const { identity } = index.columns;
+  const colors = (commanders.length ? commanders : [...parsed.cards]).reduce((m, c) => m | identity[c], 0);
+  const picks = adds.filter(a => (identity[a.card] & ~colors) === 0).slice(0, SHOW_ADDS);
+  $("adds-lede").textContent = `What the ${neighbors} decks most like yours play that yours doesn't, favoring cards they play more than most ${lead} decks do.`;
+  const infos = await Promise.all(picks.map(a => cardInfo(a.card)));
+  $("adds").replaceChildren(...picks.map((a, i) =>
+    cardTile(a.card, infos[i], `in ${a.decks} of ${neighbors} decks`, a.decks / neighbors, i)));
+  // Cuts only make sense against decks with your own commander: another's never play its cards
+  $("cuts-section").hidden = key !== ownKey;
+  const rare = cuts.filter(c => c.share < CUT_BELOW).slice(0, SHOW_CUTS);
+  $("cuts").replaceChildren(...(rare.length
+    ? rare.map(c => cardButton(c.card, names, `${names[c.card]} · ${Math.round(c.share * 100)}%`))
+    : [el("span", { className: "muted", textContent: "None: similar decks play almost all of your cards." })]));
+
+  // Other commanders, to compare with their decks instead
+  const others = closest.filter(c => c.key !== key);
+  if (files.has(ownKey) && key !== ownKey) others.unshift({ key: ownKey, decks: decks.commanders.find(c => c[0] === ownKey)[1] });
+  $("others-section").hidden = !others.length;
+  $("others").replaceChildren(...others.slice(0, 8).map(c => el("button", {
+    type: "button", className: "term", onclick: () => findSimilar(c.key).then(() => $("deck-results").scrollIntoView()),
+  }, commanderNames(c.key, names), el("small", { textContent: c.decks.toLocaleString() }))));
+
+  deckMessage("");
+  $("deck-results").hidden = false;
+}
+
+if (deckMode) {
+  try { $("decklist").value = localStorage.getItem("decklist") ?? ""; } catch {}
+  $("deck-form").addEventListener("submit", e => {
+    e.preventDefault();
+    findSimilar().catch(err => {
+      console.error(err);
+      deckMessage("Couldn't load the deck data. Please try again.");
+    });
+  });
 }
 
 // === Start: everything above is set up, so run the search in the URL ===
