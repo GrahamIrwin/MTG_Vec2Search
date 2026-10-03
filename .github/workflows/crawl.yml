@@ -1,0 +1,29 @@
+name: Crawl decks
+
+# Adds public Commander decks from Archidekt to the deck corpus, which lives on the
+# "deck-corpus" release (too big for git). Monday's "Build and deploy" picks them up.
+on:
+  schedule:
+    - cron: "0 2 * * 0" # weekly (Sunday)
+  workflow_dispatch: # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write # to update the release
+
+concurrency:
+  group: crawl
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: gh release download deck-corpus
+      - run: python3 -c "import build_index; build_index.download_bulk_data()" # card names for commanders
+      - run: python3 build_decks.py crawl --hours 5
+      # A failed crawl keeps what it fetched (each deck is saved as it arrives)
+      - if: ${{ !cancelled() }}
+        run: gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber

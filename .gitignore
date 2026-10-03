@@ -1,6 +1,9 @@
 # Generated card data — rebuild with: python build_index.py
 *.jsonl.gz
 site/index/
+# Deck corpus (kept on the deck-corpus release) and what's built from it: python build_decks.py
+crawl_state.json
+site/decks/
 node_modules/
 
 __pycache__/
