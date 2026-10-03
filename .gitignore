@@ -7,3 +7,6 @@ site/decks/
 node_modules/
 
 __pycache__/
+
+# Wrangler (Cloudflare) local state
+.wrangler/
