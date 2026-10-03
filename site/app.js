@@ -367,7 +367,7 @@ function updatePrice() {
 // === Deck recommendations (deck.js does the math, build_decks.py makes the data) ===
 // Moxfield and Archidekt links are read by a small Cloudflare Worker (worker/deck-link.js):
 // neither site lets other sites' pages call its API directly.
-const DECK_LINK = "https://mtg-deck-link.shining-bronze.workers.dev";
+const DECK_LINK = "https://mtg-deck-link.grahamirwin.workers.dev";
 const LINK = /^https?:\/\/(?:www\.)?(?:moxfield|archidekt)\.com\/\S+$/i;
 const BASIC = /^(Snow-Covered )?(Plains|Island|Swamp|Mountain|Forest|Wastes)$/;
 const MAX_ADDS = 150;

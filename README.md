@@ -118,7 +118,7 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-It only answers the site (and `localhost:8000`), and only fetches Moxfield and
+It only answers the site (and localhost, for testing), and only fetches Moxfield and
 Archidekt deck pages, one per request, cached for 10 minutes.
 
 ## Running locally

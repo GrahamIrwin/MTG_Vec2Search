@@ -3,7 +3,8 @@
 //   GET /?url=https://moxfield.com/decks/abc123  ->  { name, site, list: "1 Atraxa, Praetors' Voice *CMDR*\n1 Sol Ring\n..." }
 // It fetches only the one deck it's asked for, as itself (no crawling, no pretending to be a browser).
 const UA = "MTG_Vec2Search/1.0 (+https://github.com/grahamirwin/MTG_Vec2Search)";
-const ORIGINS = ["https://grahamirwin.github.io", "http://localhost:8000"];
+const SITE = "https://grahamirwin.github.io";
+const allowed = origin => origin === SITE || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? ""); // + local testing
 
 const SITES = [
   {
@@ -44,7 +45,7 @@ export default {
   async fetch(request) {
     const origin = request.headers.get("Origin");
     const cors = {
-      "Access-Control-Allow-Origin": ORIGINS.includes(origin) ? origin : ORIGINS[0],
+      "Access-Control-Allow-Origin": allowed(origin) ? origin : SITE,
       "Content-Type": "application/json",
       Vary: "Origin",
     };
