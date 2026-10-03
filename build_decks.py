@@ -107,6 +107,13 @@ def load_corpus(path=CORPUS):
     return decks
 
 
+def save_corpus(corpus, path=CORPUS):
+    """One gzip stream, without replaced copies of decks (about half the size)."""
+    with gzip.open(path + ".tmp", "wt", encoding="utf-8") as f:
+        f.writelines(json.dumps(d, separators=(",", ":")) + "\n" for d in corpus.values())
+    os.replace(path + ".tmp", path)
+
+
 def card_names(oracle_file="oracle_cards.jsonl.gz"):
     with gzip.open(oracle_file, "rt", encoding="utf-8") as f:
         return {c["oracle_id"]: c["name"] for c in map(json.loads, f) if c.get("oracle_id")}
@@ -118,6 +125,8 @@ def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
     in the corpus first), then the ones crawled longest ago, until `hours` run out."""
     deadline = time.time() + hours * 3600 if hours else float("inf")
     corpus = load_corpus(path)
+    # Rewritten first too: decks appended after one cut off by a stopped crawl couldn't be read
+    save_corpus(corpus, path)
     have = {i: d["updated"] for i, d in corpus.items()}
     state = {}
     if os.path.exists(state_path):
@@ -163,10 +172,7 @@ def crawl(per_commander, only=None, hours=None, path=CORPUS, state_path=STATE):
                 json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
             print(f"[{len(done)}] {commander}: +{added} decks ({len(corpus)} in all)", flush=True)
 
-    # Done: rewrite as one gzip stream without replaced copies (about half the size)
-    with gzip.open(path + ".tmp", "wt", encoding="utf-8") as f:
-        f.writelines(json.dumps(d, separators=(",", ":")) + "\n" for d in corpus.values())
-    os.replace(path + ".tmp", path)
+    save_corpus(corpus, path)
 
 
 # === Build site/decks/ ===
@@ -232,7 +238,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("crawl", help="download decks from Archidekt into the corpus")
-    c.add_argument("--per-commander", type=int, default=300,
+    c.add_argument("--per-commander", type=int, default=100,
                    help="new decks to fetch per commander (0: only recently updated decks)")
     c.add_argument("--only", nargs="*", help="crawl just these commanders (exact names)")
     c.add_argument("--hours", type=float, help="stop after this long")

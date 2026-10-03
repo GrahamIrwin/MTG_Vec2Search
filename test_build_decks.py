@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 
-from build_decks import build, load_corpus, slim_deck
+from build_decks import build, load_corpus, save_corpus, slim_deck
 
 
 def entry(uid, categories, quantity=1):
@@ -36,6 +36,11 @@ with tempfile.TemporaryDirectory() as tmp:
         f.write(cut[:len(cut) // 2])
     corpus = load_corpus(path)
     assert sorted(corpus) == [7, 8] and corpus[7]["name"] == "Newer", corpus.keys()
+    # A crawl rewrites the corpus before appending, or decks after the cut-off one would be lost
+    save_corpus(corpus, path)
+    with open(path, "ab") as f:
+        f.write(gzip.compress((json.dumps({**deck, "id": 10}) + "\n").encode()))
+    assert sorted(load_corpus(path)) == [7, 8, 10]
 
     # Cards in index order: 0 = the commander, 1 = a basic land, then c0..c96
     cards = [{"oracle_id": "cmdr", "type_line": "Legendary Creature"}, {"oracle_id": "island", "type_line": "Basic Land — Island"}]
