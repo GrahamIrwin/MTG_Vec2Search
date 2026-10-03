@@ -66,3 +66,35 @@ test("closest commanders by signature cards", () => {
   const index = { commanders: [["1", 300, [5, 6, 7]], ["2", 50, [5, 6, 8]], ["3", 900, [9]]] };
   assert.deepEqual(closestCommanders(index, [5, 6, 8]).map(c => c.key), ["2", "1"]);
 });
+
+test("deck link worker: Moxfield and Archidekt decks become plain decklists", async () => {
+  const { default: worker } = await import("./worker/deck-link.js");
+  const realFetch = globalThis.fetch;
+  const card = (name, quantity = 1) => ({ quantity, card: { name } });
+  const responses = {
+    "https://api2.moxfield.com/v3/decks/all/abc": { name: "Goblins", boards: {
+      commanders: { cards: { a: card("Krenko, Mob Boss") } },
+      mainboard: { cards: { b: card("Sol Ring"), c: card("Mountain", 30) } },
+      maybeboard: { cards: { d: card("Swords to Plowshares") } } } },
+    "https://archidekt.com/api/decks/42/": { name: "Atraxa", categories: [{ name: "Maybeboard", includedInDeck: false }],
+      cards: [["Atraxa, Praetors' Voice", ["Commander"]], ["Sol Ring", ["Ramp"]], ["Doubling Season", ["Maybeboard"]]]
+        .map(([name, categories]) => ({ quantity: 1, categories, card: { oracleCard: { name } } })) },
+  };
+  globalThis.fetch = async url => (responses[url] ? new Response(JSON.stringify(responses[url])) : new Response("{}", { status: 404 }));
+  const ask = async link => {
+    const res = await worker.fetch(new Request(`https://w/?url=${encodeURIComponent(link)}`, { headers: { Origin: "http://localhost:8000" } }));
+    return [res.status, await res.json(), res.headers.get("Access-Control-Allow-Origin")];
+  };
+  try {
+    const [status, mox, origin] = await ask("https://www.moxfield.com/decks/abc");
+    assert.equal(status, 200);
+    assert.equal(origin, "http://localhost:8000");
+    assert.deepEqual(mox, { name: "Goblins", site: "Moxfield", list: "1 Krenko, Mob Boss *CMDR*\n1 Sol Ring\n30 Mountain" });
+    const [, arch] = await ask("https://archidekt.com/decks/42/atraxa");
+    assert.equal(arch.list, "1 Atraxa, Praetors' Voice *CMDR*\n1 Sol Ring");
+    assert.equal((await ask("https://moxfield.com/decks/missing"))[0], 404);
+    assert.equal((await ask("https://example.com/decks/1"))[0], 400);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

@@ -386,6 +386,14 @@
     .deck-list .deck-body p { margin: 10px 0 6px; font-size: 15px; color: var(--ink-soft); }
     @media (max-width: 600px) { .deck-list summary { grid-template-columns: 3.4em 1fr; } .deck-list summary > a.open { grid-column: 2; } }
     button.term { cursor: pointer; font: inherit; font-size: 15px; }
+    .type-filter { margin: 4px 0 2px; }
+    .type-filter button {
+      cursor: pointer; padding: 5px 14px; border-radius: 999px; font-size: 15.5px;
+      border: 1px solid var(--rule); background: var(--paper); transition: background .15s, border-color .15s;
+    }
+    .type-filter button:hover { border-color: var(--brass); }
+    .type-filter button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+    .type-filter small { margin-left: 5px; opacity: .75; font-variant-numeric: tabular-nums; }
 
     /* ---------- Footer ---------- */
     .colophon { max-width: 980px; margin: 84px auto 0; padding-bottom: 44px; font-size: 15px; line-height: 1.6; color: var(--ink-soft); }
@@ -424,7 +432,7 @@
       <p class="tagline">A plain-English card catalogue</p>
       <nav class="modes" aria-label="What to search">
         <a href="./" id="mode-cards">Find cards</a>
-        <a href="?deck" id="mode-deck">Find similar decks</a>
+        <a href="?deck" id="mode-deck">Deck recommendations</a>
       </nav>
     </header>
 
@@ -534,27 +542,31 @@
 
       <section class="deck-view" id="deck-view" hidden>
         <form id="deck-form">
-          <label class="label" for="decklist">Your Commander decklist</label>
-          <textarea id="decklist" rows="12" spellcheck="false" required
-                    placeholder="Paste a decklist exported from Moxfield, Archidekt, Arena…&#10;1 Atraxa, Praetors' Voice *CMDR*&#10;1 Sol Ring&#10;1 Doubling Season"></textarea>
+          <label class="label" for="decklist">Your Commander deck</label>
+          <textarea id="decklist" rows="10" spellcheck="false" required
+                    placeholder="Paste a Moxfield or Archidekt link, or a decklist&#10;https://moxfield.com/decks/…&#10;&#10;1 Atraxa, Praetors' Voice *CMDR*&#10;1 Sol Ring"></textarea>
           <div class="deck-actions">
             <span class="muted" id="deck-note">Compared with public Commander decks on <a href="https://archidekt.com">Archidekt</a>.</span>
-            <button type="submit" class="btn-primary">Find similar decks</button>
+            <button type="submit" class="btn-primary">Get recommendations</button>
           </div>
         </form>
         <p class="message" id="deck-message" hidden></p>
         <div id="deck-results" hidden>
           <div class="results-head"><div class="recognized" id="deck-summary"></div></div>
-          <h2 class="deck-heading">Similar decks</h2>
-          <ol class="deck-list" id="similar"></ol>
-          <h2 class="deck-heading">Cards to consider</h2>
+          <h2 class="deck-heading">Cards to add</h2>
           <p class="muted deck-lede" id="adds-lede"></p>
+          <div class="chips type-filter" id="add-types" role="group" aria-label="Card type"></div>
           <div class="gallery" id="adds"></div>
+          <div class="more-wrap"><button id="more-adds" class="btn-quiet" type="button" hidden>Show more</button></div>
           <div id="cuts-section">
-            <h2 class="deck-heading">Cards to reconsider</h2>
+            <h2 class="deck-heading">Cards to cut</h2>
             <p class="muted deck-lede">Your cards that the most similar decks rarely play.</p>
             <div class="term-items" id="cuts"></div>
           </div>
+          <h2 class="deck-heading">The decks behind these picks</h2>
+          <p class="muted deck-lede">The decks most like yours. Open one to see what it plays that yours doesn't.</p>
+          <ol class="deck-list" id="similar"></ol>
+          <div class="more-wrap"><button id="more-decks" class="btn-quiet" type="button" hidden>Show more decks</button></div>
           <div id="others-section">
             <h2 class="deck-heading">Decks like yours with other commanders</h2>
             <p class="muted deck-lede">Commanders whose decks play the most of your cards. Pick one to compare with their decks.</p>
@@ -575,7 +587,8 @@
         <section>
           <h2 class="label">What cards do</h2>
           <p>Function tags from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.
-            Similar decks from public decklists on <a href="https://archidekt.com">Archidekt</a>.</p>
+            Deck recommendations from public decklists on <a href="https://archidekt.com">Archidekt</a>;
+            deck links from <a href="https://moxfield.com">Moxfield</a> and Archidekt.</p>
         </section>
         <section>
           <h2 class="label">Prices</h2>

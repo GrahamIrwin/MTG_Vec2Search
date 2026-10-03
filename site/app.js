@@ -364,12 +364,21 @@ function updatePrice() {
       + (money.currency !== "USD" && money.rate ? `  ·  US$${usd}` : "");
 }
 
-// === Find similar decks (deck.js does the math, build_decks.py makes the data) ===
+// === Deck recommendations (deck.js does the math, build_decks.py makes the data) ===
+// Moxfield and Archidekt links are read by a small Cloudflare Worker (worker/deck-link.js):
+// neither site lets other sites' pages call its API directly.
+const DECK_LINK = "https://mtg-deck-link.shining-bronze.workers.dev";
+const LINK = /^https?:\/\/(?:www\.)?(?:moxfield|archidekt)\.com\/\S+$/i;
 const BASIC = /^(Snow-Covered )?(Plains|Island|Swamp|Mountain|Forest|Wastes)$/;
-const SHOW_DECKS = 20;
-const SHOW_ADDS = 30;
+const MAX_ADDS = 150;
+const PAGE_ADDS = 30;
+const MAX_DECKS = 30;
+const PAGE_DECKS = 10;
 const SHOW_CUTS = 16;
 const CUT_BELOW = 0.1; // played by under 10% of similar decks
+// A card counts as its first type here: an artifact creature is a creature
+const TYPE_ORDER = ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land"];
+const TYPE_PLURALS = { Sorcery: "Sorceries" };
 const deckMessage = text => {
   $("deck-message").textContent = text;
   $("deck-message").hidden = !text;
@@ -391,14 +400,37 @@ const commanderNames = (key, names) => key.split("-").map(n => names[n]).join(" 
 const cardButton = (card, names, label = names[card]) =>
   el("button", { type: "button", className: "term", textContent: label, onclick: async () => openCard((await cardInfo(card)).id) });
 
-// key: compare with this commander's decks instead of the pasted deck's own commander
+// The decklist to compare: what was pasted, or the list behind a pasted link.
+// Returns { list, name?, site? }, or { error }.
+let fetched = { link: null };
+async function readDeck(input) {
+  const link = input.trim();
+  if (!LINK.test(link)) return { list: input };
+  if (fetched.link === link) return fetched; // switching commanders doesn't fetch it again
+  deckMessage("Fetching the deck…");
+  try {
+    const res = await fetch(`${DECK_LINK}/?url=${encodeURIComponent(link)}`);
+    const data = await res.json();
+    if (!res.ok) return { error: data.error };
+    fetched = { ...data, link };
+    return fetched;
+  } catch {
+    return { error: "Couldn't fetch that deck. Try again, or paste its list." };
+  }
+}
+
+// key: compare with this commander's decks instead of the deck's own commander
 async function findSimilar(key) {
-  const text = $("decklist").value;
-  try { localStorage.setItem("decklist", text); } catch {}
+  const input = $("decklist").value;
+  try { localStorage.setItem("decklist", input); } catch {}
+  // A link goes in the address bar, so the page can be shared or bookmarked
+  history.replaceState(null, "", "?" + new URLSearchParams({ deck: LINK.test(input.trim()) ? input.trim() : "" }));
   $("deck-results").hidden = true;
+  const deck = await readDeck(input);
+  if (deck.error) return deckMessage(deck.error);
   deckMessage("Loading decks…");
   const { names, lookup, decks, files } = await loadDeckData();
-  const parsed = parseDecklist(text, lookup);
+  const parsed = parseDecklist(deck.list, lookup);
   // The commander: as marked in the list, or else the most-played commander among its cards
   let commanders = parsed.commanders;
   const guessed = !commanders.length && decks.commanders.find(([k]) => !k.includes("-") && parsed.cards.has(+k));
@@ -415,11 +447,13 @@ async function findSimilar(key) {
   const similar = similarDecks(shard, mine);
   const { adds, cuts, neighbors } = recommend(shard, similar, mine);
 
-  // Summary: whose decks these are, and what was (and wasn't) recognized
+  // Summary: which deck, whose decks it's compared with, and what wasn't recognized
   const lead = commanderNames(key, names);
-  const summary = [el("span", { className: "label", textContent: "Compared with" }),
-    el("span", { className: "term-chip", textContent: `${count.toLocaleString()} ${lead} decks` })];
+  const summary = [];
   const note = text => summary.push(el("span", { className: "muted", textContent: text }));
+  if (deck.site) summary.push(el("span", { className: "term-chip", textContent: `${deck.name} (${deck.site})` }));
+  summary.push(el("span", { className: "label", textContent: "compared with" }),
+    el("span", { className: "term-chip", textContent: `${count.toLocaleString()} ${lead} decks` }));
   if (ownKey && key !== ownKey && !files.has(ownKey)) {
     note(`There aren't enough ${commanderNames(ownKey, names)} decks yet, so these are the closest commander's.`);
   } else if (!ownKey) {
@@ -433,9 +467,26 @@ async function findSimilar(key) {
   }
   $("deck-summary").replaceChildren(...summary);
 
-  // Similar decks, each opening to the cards they play that yours doesn't
+  // Cards to add, within the deck's color identity, filterable by type
+  const { identity, types } = index.columns;
+  const colors = (commanders.length ? commanders : [...parsed.cards]).reduce((m, c) => m | identity[c], 0);
+  const typeOf = card => TYPE_ORDER.find(t => types[card] & (1 << index.types.indexOf(t))) ?? "Other";
+  const picks = adds.filter(a => (identity[a.card] & ~colors) === 0).slice(0, MAX_ADDS)
+    .map(a => ({ ...a, type: typeOf(a.card) }));
+  $("adds-lede").textContent = `What the ${neighbors} decks most like yours play that yours doesn't, favoring cards they play more than most ${lead} decks do.`;
+  addView = { picks, neighbors, type: "All", shown: PAGE_ADDS };
+  await showAdds();
+
+  // Cuts only make sense against decks with your own commander: another's never play its cards
+  $("cuts-section").hidden = key !== ownKey;
+  const rare = cuts.filter(c => c.share < CUT_BELOW).slice(0, SHOW_CUTS);
+  $("cuts").replaceChildren(...(rare.length
+    ? rare.map(c => cardButton(c.card, names, `${names[c.card]} · ${Math.round(c.share * 100)}%`))
+    : [el("span", { className: "muted", textContent: "None: similar decks play almost all of your cards." })]));
+
+  // The similar decks, each opening to the cards they play that yours doesn't
   const have = new Set(mine);
-  $("similar").replaceChildren(...foldCopies(similar.filter(r => r.similarity > 0), SHOW_DECKS).map(r => {
+  const items = foldCopies(similar.filter(r => r.similarity > 0), MAX_DECKS).map((r, i) => {
     const meta = `${r.shared} cards in common · updated ${r.deck.updated}`
       + (r.copies ? ` · ${r.copies} near-${r.copies === 1 ? "copy" : "copies"}` : "");
     const details = el("details", {},
@@ -450,23 +501,14 @@ async function findSimilar(key) {
         el("p", { textContent: theirs.length ? `${theirs.length} cards they play that you don't, most popular first:` : "They play no cards you don't." }),
         el("div", { className: "term-items" }, ...theirs.map(c => cardButton(c, names)))));
     }, { once: true });
-    return el("li", {}, details);
-  }));
-
-  // Recommendations, within the deck's color identity
-  const { identity } = index.columns;
-  const colors = (commanders.length ? commanders : [...parsed.cards]).reduce((m, c) => m | identity[c], 0);
-  const picks = adds.filter(a => (identity[a.card] & ~colors) === 0).slice(0, SHOW_ADDS);
-  $("adds-lede").textContent = `What the ${neighbors} decks most like yours play that yours doesn't, favoring cards they play more than most ${lead} decks do.`;
-  const infos = await Promise.all(picks.map(a => cardInfo(a.card)));
-  $("adds").replaceChildren(...picks.map((a, i) =>
-    cardTile(a.card, infos[i], `in ${a.decks} of ${neighbors} decks`, a.decks / neighbors, i)));
-  // Cuts only make sense against decks with your own commander: another's never play its cards
-  $("cuts-section").hidden = key !== ownKey;
-  const rare = cuts.filter(c => c.share < CUT_BELOW).slice(0, SHOW_CUTS);
-  $("cuts").replaceChildren(...(rare.length
-    ? rare.map(c => cardButton(c.card, names, `${names[c.card]} · ${Math.round(c.share * 100)}%`))
-    : [el("span", { className: "muted", textContent: "None: similar decks play almost all of your cards." })]));
+    return el("li", { hidden: i >= PAGE_DECKS }, details);
+  });
+  $("similar").replaceChildren(...items);
+  $("more-decks").hidden = items.length <= PAGE_DECKS;
+  $("more-decks").onclick = () => {
+    items.forEach(li => (li.hidden = false));
+    $("more-decks").hidden = true;
+  };
 
   // Other commanders, to compare with their decks instead
   const others = closest.filter(c => c.key !== key);
@@ -480,15 +522,43 @@ async function findSimilar(key) {
   $("deck-results").hidden = false;
 }
 
+// Cards to add: the type filter and the gallery, PAGE_ADDS cards at a time
+let addView;
+async function showAdds() {
+  const view = addView;
+  const counts = {};
+  for (const p of view.picks) counts[p.type] = (counts[p.type] ?? 0) + 1;
+  const label = t => (t === "All" ? "All" : TYPE_PLURALS[t] ?? `${t}s`);
+  $("add-types").replaceChildren(...["All", ...TYPE_ORDER, "Other"].filter(t => t === "All" || counts[t]).map(t =>
+    el("button", {
+      type: "button", ariaPressed: String(view.type === t),
+      onclick: () => { addView = { ...view, type: t, shown: PAGE_ADDS }; showAdds(); },
+    }, label(t), el("small", { textContent: t === "All" ? view.picks.length : counts[t] }))));
+  const list = view.type === "All" ? view.picks : view.picks.filter(p => p.type === view.type);
+  const page = list.slice(0, view.shown);
+  const infos = await Promise.all(page.map(a => cardInfo(a.card)));
+  if (view !== addView) return; // filtered again while loading
+  $("adds").replaceChildren(...page.map((a, i) =>
+    cardTile(a.card, infos[i], `in ${a.decks} of ${view.neighbors} decks`, a.decks / view.neighbors, i % PAGE_ADDS)));
+  $("more-adds").hidden = view.shown >= list.length;
+}
+$("more-adds").onclick = () => {
+  addView = { ...addView, shown: addView.shown + PAGE_ADDS };
+  showAdds();
+};
+
 if (deckMode) {
-  try { $("decklist").value = localStorage.getItem("decklist") ?? ""; } catch {}
+  const link = params.get("deck");
+  try { $("decklist").value = link || (localStorage.getItem("decklist") ?? ""); } catch { $("decklist").value = link; }
+  const run = () => findSimilar().catch(err => {
+    console.error(err);
+    deckMessage("Couldn't load the deck data. Please try again.");
+  });
   $("deck-form").addEventListener("submit", e => {
     e.preventDefault();
-    findSimilar().catch(err => {
-      console.error(err);
-      deckMessage("Couldn't load the deck data. Please try again.");
-    });
+    run();
   });
+  if (link) run(); // a shared ?deck=<link>
 }
 
 // === Start: everything above is set up, so run the search in the URL ===

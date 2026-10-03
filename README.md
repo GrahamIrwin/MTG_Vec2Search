@@ -2,8 +2,9 @@
 
 Search Magic: The Gathering cards by describing them in plain English
 ("cheap green elves that ramp"), with filters for color identity, card type,
-mana value, format and price. Or paste a Commander decklist to find similar
-decks on Archidekt, and which cards they play that yours doesn't. Dark mode by
+mana value, format and price. Or paste a Commander deck (a Moxfield or
+Archidekt link, or a decklist) to see which cards similar decks play that
+yours doesn't. Dark mode by
 default. It's a static site: all the heavy lifting happens at build time, and a
 search only downloads the small pieces of the index it needs (~200 KB the first
 time, a few KB after that).
@@ -57,8 +58,8 @@ time, a few KB after that).
    least 75% as good a match as the best one are kept.
 
    **Browse all search terms** on the page lists every term with its card count.
-3. **Find similar decks** compares a pasted Commander decklist with public decks
-   from [Archidekt](https://archidekt.com):
+3. **Deck recommendations** compares a Commander deck with public decks from
+   [Archidekt](https://archidekt.com):
    - `build_decks.py crawl` downloads decks through Archidekt's API (one request a
      second) into `decks.jsonl.gz`: each deck's commanders and cards, by Scryfall
      oracle id. It takes the recently updated decks first, then takes turns
@@ -76,6 +77,11 @@ time, a few KB after that).
      similarity, minus half of how often any deck with that commander plays the
      card, so the list is what decks like yours play more than usual rather than
      staples. **Cards to reconsider** are yours that similar decks rarely play.
+   - A pasted Moxfield or Archidekt link is read by `worker/deck-link.js`, a
+     small Cloudflare Worker: neither site's API can be called from another
+     site's page (CORS). It fetches just that one deck and returns it as a
+     plain decklist. A link also goes in the address bar (`?deck=<link>`), so
+     results can be shared.
    - A commander with too few decks is compared with the commander whose
      signature cards the deck plays the most of. That same match powers "decks
      like yours with other commanders".
@@ -101,6 +107,20 @@ python build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any ti
 gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber
 ```
 
+## The deck link Worker
+
+Deploy it once to a free Cloudflare account, then put the URL it prints in
+`DECK_LINK` in `site/app.js`:
+
+```
+cd worker
+npx wrangler login
+npx wrangler deploy
+```
+
+It only answers the site (and `localhost:8000`), and only fetches Moxfield and
+Archidekt deck pages, one per request, cached for 10 minutes.
+
 ## Running locally
 
 Python 3.11+ (standard library only):
@@ -121,6 +141,7 @@ Tests: `python test_build_index.py`, `python test_build_decks.py` and `node --te
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
 - `site/deck.js`: decklist parsing, similar decks and recommendations
+- `worker/deck-link.js`: Cloudflare Worker that turns a deck link into a decklist
 - `site/currency.js`: currency detection, exchange rate and price formatting
 - `.github/workflows/deploy.yml`: weekly rebuild and GitHub Pages deploy
 - `.github/workflows/crawl.yml`: weekly deck crawl

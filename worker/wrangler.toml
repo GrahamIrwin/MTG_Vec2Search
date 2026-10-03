@@ -1,0 +1,4 @@
+# Deploy: cd worker && npx wrangler deploy   (free Cloudflare account; prints the URL to put in site/app.js)
+name = "mtg-deck-link"
+main = "deck-link.js"
+compatibility_date = "2026-10-01"
