@@ -372,18 +372,32 @@
     .deck-heading { font-size: 24px; margin: 34px 0 4px; }
     .deck-lede { margin: 0 0 12px; font-size: 15.5px; }
     /* Each section of results is a card of its own, headed by the footer's brass diamond */
+    /* Opening or closing one is the visitor's choice; the heading is the toggle */
     .panel {
-      margin-top: 22px; padding: 22px 24px 26px;
+      margin-top: 22px; padding: 0 24px;
       background: var(--paper-2); border: 1px solid var(--rule); border-radius: 14px; box-shadow: var(--shadow-sm);
     }
+    .panel[open] { padding-bottom: 26px; }
     .panel[hidden] { display: none; }
-    .panel > .deck-heading:first-child { margin-top: 0; }
+    .panel > summary {
+      display: flex; align-items: center; gap: 12px; padding: 20px 0; margin: 0;
+      cursor: pointer; list-style: none; user-select: none;
+    }
+    .panel[open] > summary { padding-bottom: 8px; }
+    .panel > summary::-webkit-details-marker { display: none; }
+    .panel > summary .deck-heading { margin: 0; }
+    .panel > summary:hover .deck-heading { color: var(--brass); }
     .panel .deck-heading::before {
       content: "◆"; color: var(--brass); font-size: .5em; vertical-align: .35em; margin-right: 10px;
     }
+    .panel > summary::after {
+      content: ""; margin-left: auto; width: 9px; height: 9px; transform: rotate(45deg) translateY(-3px);
+      border-right: 2px solid var(--ink-faint); border-bottom: 2px solid var(--ink-faint); transition: transform .2s;
+    }
+    .panel[open] > summary::after { transform: rotate(225deg) translateY(-1px); }
     .panel .more-wrap { margin-top: 22px; }
-    .panel .filters, .panel .type-filter button:not([aria-pressed="true"]) { background: var(--paper); }
-    @media (max-width: 600px) { .panel { padding: 16px 14px 20px; border-radius: 12px; } }
+    .panel .type-filter button:not([aria-pressed="true"]) { background: var(--paper); }
+    @media (max-width: 600px) { .panel { padding: 0 14px; border-radius: 12px; } .panel[open] { padding-bottom: 20px; } .panel > summary { padding: 16px 0; } }
     .deck-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; align-items: start; }
     @media (min-width: 900px) { .deck-list { grid-template-columns: 1fr 1fr; } }
     .deck-list details { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; }
@@ -428,7 +442,6 @@
     .deck-list.plain summary { grid-template-columns: 1fr auto; }
     .deck-list.plain .deck-meta { grid-column: 1 / -1; }
     .deck-list .deck-body.type-groups { padding-top: 12px; columns: 2 260px; }
-    #average { padding: 0 16px 16px; }
     #average h3 { font-size: 20px; margin: 26px 0 0; }
     #average h3 small { font-family: Georgia, serif; color: var(--ink-faint); font-size: 15px; margin-left: 8px; }
     #average .gallery { margin-top: 12px; }
@@ -598,29 +611,29 @@
         <p class="message" id="deck-message" hidden></p>
         <div id="deck-results" hidden>
           <div class="results-head"><div class="recognized" id="deck-summary"></div></div>
-          <section class="panel">
-            <h2 class="deck-heading">Cards to add</h2>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Cards to add</h2></summary>
             <p class="muted deck-lede" id="adds-lede"></p>
             <div class="chips type-filter" id="add-types" role="group" aria-label="Card type"></div>
             <div class="gallery" id="adds"></div>
             <div class="more-wrap"><button id="more-adds" class="btn-quiet" type="button" hidden>Show more</button></div>
-          </section>
-          <section class="panel" id="cuts-section">
-              <h2 class="deck-heading">Cards to cut</h2>
+          </details>
+          <details class="panel" open id="cuts-section">
+              <summary><h2 class="deck-heading">Cards to cut</h2></summary>
               <p class="muted deck-lede">Your cards that the most similar decks rarely play.</p>
               <div class="term-items" id="cuts"></div>
-          </section>
-          <section class="panel">
-            <h2 class="deck-heading">The decks behind these picks</h2>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">The decks behind these picks</h2></summary>
             <p class="muted deck-lede">The decks most like yours. Open one to see what it plays that yours doesn't.</p>
             <ol class="deck-list" id="similar"></ol>
             <div class="more-wrap"><button id="more-decks" class="btn-quiet" type="button" hidden>Show more decks</button></div>
-          </section>
-          <section class="panel" id="others-section">
-              <h2 class="deck-heading">Decks like yours with other commanders</h2>
+          </details>
+          <details class="panel" open id="others-section">
+              <summary><h2 class="deck-heading">Decks like yours with other commanders</h2></summary>
               <p class="muted deck-lede">Commanders whose decks play the most of your cards. Pick one to compare with their decks.</p>
               <div class="term-items" id="others"></div>
-          </section>
+          </details>
         </div>
       </section>
 
@@ -645,44 +658,41 @@
               <a href="?deck" class="btn-quiet">Compare your deck with these</a>
             </div>
           </div>
-          <section class="panel">
-            <h2 class="deck-heading">Builds</h2>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Builds</h2></summary>
             <p class="muted deck-lede" id="builds-lede"></p>
             <div class="chips type-filter" id="builds" role="group" aria-label="Build"></div>
-          </section>
-          <section class="panel">
-            <h2 class="deck-heading">Signature cards</h2>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Signature cards</h2></summary>
             <p class="muted deck-lede" id="signature-lede"></p>
             <div class="chips type-filter" id="signature-types" role="group" aria-label="Card type"></div>
             <div class="gallery" id="signature"></div>
             <div class="more-wrap"><button id="more-signature" class="btn-quiet" type="button" hidden>Show more</button></div>
-          </section>
-          <section class="panel">
-            <h2 class="deck-heading">Most played</h2>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Most played</h2></summary>
             <p class="muted deck-lede">Every card these decks play, most played first.</p>
             <div class="chips type-filter" id="played-types" role="group" aria-label="Card type"></div>
             <div class="gallery" id="played"></div>
             <div class="more-wrap"><button id="more-played" class="btn-quiet" type="button" hidden>Show more</button></div>
-          </section>
-          <section class="panel">
-            <h2 class="deck-heading">Average deck</h2>
+          </details>
+          <details class="panel">
+            <summary><h2 class="deck-heading">Average deck</h2></summary>
             <p class="muted deck-lede" id="average-lede"></p>
-            <details class="filters">
-              <summary><span class="label">Show the cards</span></summary>
-              <div id="average"></div>
-            </details>
+            <div id="average"></div>
             <div class="average-export">
               <button id="copy-average" class="btn-quiet" type="button">Copy list</button>
               <button id="download-average" class="btn-quiet" type="button">Download .txt</button>
               <span class="muted">One card per line, ready to paste into Moxfield, Archidekt or Deck recommendations.</span>
             </div>
-          </section>
-          <section class="panel">
-            <h2 class="deck-heading">Decklists</h2>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Decklists</h2></summary>
             <p class="muted deck-lede">Newest first. Open one to see its cards.</p>
             <ol class="deck-list plain" id="lists"></ol>
             <div class="more-wrap"><button id="more-lists" class="btn-quiet" type="button" hidden>Show more decks</button></div>
-          </section>
+          </details>
         </div>
       </section>
     </main>
