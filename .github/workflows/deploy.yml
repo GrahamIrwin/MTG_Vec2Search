@@ -35,6 +35,9 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+      # Pages lets browsers reuse a file for 10 minutes, so a new index.html could run an old
+      # cached app.js (or a new app.js an old deck.js). Each deploy's scripts get their own URLs.
+      - run: sed -i -E "s/\.js\"/.js?v=${GITHUB_SHA::8}\"/" site/index.html site/app.js
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
