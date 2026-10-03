@@ -91,6 +91,20 @@ time, a few KB after that).
    decks and recommending them back. Card overlap alone did best (about 39% of
    hidden cards in the top 20, against 31% for "most played with this
    commander"), so that's all the browser computes.
+4. **Commanders** (`?commanders`) lists every commander with decks; each one's
+   page (`?commander=<file name>`) shows its signature cards, every card its
+   decks play, an average deck and the decklists themselves. The average deck
+   takes as many spells and nonbasic lands as the decks play on average (the
+   most played of each), then basic lands to make 100, and copies or
+   downloads as a plain list. Its decks are split into **builds** in the
+   browser: spherical k-means over the same IDF-weighted cards, leaving out
+   lands (they split decks by budget, not plan), one build per 50 decks to
+   start, dropping builds under 8% of the decks and merging ones too alike.
+   A build is named for the Scryfall Tagger tag whose cards it plays the most
+   more of than the commander's other decks ("Poison mechanics", "+1/+1
+   counters matter"); `build_decks.py build` stores the tags of each
+   commander's commonly played cards in its file for this, for commanders with
+   enough decks to split. Picking a build narrows everything on the page to it.
 
 ## Updating card data
 
@@ -99,13 +113,16 @@ away (e.g. on a set's release day), open **Actions → Build and deploy → Run 
 
 The deck corpus is too big for git, so it lives on the `deck-corpus` release.
 **Actions → Crawl decks** adds to it for five hours every Sunday. To grow it
-faster, crawl locally and upload:
+faster, crawl locally:
 
 ```
 gh release download deck-corpus             # decks.jsonl.gz, crawl_state.json
 python build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any time
-gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber
 ```
+
+When a crawl stops (Ctrl+C, or its hours run out) it uploads the corpus to the
+release, after first merging in any decks the release has that it doesn't (the
+weekly crawl's, say), so an upload never loses any. `--no-upload` skips that.
 
 To fill in commanders the corpus barely has, top up the most played ones (by
 EDHREC rank) to a number of decks each, several at a time. Run one crawl at a
@@ -115,7 +132,7 @@ past about 3 requests a second.
 ```
 python build_decks.py crawl --top 3500 --per-commander 5 --rate 2    # enough for every commander first
 python build_decks.py crawl --top 3500 --per-commander 20 --rate 2   # then more
-gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber
+python build_decks.py crawl --only "Atraxa, Praetors' Voice" --per-commander 3000 --rate 2   # one commander's newest 3,000
 ```
 
 ## The deck link Worker

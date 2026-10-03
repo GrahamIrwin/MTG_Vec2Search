@@ -5,6 +5,7 @@ import {
 import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.js";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
+  findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags,
 } from "./deck.js";
 
 const PAGE_SIZE = 30;
@@ -25,7 +26,9 @@ const $ = id => document.getElementById(id);
 const form = $("search");
 const params = new URLSearchParams(location.search);
 const deckMode = params.has("deck");
-const searching = !deckMode && [...params.keys()].some(k => k !== "sort");
+const commanderKey = params.get("commander");
+const commandersMode = params.has("commanders") || commanderKey !== null;
+const searching = !deckMode && !commandersMode && [...params.keys()].some(k => k !== "sort");
 
 function el(tag, props = {}, ...children) {
   const node = Object.assign(document.createElement(tag), props);
@@ -33,8 +36,11 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+// The site's own data files are checked with the server before a cached copy is used (an
+// unchanged file is a quick "304 Not Modified"): after a rebuild, a stale deck file read with a
+// fresh card index would show the wrong cards
 async function getJson(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: /^https?:/.test(url) ? "default" : "no-cache" });
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   return res.json();
 }
@@ -138,11 +144,12 @@ const message = text => {
   $("message").textContent = text;
   $("message").hidden = !text;
 };
-$("intro").hidden = searching || deckMode;
+$("intro").hidden = searching || deckMode || commandersMode;
 $("results").hidden = !searching;
-form.hidden = deckMode;
+form.hidden = deckMode || commandersMode;
 $("deck-view").hidden = !deckMode;
-$(deckMode ? "mode-deck" : "mode-cards").setAttribute("aria-current", "page");
+$("commander-view").hidden = !commandersMode;
+$(deckMode ? "mode-deck" : commandersMode ? "mode-commanders" : "mode-cards").setAttribute("aria-current", "page");
 
 let index;
 let results = [];
@@ -397,6 +404,7 @@ function loadDeckData() {
   return deckData;
 }
 const commanderNames = (key, names) => key.split("-").map(n => names[n]).join(" & ");
+const typeOf = card => TYPE_ORDER.find(t => index.columns.types[card] & (1 << index.types.indexOf(t))) ?? "Other";
 const cardButton = (card, names, label = names[card]) =>
   el("button", { type: "button", className: "term", textContent: label, onclick: async () => openCard((await cardInfo(card)).id) });
 
@@ -453,7 +461,7 @@ async function findSimilar(key) {
   const note = text => summary.push(el("span", { className: "muted", textContent: text }));
   if (deck.site) summary.push(el("span", { className: "term-chip", textContent: `${deck.name} (${deck.site})` }));
   summary.push(el("span", { className: "label", textContent: "compared with" }),
-    el("span", { className: "term-chip", textContent: `${count.toLocaleString()} ${lead} decks` }));
+    el("a", { className: "term", href: "?" + new URLSearchParams({ commander: key }), textContent: `${count.toLocaleString()} ${lead} decks` }));
   if (ownKey && key !== ownKey && !files.has(ownKey)) {
     note(`There aren't enough ${commanderNames(ownKey, names)} decks yet, so these are the closest commander's.`);
   } else if (!ownKey) {
@@ -468,14 +476,12 @@ async function findSimilar(key) {
   $("deck-summary").replaceChildren(...summary);
 
   // Cards to add, within the deck's color identity, filterable by type
-  const { identity, types } = index.columns;
+  const { identity } = index.columns;
   const colors = (commanders.length ? commanders : [...parsed.cards]).reduce((m, c) => m | identity[c], 0);
-  const typeOf = card => TYPE_ORDER.find(t => types[card] & (1 << index.types.indexOf(t))) ?? "Other";
   const picks = adds.filter(a => (identity[a.card] & ~colors) === 0).slice(0, MAX_ADDS)
-    .map(a => ({ ...a, type: typeOf(a.card) }));
+    .map(a => ({ card: a.card, type: typeOf(a.card), detail: `in ${a.decks} of ${neighbors} decks`, bar: a.decks / neighbors }));
   $("adds-lede").textContent = `What the ${neighbors} decks most like yours play that yours doesn't, favoring cards they play more than most ${lead} decks do.`;
-  addView = { picks, neighbors, type: "All", shown: PAGE_ADDS };
-  await showAdds();
+  await showAdds(picks);
 
   // Cuts only make sense against decks with your own commander: another's never play its cards
   $("cuts-section").hidden = key !== ownKey;
@@ -522,30 +528,251 @@ async function findSimilar(key) {
   $("deck-results").hidden = false;
 }
 
-// Cards to add: the type filter and the gallery, PAGE_ADDS cards at a time
-let addView;
-async function showAdds() {
-  const view = addView;
-  const counts = {};
-  for (const p of view.picks) counts[p.type] = (counts[p.type] ?? 0) + 1;
-  const label = t => (t === "All" ? "All" : TYPE_PLURALS[t] ?? `${t}s`);
-  $("add-types").replaceChildren(...["All", ...TYPE_ORDER, "Other"].filter(t => t === "All" || counts[t]).map(t =>
-    el("button", {
-      type: "button", ariaPressed: String(view.type === t),
-      onclick: () => { addView = { ...view, type: t, shown: PAGE_ADDS }; showAdds(); },
-    }, label(t), el("small", { textContent: t === "All" ? view.picks.length : counts[t] }))));
-  const list = view.type === "All" ? view.picks : view.picks.filter(p => p.type === view.type);
-  const page = list.slice(0, view.shown);
-  const infos = await Promise.all(page.map(a => cardInfo(a.card)));
-  if (view !== addView) return; // filtered again while loading
-  $("adds").replaceChildren(...page.map((a, i) =>
-    cardTile(a.card, infos[i], `in ${a.decks} of ${view.neighbors} decks`, a.decks / view.neighbors, i % PAGE_ADDS)));
-  $("more-adds").hidden = view.shown >= list.length;
+// A gallery of cards with a type filter, PAGE_ADDS cards at a time. Returns a function that
+// shows picks: [{card, type, detail, bar}]
+const typeLabel = t => (t === "All" ? "All" : TYPE_PLURALS[t] ?? `${t}s`);
+function typedGallery(types, gallery, more) {
+  let view;
+  async function show() {
+    const current = view;
+    const counts = {};
+    for (const p of current.picks) counts[p.type] = (counts[p.type] ?? 0) + 1;
+    types.replaceChildren(...["All", ...TYPE_ORDER, "Other"].filter(t => t === "All" || counts[t]).map(t =>
+      el("button", {
+        type: "button", ariaPressed: String(current.type === t),
+        onclick: () => { view = { ...current, type: t, shown: PAGE_ADDS }; show(); },
+      }, typeLabel(t), el("small", { textContent: t === "All" ? current.picks.length : counts[t] }))));
+    const list = current.type === "All" ? current.picks : current.picks.filter(p => p.type === current.type);
+    const page = list.slice(0, current.shown);
+    const infos = await Promise.all(page.map(a => cardInfo(a.card)));
+    if (current !== view) return; // filtered again while loading
+    gallery.replaceChildren(...page.map((a, i) => cardTile(a.card, infos[i], a.detail, a.bar, i % PAGE_ADDS)));
+    more.hidden = current.shown >= list.length;
+  }
+  more.onclick = () => {
+    view = { ...view, shown: view.shown + PAGE_ADDS };
+    show();
+  };
+  return picks => {
+    view = { picks, type: "All", shown: PAGE_ADDS };
+    return show();
+  };
 }
-$("more-adds").onclick = () => {
-  addView = { ...addView, shown: addView.shown + PAGE_ADDS };
-  showAdds();
+const showAdds = typedGallery($("add-types"), $("adds"), $("more-adds"));
+
+// === Commanders: every commander with decks, and what their decks play ===
+const PAGE_COMMANDERS = 30;
+const SIGNATURE_SHOWN = 60;
+const PAGE_LISTS = 20;
+const BASIC_OF = { W: "Plains", U: "Island", B: "Swamp", R: "Mountain", G: "Forest" };
+const commanderMessage = text => {
+  $("commander-message").textContent = text;
+  $("commander-message").hidden = !text;
 };
+const commanderLink = key => "?" + new URLSearchParams({ commander: key });
+
+async function showCommanders() {
+  const { names, decks } = await loadDeckData();
+  const all = decks.commanders.map(([key, count]) => ({ key, count, name: commanderNames(key, names) }));
+  let matches = all;
+  let shown = 0;
+  const more = async () => {
+    const list = matches;
+    $("more-commanders").hidden = true;
+    const page = list.slice(shown, shown + PAGE_COMMANDERS);
+    const infos = await Promise.all(page.map(c => cardInfo(+c.key.split("-")[0])));
+    if (list !== matches) return; // filtered again while loading
+    $("commanders").append(...page.map((c, i) => {
+      const img = el("img", { alt: "", loading: "lazy", decoding: "async" });
+      img.onload = () => img.classList.add("loaded");
+      img.src = imageUrl(infos[i].id);
+      const tile = el("a", { className: "card", href: commanderLink(c.key) },
+        el("span", { className: "card-art" }, img),
+        el("span", { className: "card-name", textContent: c.name }),
+        el("span", { className: "card-meta" }, el("span", { textContent: `${c.count.toLocaleString()} decks` })));
+      tile.style.setProperty("--i", i);
+      return tile;
+    }));
+    shown += page.length;
+    $("more-commanders").hidden = shown >= list.length;
+  };
+  $("more-commanders").onclick = more;
+  $("commander-filter").oninput = () => {
+    const q = $("commander-filter").value.trim().toLowerCase();
+    matches = all.filter(c => c.name.toLowerCase().includes(q));
+    $("commander-count").textContent = `${matches.length.toLocaleString()} ${matches.length === 1 ? "commander" : "commanders"}`
+      + (q ? "" : ` · ${decks.decks.toLocaleString()} decks`);
+    $("commanders").replaceChildren();
+    shown = 0;
+    more();
+  };
+  $("commander-filter").oninput();
+  commanderMessage("");
+  $("commander-list").hidden = false;
+}
+
+// Cards grouped by type (as card numbers), each opening its details
+function typeGroups(cards, names) {
+  const by = new Map();
+  for (const c of cards) by.set(typeOf(c), [...(by.get(typeOf(c)) ?? []), c]);
+  return [...TYPE_ORDER, "Other"].filter(t => by.has(t)).map(t => el("div", { className: "type-group" },
+    el("h3", {}, typeLabel(t), el("small", { textContent: by.get(t).length })),
+    el("div", { className: "term-items" }, ...by.get(t).sort((a, b) => a - b).map(c => cardButton(c, names)))));
+}
+
+const showPlayed = typedGallery($("played-types"), $("played"), $("more-played"));
+const showSignature = typedGallery($("signature-types"), $("signature"), $("more-signature"));
+// Scryfall Tagger tags, readably: "gives-pp-counters" -> "Gives +1/+1 counters"
+function tagLabel(tag) {
+  const label = tag.replaceAll("-", " ").replace(/\bpp\b/g, "+1/+1").replace(/\bmm\b/g, "−1/−1");
+  return label[0].toUpperCase() + label.slice(1);
+}
+
+async function showCommander(key) {
+  const { names, decks } = await loadDeckData();
+  const entry = decks.commanders.find(c => c[0] === key);
+  if (!entry) {
+    await showCommanders();
+    return commanderMessage("There aren't enough decks with that commander yet. Here are the commanders that have some.");
+  }
+  const lead = commanderNames(key, names);
+  document.title = `${lead} · MTG Vec2Search`;
+  const leaders = key.split("-").map(Number);
+  const [shard, infos] = await Promise.all([getJson(`decks/${key}.json`).then(decodeShard), Promise.all(leaders.map(cardInfo))]);
+  const n = shard.decks.length;
+
+  $("commander-art").replaceChildren(...infos.map(({ name, id }) =>
+    el("button", { type: "button", className: "card", onclick: () => openCard(id) }, el("img", { src: imageUrl(id), alt: name }))));
+  const identity = leaders.reduce((m, c) => m | index.columns.identity[c], 0);
+  const colors = [..."WUBRG"].filter((_, i) => identity & (1 << i));
+  $("commander-name").textContent = lead;
+  $("commander-meta").textContent = `${n.toLocaleString()} decks · ${colors.map(c => COLOR_NAMES[c]).join(", ") || "Colorless"}`;
+
+  // Builds: lands are left out of telling them apart (they mostly show a deck's budget)
+  const landBit = 1 << index.types.indexOf("Land");
+  const lands = new Set(shard.cards.flatMap((c, p) => (index.columns.types[c] & landBit ? [p] : [])));
+  // Each build is named for the Tagger tag it leans on most that a bigger build isn't named for;
+  // failing that, a word its deck names share, or its most distinctive card
+  const skip = new Set(lead.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'+-]*/gu));
+  const named = new Set();
+  const builds = findBuilds(shard, { ignore: lands }).map(members => {
+    const tags = buildTags(shard, members);
+    const tag = tags.find(t => !named.has(t));
+    named.add(tag);
+    return {
+      members, tags,
+      name: tag ? tagLabel(tag) : buildName(shard, members, skip)
+        ?? names[shard.cards[distinctive(shard, members, { n: 1, ignore: lands })[0]]],
+    };
+  });
+  const groups = [{ name: "All decks", members: shard.decks.map((_, d) => d) }, ...builds];
+  $("builds-lede").textContent = builds.length
+    ? `${lead} decks fall into ${builds.length} builds by the cards they play, each named for the kind of card (Scryfall Tagger tag) it plays more of than the rest. Pick one to see its cards and decks.`
+    : `There aren't enough ${lead} decks, or they're too alike, to tell builds apart.`;
+  $("builds").hidden = !builds.length;
+  $("builds").replaceChildren(...groups.map((g, i) => el("button", {
+    type: "button", ariaPressed: String(i === 0),
+    onclick: e => {
+      for (const b of $("builds").children) b.ariaPressed = String(b === e.currentTarget);
+      showGroup(g);
+    },
+  }, g.name, el("small", { textContent: i ? `${Math.round(g.members.length / n * 100)}%` : n.toLocaleString() }))));
+
+  let current;
+  async function showGroup(g) {
+    current = g;
+    const all = g === groups[0];
+    const counts = playCounts(shard, g.members);
+    const share = p => counts[p] / g.members.length;
+    const detail = p => `in ${Math.round(share(p) * 100)}% of decks`;
+
+    const tile = p => ({ card: shard.cards[p], type: typeOf(shard.cards[p]), detail: detail(p), bar: share(p) });
+
+    // Signature cards: what sets these decks apart from other commanders' decks (all of them),
+    // or from the commander's other decks (a build)
+    $("signature-lede").textContent = all
+      ? `What ${lead} decks play far more often than other commanders' decks do.`
+      : `What this build plays far more often than other ${lead} decks do. It leans on: ${g.tags.map(t => tagLabel(t).toLowerCase()).join(", ") || "no tag in particular"}.`;
+    showSignature((all ? (shard.signature ?? entry[2]).map(c => shard.position.get(c)).filter(p => p !== undefined)
+      : distinctive(shard, g.members, { n: SIGNATURE_SHOWN, ignore: lands })).slice(0, SIGNATURE_SHOWN).map(tile));
+
+    showPlayed([...counts.keys()].filter(p => counts[p]).sort((a, b) => counts[b] - counts[a] || a - b).map(tile));
+
+    // The average deck: as many spells and nonbasic lands as these decks play on average, then
+    // basic lands, split evenly between the colors, to make 100 cards
+    const average = averageDeck(shard, g.members, lands);
+    const basics = Math.max(0, 100 - leaders.length - average.spells.length - average.lands.length);
+    const kinds = colors.length ? colors.map(c => BASIC_OF[c]) : ["Wastes"];
+    const basicCounts = kinds.map((b, i) => [names.indexOf(b), Math.floor(basics / kinds.length) + (i < basics % kinds.length)])
+      .filter(([, k]) => k);
+    $("average-lede").textContent = `${average.spells.length} spells and ${average.lands.length + basics} lands`
+      + ` (${basics} of them basic), as many of each as ${all ? "these" : "this build's"} decks play on average, picking the cards they play most.`;
+    const picks = [...average.spells, ...average.lands].map(p => ({ card: shard.cards[p], detail: detail(p), bar: share(p) }))
+      .concat(basicCounts.map(([card, k]) => ({ card, detail: `× ${k}`, bar: null, copies: k })));
+    const byType = new Map();
+    for (const pick of picks) byType.set(typeOf(pick.card), [...(byType.get(typeOf(pick.card)) ?? []), pick]);
+    const sections = [...TYPE_ORDER, "Other"].filter(t => byType.has(t)).map(t => [t, byType.get(t)]);
+    const listText = () => [...leaders.map(c => `1 ${names[c]} *CMDR*`),
+      ...sections.flatMap(([, list]) => list.map(a => `${a.copies ?? 1} ${names[a.card]}`))].join("\n") + "\n";
+    $("copy-average").textContent = "Copy list";
+    $("copy-average").onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(listText());
+        $("copy-average").textContent = "Copied";
+      } catch {
+        $("copy-average").textContent = "Couldn't copy";
+      }
+    };
+    $("download-average").onclick = () => {
+      const a = el("a", { download: `${lead}${all ? "" : ` (${g.name})`} average deck.txt`,
+        href: URL.createObjectURL(new Blob([listText()], { type: "text/plain" })) });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href));
+    };
+
+    // Decklists, newest first, each opening to its cards
+    let shown = 0;
+    $("lists").replaceChildren();
+    const moreLists = () => {
+      $("lists").append(...g.members.slice(shown, shown + PAGE_LISTS).map(d => {
+        const deck = shard.decks[d];
+        const details = el("details", {},
+          el("summary", {},
+            el("span", { className: "deck-name", textContent: deck.name || "Untitled deck" }),
+            el("a", { className: "open", href: `https://archidekt.com/decks/${deck.id}`, target: "_blank", rel: "noopener", textContent: "Archidekt ↗" }),
+            el("span", { className: "deck-meta", textContent: `updated ${deck.updated} · ${deck.cards.length} cards besides basic lands` })));
+        details.addEventListener("toggle", () => details.append(el("div", { className: "deck-body type-groups" },
+          ...typeGroups([...deck.cards].map(p => shard.cards[p]), names))), { once: true });
+        return el("li", {}, details);
+      }));
+      shown += PAGE_LISTS;
+      $("more-lists").hidden = shown >= g.members.length;
+    };
+    $("more-lists").onclick = moreLists;
+    moreLists();
+
+
+    // The average deck's cards, by type (after the rest, as it's the most to load)
+    const averageInfos = await Promise.all(sections.map(([, list]) => Promise.all(list.map(a => cardInfo(a.card)))));
+    if (current !== g) return; // another build was picked while loading
+    $("average").replaceChildren(...sections.flatMap(([t, list], s) => [
+      el("h3", {}, typeLabel(t), el("small", { textContent: list.reduce((k, a) => k + (a.copies ?? 1), 0) })),
+      el("div", { className: "gallery" }, ...list.map((a, i) => cardTile(a.card, averageInfos[s][i], a.detail, a.bar, i))),
+    ]));
+  }
+
+  await showGroup(groups[0]);
+  commanderMessage("");
+  $("commander-page").hidden = false;
+}
+
+if (commandersMode) {
+  commanderMessage("Loading decks…");
+  (commanderKey !== null ? showCommander(commanderKey) : showCommanders()).catch(err => {
+    console.error(err);
+    commanderMessage("Couldn't load the deck data. Please try again.");
+  });
+}
 
 if (deckMode) {
   const link = params.get("deck");

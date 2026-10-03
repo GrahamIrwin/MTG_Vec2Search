@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v7
       - run: gh release download deck-corpus
       - run: python3 -c "import build_index; build_index.download_bulk_data()" # card names for commanders
-      - run: python3 build_decks.py crawl --hours 5
+      - run: python3 build_decks.py crawl --hours 5 --no-upload # the next step uploads, even after a failed crawl
       # A failed crawl keeps what it fetched (each deck is saved as it arrives)
       - if: ${{ !cancelled() }}
         run: gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber

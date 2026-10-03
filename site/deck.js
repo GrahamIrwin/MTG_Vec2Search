@@ -55,7 +55,7 @@ export function parseDecklist(text, lookup) {
 
 // === Similar decks ===
 // A commander's file (see build_decks.py): cards = card numbers, most played first;
-// decks = [id, name, updated, gaps between positions in `cards`]
+// decks = [id, name, updated, gaps between positions in `cards`]; tags = [tag, gaps between positions]
 export function decodeShard(shard) {
   const decks = shard.decks.map(([id, name, updated, gaps]) => {
     const cards = new Int32Array(gaps.length);
@@ -69,7 +69,11 @@ export function decodeShard(shard) {
   for (const d of decks) for (const p of d.cards) plays[p]++;
   const weight = Float64Array.from(plays, n => Math.log(decks.length / Math.max(n, 1)) ** 2);
   const position = new Map(shard.cards.map((card, p) => [card, p]));
-  return { cards: shard.cards, decks, plays, weight, position };
+  const tags = (shard.tags ?? []).map(([name, gaps]) => {
+    let p = 0;
+    return { name, positions: gaps.map(gap => (p += gap)) };
+  });
+  return { cards: shard.cards, decks, plays, weight, position, tags, signature: shard.signature };
 }
 
 // Cosine similarity between the pasted deck and every deck in the file, over the cards they
@@ -142,6 +146,158 @@ export function recommend(shard, similar, deckCards, { neighbors = NEIGHBORS, di
   const cuts = [...mine].map(card => ({ card, share: shard.position.has(card) ? share[shard.position.get(card)] : 0 }))
     .sort((a, b) => a.share - b.share);
   return { adds, cuts, neighbors: top.length };
+}
+
+// === Builds: a commander's decks, grouped by the cards they share ===
+// Spherical k-means over the decks' cards, each weighted by how rare it is among them (IDF),
+// starting from a build per DECKS_PER_BUILD decks (up to MAX_BUILDS): one with under MIN_BUILD of
+// the decks is dropped, and of two whose typical decks are ALIKE, one is dropped, its decks going
+// to the build nearest them. ignore: positions in shard.cards to leave out (lands, which say more
+// about a deck's budget than its plan).
+// Returns [[deck numbers in shard.decks]], biggest build first, or [] for a single build.
+export const MAX_BUILDS = 6;
+export const DECKS_PER_BUILD = 50;
+export const MIN_BUILD = 0.08;
+export const ALIKE = 0.75; // cosine similarity of two builds' centers
+export function findBuilds(shard, { ignore = new Set(), seed = 1 } = {}) {
+  const { decks, plays } = shard;
+  const n = decks.length;
+  const k = Math.min(MAX_BUILDS, Math.floor(n / DECKS_PER_BUILD));
+  if (k < 2) return [];
+  // Cards a few decks play are noise here; cards every deck plays weigh nothing anyway
+  const rare = Math.max(2, 0.02 * n);
+  const idf = Float64Array.from(plays, (c, p) => (c >= rare && !ignore.has(p) ? Math.log(n / c) : 0));
+  const norm = decks.map(d => Math.sqrt(d.cards.reduce((s, p) => s + idf[p] ** 2, 0)) || 1);
+  const sim = (d, c) => decks[d].cards.reduce((s, p) => s + idf[p] * c[p], 0) / norm[d];
+  const center = members => {
+    const c = new Float64Array(plays.length);
+    for (const d of members) for (const p of decks[d].cards) c[p] += idf[p] / norm[d];
+    const len = Math.hypot(...c) || 1;
+    return c.map(x => x / len);
+  };
+  const random = mulberry32(seed);
+
+  // k-means++: each next center is a deck far from the ones chosen so far
+  let centers = [center([Math.floor(random() * n)])];
+  while (centers.length < k) {
+    const far = decks.map((_, d) => (1 - Math.max(...centers.map(c => sim(d, c)))) ** 2);
+    let r = random() * far.reduce((a, b) => a + b, 0);
+    centers.push(center([far.findIndex(f => (r -= f) <= 0)]));
+  }
+  let groups;
+  const settle = () => {
+    for (let round = 0; round < 30; round++) {
+      const near = decks.map((_, d) => centers.reduce((best, c, i) => (sim(d, c) > sim(d, centers[best]) ? i : best), 0));
+      const next = centers.map((_, i) => near.flatMap((g, d) => (g === i ? [d] : [])));
+      const same = groups && next.every((g, i) => g.length === groups[i].length && g.every((d, j) => d === groups[i][j]));
+      groups = next;
+      if (same) break;
+      centers = groups.map((g, i) => (g.length ? center(g) : centers[i]));
+    }
+  };
+  settle();
+  for (;;) {
+    const smallest = groups.reduce((s, g, i) => (g.length < groups[s].length ? i : s), 0);
+    let drop = groups[smallest].length < MIN_BUILD * n ? smallest : -1;
+    for (let i = 0; drop < 0 && i < centers.length; i++) {
+      for (let j = i + 1; j < centers.length; j++) {
+        if (centers[i].reduce((s, x, p) => s + x * centers[j][p], 0) > ALIKE) {
+          drop = groups[i].length < groups[j].length ? i : j;
+          break;
+        }
+      }
+    }
+    if (drop < 0 || centers.length === 1) break;
+    centers.splice(drop, 1);
+    groups = null;
+    settle();
+  }
+  return centers.length > 1 ? groups.sort((a, b) => b.length - a.length) : [];
+}
+
+function mulberry32(seed) { // a small seeded random number generator, so builds don't change between visits
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// How many of these decks (numbers in shard.decks) play each card, by position in shard.cards
+export function playCounts(shard, members) {
+  const counts = new Int32Array(shard.cards.length);
+  for (const d of members) for (const p of shard.decks[d].cards) counts[p]++;
+  return counts;
+}
+
+// The cards a group of decks plays far more often than all this commander's decks do
+// (positions in shard.cards, most distinctive first)
+export function distinctive(shard, members, { n = 12, ignore = new Set() } = {}) {
+  const counts = playCounts(shard, members);
+  const lift = p => counts[p] / members.length - shard.plays[p] / shard.decks.length;
+  return [...counts.keys()].filter(p => counts[p] && !ignore.has(p)).sort((a, b) => lift(b) - lift(a)).slice(0, n);
+}
+
+// An average deck: the spells these decks play most, as many as they play on average, and the
+// same for lands (positions in shard.cards; lands: a Set of positions). Basic lands aren't in
+// the deck files, so they're left to fill the rest. Returns { spells, lands }.
+export function averageDeck(shard, members, lands) {
+  const counts = playCounts(shard, members);
+  const landCount = members.reduce((s, d) => s + shard.decks[d].cards.reduce((k, p) => k + lands.has(p), 0), 0);
+  const cardCount = members.reduce((s, d) => s + shard.decks[d].cards.length, 0);
+  const most = isLand => [...counts.keys()].filter(p => counts[p] && lands.has(p) === isLand)
+    .sort((a, b) => counts[b] - counts[a] || a - b);
+  return {
+    spells: most(false).slice(0, Math.round((cardCount - landCount) / members.length)),
+    lands: most(true).slice(0, Math.round(landCount / members.length)),
+  };
+}
+
+// The Scryfall Tagger tags (shard.tags) whose cards these decks play the most more of than all
+// this commander's decks do, per deck, relative to how many they play anyway. A tag mostly on
+// the same cards as a better one ("tutor" after "tutor-to") is skipped. Returns tag names.
+export function buildTags(shard, members, n = 3) {
+  const counts = playCounts(shard, members);
+  const scored = shard.tags.map(tag => {
+    let here = 0, all = 0;
+    for (const p of tag.positions) { here += counts[p]; all += shard.plays[p]; }
+    here /= members.length;
+    all /= shard.decks.length;
+    return { ...tag, more: here - all, score: (here - all) / Math.sqrt(all + 1) };
+  }).filter(t => t.more >= 0.5).sort((a, b) => b.score - a.score);
+  const picked = [];
+  for (const t of scored) {
+    if (picked.length >= n) break;
+    const mine = new Set(t.positions);
+    const alike = picked.some(p => {
+      const both = p.positions.reduce((k, x) => k + mine.has(x), 0);
+      return both / (mine.size + p.positions.length - both) >= 0.5;
+    });
+    if (!alike) picked.push(t);
+  }
+  return picked.map(t => t.name);
+}
+
+// A name for a build from the word its deck names use far more than the commander's other
+// decks do ("Poison", "Superfriends"), or null. skip: words that say nothing (the commander's name)
+const NAME_WORDS = /[\p{L}\p{N}][\p{L}\p{N}'+-]*/gu;
+const FILLER = new Set(["the", "of", "a", "an", "and", "my", "deck", "edh", "commander", "copy", "v1", "v2", "v3",
+  "new", "list", "build", "upgraded", "upgrade", "precon", "budget", "cedh", "test", "wip", "in", "to", "with",
+  "for", "is", "on", "de", "la", "el", "untitled", "version", "primer", "optimized", "casual"]);
+export function buildName(shard, members, skip = new Set()) {
+  const wordsOf = d => new Set((shard.decks[d].name.toLowerCase().match(NAME_WORDS) ?? [])
+    .filter(w => !FILLER.has(w) && !skip.has(w) && w.length > 2));
+  const all = new Map();
+  shard.decks.forEach((_, d) => { for (const w of wordsOf(d)) all.set(w, (all.get(w) ?? 0) + 1); });
+  const here = new Map();
+  for (const d of members) for (const w of wordsOf(d)) here.set(w, (here.get(w) ?? 0) + 1);
+  const best = [...here]
+    .filter(([, k]) => k >= Math.max(3, 0.1 * members.length))
+    .map(([w, k]) => [w, k / members.length - all.get(w) / shard.decks.length])
+    .filter(([, lift]) => lift >= 0.08)
+    .sort((a, b) => b[1] - a[1]);
+  return best.length ? best[0][0][0].toUpperCase() + best[0][0].slice(1) : null;
 }
 
 // Commanders whose decks look most like this one, by how many of their signature cards it plays

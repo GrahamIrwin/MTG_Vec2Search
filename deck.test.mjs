@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
+  findBuilds, distinctive, averageDeck, buildName, buildTags,
 } from "./site/deck.js";
 
 const NAMES = ["Sol Ring", "Atraxa, Praetors' Voice", "Delver of Secrets // Insectile Aberration", "Island",
@@ -65,6 +66,28 @@ test("recommendations: what similar decks play that you don't; cuts: what they d
 test("closest commanders by signature cards", () => {
   const index = { commanders: [["1", 300, [5, 6, 7]], ["2", 50, [5, 6, 8]], ["3", 900, [9]]] };
   assert.deepEqual(closestCommanders(index, [5, 6, 8]).map(c => c.key), ["2", "1"]);
+});
+
+test("builds: decks that play different cards split apart, and are named for them", () => {
+  // Cards 0-9 every deck plays; 10-19 only "Poison" decks, 20-29 only the others; 30 a land the
+  // "Poison" decks play, which shouldn't count. 60 decks of each.
+  const range = (from, to) => Array.from({ length: to - from }, (_, i) => from + i);
+  const gaps = ps => ps.map((p, i) => p - (i ? ps[i - 1] : 0));
+  const deck = (i, poison) => [i, poison ? `Poison ${i}` : `Deck ${i}`, "2026-01-01",
+    gaps([...range(0, 10), ...(poison ? range(10, 20) : range(20, 30)), ...(poison ? [30] : [])])];
+  const tags = [["poison-mechanics", gaps(range(10, 15))], ["proliferate", gaps(range(20, 25))], ["ramp", gaps(range(0, 5))]];
+  const shard = decodeShard({ cards: range(0, 31), decks: range(0, 120).map(i => deck(i, i % 2 === 0)), tags });
+  const builds = findBuilds(shard, { ignore: new Set([30]) });
+  assert.equal(builds.length, 2);
+  for (const b of builds) assert.ok(b.every(d => d % 2 === b[0] % 2) && b.length === 60);
+  const poison = builds.find(b => b[0] % 2 === 0);
+  assert.equal(buildName(shard, poison), "Poison");
+  assert.equal(buildName(shard, builds.find(b => b !== poison)), null); // "Deck" is filler
+  assert.ok(distinctive(shard, poison, { n: 10, ignore: new Set([30]) }).every(p => p >= 10 && p < 20));
+  assert.deepEqual(findBuilds(decodeShard({ cards: [0], decks: range(0, 40).map(i => [i, "", "", [0]]) })), []); // too few decks
+  assert.deepEqual(buildTags(shard, poison), ["poison-mechanics"]); // ramp: every deck plays it
+  assert.deepEqual(buildTags(shard, builds.find(b => b !== poison)), ["proliferate"]);
+  assert.deepEqual(averageDeck(shard, poison, new Set([30])), { spells: range(0, 20), lands: [30] });
 });
 
 test("deck link worker: Moxfield and Archidekt decks become plain decklists", async () => {

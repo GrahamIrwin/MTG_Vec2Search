@@ -49,12 +49,17 @@ with tempfile.TemporaryDirectory() as tmp:
     cards = [{"oracle_id": "cmdr", "type_line": "Legendary Creature"}, {"oracle_id": "island", "type_line": "Basic Land — Island"}]
     cards += [{"oracle_id": f"c{i}", "type_line": "Creature"} for i in range(97)]
     corpus = {i: {**deck, "id": i, "updated": f"2026-09-0{i}"} for i in range(1, 6)}
+    build_decks.BUILD_DECKS = 5  # so these few decks get tags
     corpus[5]["cards"] = {"cmdr": 1, "c96": 1, "c0": 1}
     out = os.path.join(tmp, "decks")
-    build(corpus, cards, out)
+    # c0 and c96 are in every deck, c1-c95 in 4 of 5: a tag needs 2 cards decks play, and none
+    # about wording ("cycle-")
+    tags = {"pump": ({"c0", "c96", "island"}, []), "cycle-test": ({"c0", "c96"}, []), "lone": ({"c0"}, [])}
+    build(corpus, cards, tags, out)
     with open(os.path.join(out, "0.json"), encoding="utf-8") as f:
         shard = json.load(f)
     assert shard["cards"][:2] == [2, 98] and len(shard["cards"]) == 97  # c0 and c96 are in every deck
+    assert shard["tags"] == [["pump", [0, 1]]] and len(shard["signature"]) == 60, shard["tags"]
     first = shard["decks"][0]
     assert first[0] == 5 and first[2] == "2026-09-05"  # newest first
     positions = [sum(first[3][:i + 1]) for i in range(len(first[3]))]
@@ -77,6 +82,14 @@ with tempfile.TemporaryDirectory() as tmp:
     with gzip.open("oracle_cards.jsonl.gz", "wt", encoding="utf-8") as f:
         f.writelines(json.dumps(c) + "\n" for c in oracle)
     assert build_decks.top_commanders(10) == [("A", "A"), ("B", "B // B2"), ("D", "D")]
+    # --only: any case, and a double-faced card by its front face
+    assert build_decks.full_names(["a", "B"], {c["oracle_id"]: c["name"] for c in oracle}) == ["A", "B // B2"]
+    assert build_decks.full_names(["r"], {"x": "R // R", "y": "R // R2"}) == ["R // R2"]  # not the reversible printing
+    try:
+        build_decks.full_names(["Nope"], {"A": "A"})
+        raise AssertionError("an unknown name should stop the crawl")
+    except SystemExit as e:
+        assert "Nope" in str(e)
 
     lead = {}
     def fake_get_json(path):
@@ -94,5 +107,17 @@ with tempfile.TemporaryDirectory() as tmp:
     assert count == {"A": 3, "B": 3, "D": 3}, count  # A already had 3
     with open("crawl_state.json", encoding="utf-8") as f:
         assert sorted(json.load(f)) == ["B // B2", "D"]
+
+    # Before uploading, the release's copy is merged in: decks only it has, and newer versions
+    os.makedirs("release")
+    save_corpus({1: {**deck, "id": 1, "updated": "2026-01-01"}, 2: {**deck, "id": 2, "updated": "2026-12-01"},
+                 99: {**deck, "id": 99}}, os.path.join("release", "decks.jsonl.gz"))
+    with open(os.path.join("release", "crawl_state.json"), "w", encoding="utf-8") as f:
+        json.dump({"A": "2027-01-01", "Z": "2026-01-01"}, f)
+    mine = {1: {**deck, "id": 1, "updated": "2026-06-01"}, 2: {**deck, "id": 2, "updated": "2026-06-01"}}
+    state = {"A": "2026-10-01", "B // B2": "2026-10-01"}
+    assert build_decks.merge(mine, state, "release") == 2
+    assert {i: d["updated"] for i, d in mine.items()} == {1: "2026-06-01", 2: "2026-12-01", 99: "2026-09-30"}
+    assert state == {"A": "2027-01-01", "B // B2": "2026-10-01", "Z": "2026-01-01"}
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 print("ok")

@@ -9,8 +9,11 @@ import argparse
 import gzip
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -19,7 +22,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import date
 
-from build_index import by_popularity, load_cards, write_json
+from build_index import by_popularity, load_cards, load_oracle_tags, write_json
 
 ARCHIDEKT = "https://archidekt.com/api"
 CORPUS = "decks.jsonl.gz"
@@ -30,6 +33,7 @@ DELAY = 1.0  # seconds between requests; Archidekt is a small team, so crawl pol
 MIN_CARDS, MAX_CARDS = 95, 105  # roughly complete 100-card decks
 MAX_PAGES = 50  # the search API stops returning results after ~50 pages
 STATE = "crawl_state.json"  # when each commander was last crawled, so crawls take turns
+RELEASE = "deck-corpus"  # the GitHub release the corpus lives on (too big for git)
 
 
 _last = 0.0
@@ -124,6 +128,19 @@ def save_corpus(corpus, path=CORPUS):
     os.replace(path + ".tmp", path)
 
 
+def full_names(wanted, names):
+    """Archidekt only finds a commander by its exact, full name, so: the full names of these
+    cards, written in any case and double-faced ones by their front face. names: {oracle id: name}"""
+    # Reversible printings are named twice over ("Atraxa, Praetors' Voice // Atraxa, Praetors' Voice")
+    real = [n for n in names.values() if len(set(n.split(" // "))) == len(n.split(" // "))]
+    full = {name.split(" // ")[0].lower(): name for name in real}
+    full.update({name.lower(): name for name in real})  # a whole name beats a front face
+    unknown = [w for w in wanted if w.lower() not in full]
+    if unknown:
+        raise SystemExit(f"Not card names: {', '.join(unknown)}")
+    return [full[w.lower()] for w in wanted]
+
+
 def card_names(oracle_file="oracle_cards.jsonl.gz"):
     with gzip.open(oracle_file, "rt", encoding="utf-8") as f:
         return {c["oracle_id"]: c["name"] for c in map(json.loads, f) if c.get("oracle_id")}
@@ -148,7 +165,45 @@ def duration(seconds):
     return f"{h}h {m}m" if h else f"{m}m {s}s" if m else f"{s}s"
 
 
-def crawl(per_commander, only=None, hours=None, top=None, path=CORPUS, state_path=STATE):
+def merge(corpus, state, other_dir, path=CORPUS, state_path=STATE):
+    """Add what another copy of the corpus (in other_dir) has that this one doesn't: decks, and
+    newer versions of decks. Crawl dates keep the later of the two. Returns how many decks it took."""
+    taken = 0
+    for i, d in load_corpus(os.path.join(other_dir, path)).items():
+        if i not in corpus or d["updated"] > corpus[i]["updated"]:
+            corpus[i] = d
+            taken += 1
+    if os.path.exists(os.path.join(other_dir, state_path)):
+        with open(os.path.join(other_dir, state_path), encoding="utf-8") as f:
+            for commander, day in json.load(f).items():
+                state[commander] = max(state.get(commander, ""), day)
+    return taken
+
+
+def share(corpus, state, path=CORPUS, state_path=STATE):
+    """Upload the corpus to the release, after merging in what the release has that it doesn't
+    (another crawl's decks, e.g. the weekly one on GitHub Actions), so nothing there is lost."""
+    print(f"\nSharing with the {RELEASE} release...", flush=True)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            got = subprocess.run(["gh", "release", "download", RELEASE, "--dir", tmp,
+                                  "--pattern", path, "--pattern", state_path])
+            if got.returncode:  # uploading anyway could replace decks we couldn't see
+                raise RuntimeError("couldn't download the release to merge with")
+            taken = merge(corpus, state, tmp, path, state_path)
+        save_corpus(corpus, path)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
+        print(f"Merged in {taken:,} decks from the release; {len(corpus):,} in all", flush=True)
+        if subprocess.run(["gh", "release", "upload", RELEASE, path, state_path, "--clobber"]).returncode:
+            raise RuntimeError("the upload failed")
+        print("Uploaded.", flush=True)
+    except (OSError, RuntimeError) as e:  # OSError: gh isn't installed
+        print(f"Couldn't share it ({e}). Everything is saved here; to try again:\n"
+              f"  gh release upload {RELEASE} {path} {state_path} --clobber", flush=True)
+
+
+def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=CORPUS, state_path=STATE):
     """First the decks updated most recently (new decks, and new versions of ones we have), then up
     to per_commander more decks for each commander: commanders never crawled first (most common
     in the corpus first), then the ones crawled longest ago, until `hours` run out.
@@ -166,6 +221,8 @@ def crawl(per_commander, only=None, hours=None, top=None, path=CORPUS, state_pat
         with open(state_path, encoding="utf-8") as f:
             state = json.load(f)
     names = card_names() if os.path.exists("oracle_cards.jsonl.gz") else {}  # from build_index.py
+    if only and names:
+        only = full_names(only, names)
     start, before = time.time(), len(corpus)
     counts = {"new": 0, "updated": 0}
     print(f"{len(corpus):,} decks in {path}" + (f"; crawling for {hours:g} hours" if hours else "")
@@ -256,8 +313,11 @@ def crawl(per_commander, only=None, hours=None, top=None, path=CORPUS, state_pat
 
     save_corpus(corpus, path)
     print(f"Done in {duration(time.time() - start)}: {counts['new']:,} new decks, {counts['updated']:,} updated; "
-          f"{len(corpus):,} in {path} (was {before:,}).\n"
-          f"Share it with the site: gh release upload deck-corpus {path} {state_path} --clobber", flush=True)
+          f"{len(corpus):,} in {path} (was {before:,}).", flush=True)
+    if upload:
+        share(corpus, state, path, state_path)
+    else:
+        print(f"Share it with the site: gh release upload {RELEASE} {path} {state_path} --clobber", flush=True)
 
 
 # === Build site/decks/ ===
@@ -268,6 +328,10 @@ def crawl(per_commander, only=None, hours=None, top=None, path=CORPUS, state_pat
 #       decks  [archidekt id, name, last updated, cards], the newest MAX_DECKS; cards are
 #              positions in `cards`, sorted and stored as gaps (popular cards have small
 #              positions, so the gaps are small numbers; same idea as index/t/)
+#       signature  the SHOWN_SIGNATURE cards these decks play far more often than other decks do
+#       tags   [Scryfall Tagger tag, gaps between positions in `cards`], over the nonland cards
+#              at least COMMON of the decks play: what the site names a commander's builds by
+#              (only for BUILD_DECKS decks or more, as fewer aren't split into builds)
 #   index.json  every commander with a file: [file name, deck count, signature cards], where the
 #              signature cards are what its decks play far more often than other decks do. Used to
 #              find decks with other commanders, and for commanders without enough decks.
@@ -275,16 +339,31 @@ OUT_DIR = os.path.join("site", "decks")
 MIN_DECKS = 5  # fewer decks than this don't make useful recommendations
 MAX_DECKS = 3000  # per commander, newest first: keeps a file around 300 KB to download
 SIGNATURE = 24
+SHOWN_SIGNATURE = 60
+COMMON = 0.02  # same as `rare` in findBuilds (site/deck.js)
+BUILD_DECKS = 100  # 2 * DECKS_PER_BUILD in site/deck.js
+MAX_TAG_CARDS = 2000  # tags on more cards than this ("removal") don't tell builds apart
+# Tags about how a card is worded or printed rather than what a deck does with it
+NOT_A_PLAN = re.compile(r"^cycle-|-effect$|vanilla|^multiple-|^passive-ability$|^delayed-trigger$|"
+                        r"^inverted-effects$|^intervening-if|out-of-color|^noncreature-typal$|"
+                        r"^unique-type-line$|^drawback$|^cheaper-than-mv$|^staple-with")
 
 
 def gaps(numbers):
     return [b - a for a, b in zip([0] + numbers, numbers)]
 
 
-def build(corpus, cards, out_dir=OUT_DIR):
-    """corpus: {id: deck} (see slim_deck); cards: Scryfall cards in card-index order."""
+def build(corpus, cards, tags=None, out_dir=OUT_DIR):
+    """corpus: {id: deck} (see slim_deck); cards: Scryfall cards in card-index order;
+    tags: Scryfall Tagger tags, {slug: (oracle ids, names)} (see load_oracle_tags)."""
     number = {c["oracle_id"]: i for i, c in enumerate(cards) if c.get("oracle_id")}
     basic = {c["oracle_id"] for c in cards if "Basic" in c.get("type_line", "")}
+    card_tags = defaultdict(list)
+    for slug, (ids, _) in (tags or {}).items():
+        if len(ids) <= MAX_TAG_CARDS and not NOT_A_PLAN.search(slug):
+            for o in ids:
+                if o in number:
+                    card_tags[number[o]].append(slug)
     groups = defaultdict(list)
     for d in corpus.values():
         if not all(o in number for o in d["commanders"]):
@@ -306,13 +385,21 @@ def build(corpus, cards, out_dir=OUT_DIR):
         here = Counter(c for _, played in decks for c in played)
         played_most = sorted(here, key=lambda c: (-here[c], c))
         position = {c: i for i, c in enumerate(played_most)}
+        lift = {c: here[c] / len(decks) - everywhere[c] / total for c in here}
+        signature = sorted(here, key=lambda c: -lift[c])
+        by_tag = defaultdict(list)
+        for i, c in enumerate(played_most if len(decks) >= BUILD_DECKS else []):
+            if here[c] >= max(2, COMMON * len(decks)) and "Land" not in cards[c].get("type_line", ""):
+                for t in card_tags[c]:
+                    by_tag[t].append(i)
         write_json(os.path.join(out_dir, f"{key}.json"), {
             "cards": played_most,
             "decks": [[d["id"], d["name"][:80], d["updated"], gaps(sorted(position[c] for c in played))]
                       for d, played in decks],
+            "signature": signature[:SHOWN_SIGNATURE],
+            "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
         })
-        lift = {c: here[c] / len(decks) - everywhere[c] / total for c in here}
-        commanders.append([key, len(decks), sorted(here, key=lambda c: -lift[c])[:SIGNATURE]])
+        commanders.append([key, len(decks), signature[:SIGNATURE]])
     commanders.sort(key=lambda c: -c[1])
     write_json(os.path.join(out_dir, "index.json"), {"decks": total, "commanders": commanders})
     size = sum(os.path.getsize(os.path.join(out_dir, f)) for f in os.listdir(out_dir))
@@ -325,15 +412,17 @@ if __name__ == "__main__":
     c = sub.add_parser("crawl", help="download decks from Archidekt into the corpus")
     c.add_argument("--per-commander", type=int, default=100,
                    help="new decks to fetch per commander (0: only recently updated decks)")
-    c.add_argument("--only", nargs="*", help="crawl just these commanders (exact names)")
+    c.add_argument("--only", nargs="*", help="crawl just these commanders (card names; double-faced ones by either)")
     c.add_argument("--hours", type=float, help="stop after this long")
     c.add_argument("--top", type=int, help="instead: top up the N most played commanders to --per-commander decks each")
     c.add_argument("--rate", type=float, default=1 / DELAY, help="requests a second (default: %(default)g)")
+    c.add_argument("--no-upload", action="store_true",
+                   help="don't merge with and upload to the deck-corpus release when the crawl stops")
     sub.add_parser("build", help="write site/decks/ from the corpus")
     args = p.parse_args()
     sys.stdout.reconfigure(errors="replace")  # deck names with emoji can't crash a non-UTF-8 console
     if args.cmd == "crawl":
         DELAY = 1 / args.rate
-        crawl(args.per_commander, args.only, args.hours, args.top)
+        crawl(args.per_commander, args.only, args.hours, args.top, upload=not args.no_upload)
     else:
-        build(load_corpus(), by_popularity(load_cards()))
+        build(load_corpus(), by_popularity(load_cards()), load_oracle_tags())

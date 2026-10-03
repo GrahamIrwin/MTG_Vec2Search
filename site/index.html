@@ -351,7 +351,7 @@
     .term small { color: var(--ink-faint); margin-left: 4px; font-variant-numeric: tabular-nums; }
 
     /* ---------- Find cards / Find similar decks ---------- */
-    .modes { display: flex; justify-content: center; gap: 6px; margin-top: 18px; }
+    .modes { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 18px; }
     .modes a {
       padding: 5px 16px; border-radius: 999px; text-decoration: none; color: var(--ink-soft);
       border: 1px solid transparent; font-size: 16px;
@@ -395,6 +395,36 @@
     .type-filter button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
     .type-filter small { margin-left: 5px; opacity: .75; font-variant-numeric: tabular-nums; }
 
+    /* ---------- Commanders ---------- */
+    .filter-box {
+      flex: 1; max-width: 420px; padding: 9px 14px; font-size: 17px;
+      border: 1px solid var(--rule); border-radius: 10px; background: var(--paper);
+    }
+    .filter-box:focus { outline: none; border-color: var(--brass); box-shadow: 0 0 0 3px rgb(168 131 74 / .22); }
+    a.card { text-decoration: none; }
+    .commander-head { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; }
+    .commander-head h2 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 8px 0 4px; }
+    .commander-head .btn-quiet { display: inline-block; margin-top: 10px; text-decoration: none; }
+    .commander-art { display: flex; gap: 12px; }
+    .commander-art img { width: min(200px, 36vw); border-radius: 4.75% / 3.4%; box-shadow: var(--shadow-md); }
+    @media (max-width: 600px) {
+      .commander-head { grid-template-columns: 1fr; }
+      .commander-art { justify-content: center; }
+      .commander-art img { width: min(200px, 42vw); }
+    }
+    .deck-list.plain summary { grid-template-columns: 1fr auto; }
+    .deck-list.plain .deck-meta { grid-column: 1 / -1; }
+    .deck-list .deck-body.type-groups { padding-top: 12px; columns: 2 260px; }
+    #average h3 { font-size: 20px; margin: 26px 0 0; }
+    #average h3 small { font-family: Georgia, serif; color: var(--ink-faint); font-size: 15px; margin-left: 8px; }
+    #average .gallery { margin-top: 12px; }
+    .average-export { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 28px; }
+    .type-groups { columns: 3 280px; column-gap: 28px; }
+    .type-group { break-inside: avoid; margin-bottom: 14px; }
+    .type-group h3 { font-size: 17px; margin-bottom: 6px; }
+    .type-group h3 small { font-family: Georgia, serif; color: var(--ink-faint); font-size: 14px; margin-left: 6px; }
+    .type-group .term-items { padding: 0; }
+
     /* ---------- Footer ---------- */
     .colophon { max-width: 980px; margin: 84px auto 0; padding-bottom: 44px; font-size: 15px; line-height: 1.6; color: var(--ink-soft); }
     .ornament {
@@ -433,6 +463,7 @@
       <nav class="modes" aria-label="What to search">
         <a href="./" id="mode-cards">Find cards</a>
         <a href="?deck" id="mode-deck">Deck recommendations</a>
+        <a href="?commanders" id="mode-commanders">Commanders</a>
       </nav>
     </header>
 
@@ -572,6 +603,55 @@
             <p class="muted deck-lede">Commanders whose decks play the most of your cards. Pick one to compare with their decks.</p>
             <div class="term-items" id="others"></div>
           </div>
+        </div>
+      </section>
+
+      <section class="deck-view" id="commander-view" hidden>
+        <p class="message" id="commander-message" hidden></p>
+        <div id="commander-list" hidden>
+          <div class="results-head">
+            <input type="search" id="commander-filter" class="filter-box" placeholder="Filter commanders, e.g. Atraxa" aria-label="Filter commanders">
+            <span class="count" id="commander-count" role="status"></span>
+          </div>
+          <div class="gallery" id="commanders"></div>
+          <div class="more-wrap"><button id="more-commanders" class="btn-quiet" type="button" hidden>Show more</button></div>
+        </div>
+
+        <div id="commander-page" hidden>
+          <div class="commander-head">
+            <div class="commander-art" id="commander-art"></div>
+            <div>
+              <a href="?commanders">← All commanders</a>
+              <h2 id="commander-name"></h2>
+              <p class="muted" id="commander-meta"></p>
+              <a href="?deck" class="btn-quiet">Compare your deck with these</a>
+            </div>
+          </div>
+          <h2 class="deck-heading">Builds</h2>
+          <p class="muted deck-lede" id="builds-lede"></p>
+          <div class="chips type-filter" id="builds" role="group" aria-label="Build"></div>
+          <h2 class="deck-heading">Signature cards</h2>
+          <p class="muted deck-lede" id="signature-lede"></p>
+          <div class="chips type-filter" id="signature-types" role="group" aria-label="Card type"></div>
+          <div class="gallery" id="signature"></div>
+          <div class="more-wrap"><button id="more-signature" class="btn-quiet" type="button" hidden>Show more</button></div>
+          <h2 class="deck-heading">Most played</h2>
+          <p class="muted deck-lede">Every card these decks play, most played first.</p>
+          <div class="chips type-filter" id="played-types" role="group" aria-label="Card type"></div>
+          <div class="gallery" id="played"></div>
+          <div class="more-wrap"><button id="more-played" class="btn-quiet" type="button" hidden>Show more</button></div>
+          <h2 class="deck-heading">Average deck</h2>
+          <p class="muted deck-lede" id="average-lede"></p>
+          <div id="average"></div>
+          <div class="average-export">
+            <button id="copy-average" class="btn-quiet" type="button">Copy list</button>
+            <button id="download-average" class="btn-quiet" type="button">Download .txt</button>
+            <span class="muted">One card per line, ready to paste into Moxfield, Archidekt or Deck recommendations.</span>
+          </div>
+          <h2 class="deck-heading">Decklists</h2>
+          <p class="muted deck-lede">Newest first. Open one to see its cards.</p>
+          <ol class="deck-list plain" id="lists"></ol>
+          <div class="more-wrap"><button id="more-lists" class="btn-quiet" type="button" hidden>Show more decks</button></div>
         </div>
       </section>
     </main>
