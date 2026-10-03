@@ -71,17 +71,19 @@ def get_json(path):
 
 def search_decks(commander=None, pages=MAX_PAGES):
     """(id, last update date) of complete Commander decks, most recently updated first,
-    optionally only those led by this commander."""
-    query = {"deckFormat": COMMANDER_FORMAT, "orderBy": "-updatedAt", "pageSize": 50}
+    optionally only those led by this commander. A search stops after MAX_PAGES (3,000 decks),
+    so a commander's search then goes on from its oldest decks: twice as many in all."""
+    query = {"deckFormat": COMMANDER_FORMAT, "pageSize": 50}
     if commander:
         query["commanderName"] = commander
-    for page in range(1, pages + 1):
-        data = get_json("/decks/v3/?" + urllib.parse.urlencode({**query, "page": page}))
-        for d in (data or {}).get("results") or []:
-            if MIN_CARDS <= d.get("size", 0) <= MAX_CARDS and not d.get("private") and not d.get("unlisted"):
-                yield d["id"], (d.get("updatedAt") or "")[:10]
-        if not data or not data.get("next"):
-            return
+    for order in ["-updatedAt", "updatedAt"] if commander else ["-updatedAt"]:
+        for page in range(1, pages + 1):
+            data = get_json("/decks/v3/?" + urllib.parse.urlencode({**query, "orderBy": order, "page": page}))
+            for d in (data or {}).get("results") or []:
+                if MIN_CARDS <= d.get("size", 0) <= MAX_CARDS and not d.get("private") and not d.get("unlisted"):
+                    yield d["id"], (d.get("updatedAt") or "")[:10]
+            if not data or not data.get("next"):
+                break
 
 
 def slim_deck(deck):
@@ -198,6 +200,10 @@ def share(corpus, state, path=CORPUS, state_path=STATE):
         if subprocess.run(["gh", "release", "upload", RELEASE, path, state_path, "--clobber"]).returncode:
             raise RuntimeError("the upload failed")
         print("Uploaded.", flush=True)
+        # The site only reads the corpus when it's built, so build it now rather than on Monday
+        deployed = not subprocess.run(["gh", "workflow", "run", "deploy.yml"]).returncode
+        print("Started a deploy; the site has the new decks in a few minutes." if deployed else
+              "Couldn't start a deploy: Actions → Build and deploy → Run workflow", flush=True)
     except (OSError, RuntimeError) as e:  # OSError: gh isn't installed
         print(f"Couldn't share it ({e}). Everything is saved here; to try again:\n"
               f"  gh release upload {RELEASE} {path} {state_path} --clobber", flush=True)

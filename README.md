@@ -121,7 +121,8 @@ python build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any ti
 ```
 
 When a crawl stops (Ctrl+C, or its hours run out) it uploads the corpus to the
-release, after first merging in any decks the release has that it doesn't (the
+release (and starts a deploy, so the site has them), after first merging in any
+decks the release has that it doesn't (the
 weekly crawl's, say), so an upload never loses any. `--no-upload` skips that.
 
 To fill in commanders the corpus barely has, top up the most played ones (by
