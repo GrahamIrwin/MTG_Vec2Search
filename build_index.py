@@ -104,8 +104,10 @@ def load_cards():
             if not line.strip():
                 continue
             card = json.loads(line)
-            # Skip digital-only cards, tokens, and non-traditional cards
-            if card.get("digital") or card.get("layout") in SKIP_LAYOUTS:
+            # Skip digital-only cards, tokens, and non-traditional cards. A paper card's one oracle
+            # entry can be a digital printing (Tundra's is MTGO), so digital-only means no Vintage legality.
+            digital_only = card.get("digital") and card.get("legalities", {}).get("vintage") == "not_legal"
+            if digital_only or card.get("layout") in SKIP_LAYOUTS:
                 continue
             # Double-faced/split cards keep colors and rules text on their faces
             faces = card.get("card_faces", [])
