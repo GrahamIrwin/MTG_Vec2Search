@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, distinctive, averageDeck, buildName, buildTags,
+  decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "./site/deck.js";
 
 const NAMES = ["Sol Ring", "Atraxa, Praetors' Voice", "Delver of Secrets // Insectile Aberration", "Island",
@@ -120,4 +121,44 @@ test("deck link worker: Moxfield and Archidekt decks become plain decklists", as
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("trends: rising commanders and cards, within the filters", () => {
+  // made: [ever, 90 days, 30 days, 7 days]; plays per window for the cards 5 and 9
+  const { commanders, everything } = decodeTrends({ themes: ["tokens", "lifegain"],
+    everything: [[150, 36, 20, 7], [5, 4], [[110, 16], [30, 6], [17, 3], [7, 0]]],
+    commanders: [["1", [100, 10, 5, 1], 20000, 3, [0]], ["2", [20, 20, 12, 6], 8000, 2, [1]], ["3-4", [30, 6, 3, 0], 5000, 2, [0, 1]]] });
+  withCards(commanders, [[[5, 4], [[90, 10], [10, 0], [5, 0], [1, 0]]], [[5, 4], [[20, 0], [20, 0], [12, 0], [6, 0]]], [[9], [[6], [6], [3], [0]]]]);
+  assert.deepEqual(commanders[0].cards, [5, 9]);
+  assert.deepEqual(trendingCards([everything], 2), trendingCards(commanders, 2)); // all of them, as one
+  commanders.forEach((c, i) => (c.identity = [0b1, 0b11, 0b100][i])); // W, WU, B
+  const keys = list => list.map(c => c.key);
+
+  const all = trendingCommanders(commanders, 2);
+  assert.deepEqual(keys(all.popular), ["2", "1", "3-4"]);
+  assert.deepEqual(keys(all.rising), ["2"]); // all its decks are new
+  assert.deepEqual(trendingCommanders(commanders, 0).rising, []); // nothing rises over all time
+
+  // In the last 30 days: card 5 is in 17 of 20 decks (was 110 of 150), card 9 in 3 (was 16)
+  const cards = trendingCards(commanders, 2);
+  assert.deepEqual(cards.popular.map(x => [x.card, x.decks]), [[5, 17], [9, 3]]);
+  assert.deepEqual(cards.rising.map(x => x.card), [5, 9]);
+  // Only commander 1: card 9 fell from 10% of its decks to none
+  assert.deepEqual(trendingCards(commanders.slice(0, 1), 2).rising.map(x => x.card), [5]);
+
+  assert.deepEqual(keys(filterCommanders(commanders, { colors: 0b11 })), ["1", "2"]); // fit within WU
+  assert.deepEqual(keys(filterCommanders(commanders, { colors: 0 })), []); // colorless
+  assert.deepEqual(keys(filterCommanders(commanders, { maxPrice: 10000, kind: "single" })), ["2"]);
+  assert.deepEqual(keys(filterCommanders(commanders, { themes: new Set([0]), brackets: [2] })), ["3-4"]);
+  assert.deepEqual(keys(filterCommanders(commanders, { window: 3, min: 1 })), ["1", "2"]);
+
+  assert.deepEqual(commandersPlaying(commanders, 9).map(c => [c.key, c.decks]), [["3-4", 6], ["1", 10]]);
+});
+
+test("a commander's rising cards: what its recent decks play more than its decks overall", () => {
+  // Six decks all play card 10; only the three newest also play 11
+  const shard = decodeShard({ cards: [10, 11], decks: [1, 2, 3, 4, 5, 6].map(id => [id, "", "", id > 3 ? [0, 1] : [0]]) });
+  const all = [0, 1, 2, 3, 4, 5];
+  assert.deepEqual(risingCards(shard, all, [3, 4, 5]).map(x => [x.p, x.share, x.was]), [[1, 1, 0.5]]);
+  assert.deepEqual(risingCards(shard, all, all), []); // the same decks: nothing rises
 });

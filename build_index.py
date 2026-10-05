@@ -195,8 +195,9 @@ def vectorize_card(card, index, find_keywords, card_tags=(), subtype_names=froze
 
 def load_printings():
     """From every paper printing, by oracle_id: the cheapest current USD price (nonfoil, foil or
-    etched) and the first release date (YYYY-MM-DD)."""
-    prices, released = {}, {}
+    etched), the first release date (YYYY-MM-DD) and the sets it was printed in.
+    Also {set code: (name, release date)} for every paper set."""
+    prices, released, in_sets, sets = {}, {}, {}, {}
     with gzip.open(PRINTINGS_FILE, "rt", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -211,7 +212,12 @@ def load_printings():
                 prices[oracle_id] = min(prices.get(oracle_id, usd[0]), *usd)
             if c.get("released_at"):
                 released[oracle_id] = min(released.get(oracle_id, c["released_at"]), c["released_at"])
-    return prices, released
+            if c.get("set_type") not in NO_SET_FILTER:
+                in_sets.setdefault(oracle_id, set()).add(c["set"])
+                day = c.get("released_at") or ""
+                first = min(sets.get(c["set"], ("", day))[1], day)
+                sets[c["set"]] = (c["set_name"], first)
+    return prices, released, in_sets, sets
 
 
 # === Step 4: Write the index ===
@@ -222,12 +228,19 @@ def load_printings():
 #   c/<chunk>.json name + Scryfall id for each block of CHUNK cards, fetched to show results
 #   names.json     all card names, only fetched for card-name searches and sorting by name
 #   released.json  first release date per card (days since 1993-01-01), only fetched to sort by date
+#   s/<set>.json   the cards printed in each set (numbered as in meta's sets), fetched to filter by set
 # Cards are in popularity order (EDHREC rank), so the top results sit in the first chunks.
 OUT_DIR = os.path.join("site", "index")
 CHUNK = 256
 FILTER_TYPES = [t for t in TYPES if t != "Legendary"]
 NO_PRICE = -1
 EPOCH, NO_DATE = date(1993, 1, 1), -1
+NO_SET_FILTER = {"token", "memorabilia", "minigame", "promo"}  # sets too odd or too many to list
+
+
+def gaps(card_numbers):
+    """Gaps between (ascending) card numbers are small numbers, which keeps the files short."""
+    return [b - a for a, b in zip([0] + card_numbers, card_numbers)]
 
 
 def by_popularity(cards):
@@ -242,7 +255,7 @@ def write_json(path, data):
 
 
 def build_index(cards, updated, tags, printings):
-    prices, released = printings
+    prices, released, in_sets, all_sets = printings
     terms, keywords, categories = build_term_space(cards, tags)
     index = {t: i for i, t in enumerate(terms)}
     find_keywords = keyword_matcher(keywords)
@@ -268,6 +281,12 @@ def build_index(cards, updated, tags, printings):
         price = prices.get(c.get("oracle_id"))
         columns["price"].append(round(price * 100) if price is not None else NO_PRICE)  # cents
 
+    set_cards = {}
+    for i, c in enumerate(cards):
+        for code in in_sets.get(c.get("oracle_id"), ()):
+            set_cards.setdefault(code, []).append(i)
+    sets = sorted(set_cards, key=lambda code: all_sets[code][1], reverse=True)  # newest first
+
     if os.path.isdir(OUT_DIR):
         shutil.rmtree(OUT_DIR)
     write_json(os.path.join(OUT_DIR, "meta.json"), {
@@ -276,6 +295,7 @@ def build_index(cards, updated, tags, printings):
         # Other names a tag goes by (label, community aliases), for matching queries
         "tag_names": {t: [n for n in tags[t[4:]][1] if n != t[4:]] for t in terms if t.startswith("tag:")},
         "categories": [[name, [index[t] for t in ts if t in index]] for name, ts in categories.items()],
+        "sets": [[code, all_sets[code][0]] for code in sets],
     })
     write_json(os.path.join(OUT_DIR, "columns.json"), columns)
     write_json(os.path.join(OUT_DIR, "names.json"), [c["name"] for c in cards])
@@ -283,8 +303,9 @@ def build_index(cards, updated, tags, printings):
     write_json(os.path.join(OUT_DIR, "released.json"),
                [(date.fromisoformat(d) - EPOCH).days if d else NO_DATE for d in first])
     for t, cards_with_term in enumerate(postings):
-        # Gaps between card numbers are small numbers, which keeps the files short
-        write_json(os.path.join(OUT_DIR, "t", f"{t}.json"), [b - a for a, b in zip([0] + cards_with_term, cards_with_term)])
+        write_json(os.path.join(OUT_DIR, "t", f"{t}.json"), gaps(cards_with_term))
+    for s, code in enumerate(sets):  # numbered, not named: Conflux's code "con" is no file name on Windows
+        write_json(os.path.join(OUT_DIR, "s", f"{s}.json"), gaps(set_cards[code]))
     for k in range(0, len(cards), CHUNK):
         write_json(os.path.join(OUT_DIR, "c", f"{k // CHUNK}.json"), [[c["name"], c["id"]] for c in cards[k:k + CHUNK]])
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(OUT_DIR) for f in fs)

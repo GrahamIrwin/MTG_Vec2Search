@@ -6,6 +6,7 @@ import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags,
+  decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "./deck.js";
 
 const PAGE_SIZE = 30;
@@ -27,8 +28,10 @@ const form = $("search");
 const params = new URLSearchParams(location.search);
 const deckMode = params.has("deck");
 const commanderKey = params.get("commander");
-const commandersMode = params.has("commanders") || commanderKey !== null;
-const searching = !deckMode && !commandersMode && [...params.keys()].some(k => k !== "sort");
+const cardKey = params.get("card"); // a card's page: the commanders whose decks play it
+const commandersMode = params.has("commanders") || commanderKey !== null || cardKey !== null;
+const trendsMode = params.has("trends");
+const searching = !deckMode && !commandersMode && !trendsMode && [...params.keys()].some(k => k !== "sort");
 
 function el(tag, props = {}, ...children) {
   const node = Object.assign(document.createElement(tag), props);
@@ -62,17 +65,21 @@ for (const input of form.elements) {
   else if (input.name && params.has(input.name)) input.value = params.get(input.name);
 }
 // Colorless excludes every color, so checking it clears and grays out the color pips
-const colorless = form.querySelector('[name="c"][value="C"]');
-const syncColorless = () => {
-  for (const pip of form.querySelectorAll('[name="c"]:not([value="C"])')) {
-    pip.disabled = colorless.checked;
-    if (colorless.checked) pip.checked = false;
-  }
-};
-colorless.addEventListener("change", syncColorless);
-syncColorless();
+function linkColorless(f) {
+  const colorless = f.querySelector('[name="c"][value="C"]');
+  const sync = () => {
+    for (const pip of f.querySelectorAll('[name="c"]:not([value="C"])')) {
+      pip.disabled = colorless.checked;
+      if (colorless.checked) pip.checked = false;
+    }
+  };
+  colorless.addEventListener("change", sync);
+  sync();
+}
+linkColorless(form);
 form.addEventListener("submit", e => {
   e.preventDefault();
+  if (metaSets) $("set-code").value = setCode($("set").value);
   const next = new URLSearchParams([...new FormData(form)].filter(([, v]) => v));
   if (params.get("sort")) next.set("sort", params.get("sort"));
   location.search = next;
@@ -94,7 +101,7 @@ document.addEventListener("keydown", e => {
 });
 
 const activeFilters = params.getAll("c").length + params.getAll("t").length
-  + ["min", "max", "price", "f"].filter(k => params.get(k)).length;
+  + ["min", "max", "price", "f", "s"].filter(k => params.get(k)).length;
 if (activeFilters) {
   $("filter-count").textContent = activeFilters;
   $("filter-count").hidden = false;
@@ -124,18 +131,33 @@ $("currency").onchange = () => {
   location.reload();
 };
 $("money").dataset.symbol = money.symbol;
-if (currency !== "USD") $("price-label").textContent = `Max price (${currency})`;
+$("budget-money").dataset.symbol = money.symbol;
+if (currency !== "USD") {
+  $("price-label").textContent = `Max price (${currency})`;
+  $("budget-label").textContent = `Max deck price (${currency})`;
+}
 
 // === Index files: each is downloaded only when something needs it (see build_index.py) ===
-let metaPromise;
+let metaPromise, metaSets;
 function getMeta() {
   metaPromise ??= getJson("index/meta.json").then(meta => {
+    metaSets = meta.sets;
     $("updated").textContent = `updated ${new Date(meta.updated).toLocaleDateString(undefined, { dateStyle: "long", timeZone: "UTC" })}`;
     for (const f of meta.formats) $("format").append(el("option", { value: f, textContent: f[0].toUpperCase() + f.slice(1) }));
     $("format").value = params.get("f") ?? "";
+    $("sets").append(...meta.sets.map(([code, name]) => el("option", { value: setLabel(code, name) })));
+    const chosen = meta.sets.find(([code]) => code === params.get("s"));
+    if (chosen) $("set").value = setLabel(...chosen);
     return meta;
   });
   return metaPromise;
+}
+// The set box shows "Bloomburrow (BLB)"; the URL holds the code. Typing just the name or code works too.
+const setLabel = (code, name) => `${name} (${code.toUpperCase()})`;
+function setCode(text) {
+  const t = text.trim().toLowerCase();
+  const found = t && (metaSets ?? []).find(([code, name]) => [code, name.toLowerCase(), setLabel(code, name).toLowerCase()].includes(t));
+  return found ? found[0] : "";
 }
 $("filters").addEventListener("toggle", () => $("filters").open && getMeta());
 
@@ -144,12 +166,14 @@ const message = text => {
   $("message").textContent = text;
   $("message").hidden = !text;
 };
-$("intro").hidden = searching || deckMode || commandersMode;
+$("intro").hidden = searching || deckMode || commandersMode || trendsMode;
 $("results").hidden = !searching;
-form.hidden = deckMode || commandersMode;
+form.hidden = deckMode || commandersMode || trendsMode;
 $("deck-view").hidden = !deckMode;
 $("commander-view").hidden = !commandersMode;
-$(deckMode ? "mode-deck" : commandersMode ? "mode-commanders" : "mode-cards").setAttribute("aria-current", "page");
+$("trends-view").hidden = !trendsMode;
+$(deckMode ? "mode-deck" : commandersMode ? "mode-commanders" : trendsMode ? "mode-trends" : "mode-cards")
+  .setAttribute("aria-current", "page");
 
 let index;
 let results = [];
@@ -167,6 +191,8 @@ async function runSearch() {
     min: num("min"), max: num("max"),
     maxPrice: limit !== null ? limit / (money.rate ?? 1) : isBudget(query) ? BUDGET_USD : null,
   };
+  const set = index.sets.findIndex(([code]) => code === params.get("s"));
+  if (set >= 0) filters.printedIn = new Set(decodePosting(await getJson(`index/s/${set}.json`)));
   const groups = parseQuery(query, index);
   if (groups.length) {
     const postings = await Promise.all(termsNeeded(index, groups).map(async t => [t, decodePosting(await getJson(`index/t/${t}.json`))]));
@@ -229,7 +255,7 @@ function cardTile(card, { name, id }, detail, bar, i) {
   const img = el("img", { alt: name, loading: "lazy", decoding: "async" });
   img.onload = () => img.classList.add("loaded");
   img.src = imageUrl(id);
-  const tile = el("button", { className: "card", type: "button", onclick: () => openCard(id) },
+  const tile = el("button", { className: "card", type: "button", onclick: () => openCard(id, card) },
     el("span", { className: "card-art" }, img),
     el("span", { className: "card-name", textContent: name }),
     el("span", { className: "card-meta" },
@@ -316,7 +342,27 @@ const foil = $("foil");
 let current = null;
 foil.onchange = updatePrice;
 
-async function openCard(id) {
+let deckIndex; // decks/index.json
+const getDeckIndex = () => (deckIndex ??= getJson("decks/index.json").catch(err => { deckIndex = null; throw err; }));
+let actionsFor;
+async function showCardActions(card) {
+  actionsFor = card;
+  $("card-actions").hidden = card === undefined;
+  $("as-commander").hidden = true;
+  if (card === undefined) return;
+  $("in-decks").href = "?" + new URLSearchParams({ card });
+  // A commander page for it alone, or else for the partners it's played with most
+  const { commanders } = await getDeckIndex().catch(() => ({ commanders: [] }));
+  const key = commanders.find(([k]) => k === String(card))?.[0] ?? commanders.find(([k]) => k.split("-").includes(String(card)))?.[0];
+  if (key && actionsFor === card) {
+    $("as-commander").href = commanderLink(key);
+    $("as-commander").hidden = false;
+  }
+}
+
+// card: its number in the index, when known, for links to the commanders that play it
+async function openCard(id, card) {
+  showCardActions(card);
   $("printings").replaceChildren();
   $("modal-name").textContent = "Loading…";
   $("modal-type").textContent = $("modal-set").textContent = $("price").textContent = "";
@@ -394,7 +440,7 @@ const deckMessage = text => {
 let deckData;
 function loadDeckData() {
   deckData ??= Promise.all([getMeta(), getJson("index/columns.json"), getJson("index/names.json"),
-    getJson("decks/index.json"), usdRate(currency)])
+    getDeckIndex(), usdRate(currency)])
     .then(([meta, columns, names, decks, rate]) => {
       money = moneyFormatter(currency, rate);
       index = buildIndex(meta, columns);
@@ -406,7 +452,7 @@ function loadDeckData() {
 const commanderNames = (key, names) => key.split("-").map(n => names[n]).join(" & ");
 const typeOf = card => TYPE_ORDER.find(t => index.columns.types[card] & (1 << index.types.indexOf(t))) ?? "Other";
 const cardButton = (card, names, label = names[card]) =>
-  el("button", { type: "button", className: "term", textContent: label, onclick: async () => openCard((await cardInfo(card)).id) });
+  el("button", { type: "button", className: "term", textContent: label, onclick: async () => openCard((await cardInfo(card)).id, card) });
 
 // The decklist to compare: what was pasted, or the list behind a pasted link.
 // Returns { list, name?, site? }, or { error }.
@@ -571,40 +617,51 @@ const commanderMessage = text => {
 };
 const commanderLink = key => "?" + new URLSearchParams({ commander: key });
 
-async function showCommanders() {
-  const { names, decks } = await loadDeckData();
-  const all = decks.commanders.map(([key, count]) => ({ key, count, name: commanderNames(key, names) }));
-  let matches = all;
+// A gallery of commanders, PAGE_COMMANDERS at a time, each opening its page. Returns a function
+// that shows a list: [{key, name, detail}]
+function commanderGallery(gallery, moreButton) {
+  let list = [];
   let shown = 0;
   const more = async () => {
-    const list = matches;
-    $("more-commanders").hidden = true;
-    const page = list.slice(shown, shown + PAGE_COMMANDERS);
+    const current = list;
+    moreButton.hidden = true;
+    const page = current.slice(shown, shown + PAGE_COMMANDERS);
     const infos = await Promise.all(page.map(c => cardInfo(+c.key.split("-")[0])));
-    if (list !== matches) return; // filtered again while loading
-    $("commanders").append(...page.map((c, i) => {
+    if (current !== list) return; // shown another list while loading
+    gallery.append(...page.map((c, i) => {
       const img = el("img", { alt: "", loading: "lazy", decoding: "async" });
       img.onload = () => img.classList.add("loaded");
       img.src = imageUrl(infos[i].id);
       const tile = el("a", { className: "card", href: commanderLink(c.key) },
         el("span", { className: "card-art" }, img),
         el("span", { className: "card-name", textContent: c.name }),
-        el("span", { className: "card-meta" }, el("span", { textContent: `${c.count.toLocaleString()} decks` })));
+        el("span", { className: "card-meta" }, el("span", { textContent: c.detail })));
       tile.style.setProperty("--i", i);
       return tile;
     }));
     shown += page.length;
-    $("more-commanders").hidden = shown >= list.length;
+    moreButton.hidden = shown >= current.length;
   };
-  $("more-commanders").onclick = more;
+  moreButton.onclick = more;
+  return items => {
+    list = items;
+    shown = 0;
+    gallery.replaceChildren();
+    return more();
+  };
+}
+const showCommanderList = commanderGallery($("commanders"), $("more-commanders"));
+
+async function showCommanders() {
+  const { names, decks } = await loadDeckData();
+  const all = decks.commanders.map(([key, count]) => ({ key, name: commanderNames(key, names), detail: `${count.toLocaleString()} decks` }));
+  $("random-commander").onclick = () => (location.search = commanderLink(pick(all).key));
   $("commander-filter").oninput = () => {
     const q = $("commander-filter").value.trim().toLowerCase();
-    matches = all.filter(c => c.name.toLowerCase().includes(q));
+    const matches = all.filter(c => c.name.toLowerCase().includes(q));
     $("commander-count").textContent = `${matches.length.toLocaleString()} ${matches.length === 1 ? "commander" : "commanders"}`
       + (q ? "" : ` · ${decks.decks.toLocaleString()} decks`);
-    $("commanders").replaceChildren();
-    shown = 0;
-    more();
+    showCommanderList(matches);
   };
   $("commander-filter").oninput();
   commanderMessage("");
@@ -638,15 +695,23 @@ async function showCommander(key) {
   const lead = commanderNames(key, names);
   document.title = `${lead} · MTG Vec2Search`;
   const leaders = key.split("-").map(Number);
-  const [shard, infos] = await Promise.all([getJson(`decks/${key}.json`).then(decodeShard), Promise.all(leaders.map(cardInfo))]);
+  const [shard, infos, released] = await Promise.all([getJson(`decks/${key}.json`).then(decodeShard),
+    Promise.all(leaders.map(cardInfo)), getReleased()]);
   const n = shard.decks.length;
 
-  $("commander-art").replaceChildren(...infos.map(({ name, id }) =>
-    el("button", { type: "button", className: "card", onclick: () => openCard(id) }, el("img", { src: imageUrl(id), alt: name }))));
+  $("commander-art").replaceChildren(...infos.map(({ name, id }, i) =>
+    el("button", { type: "button", className: "card", onclick: () => openCard(id, leaders[i]) }, el("img", { src: imageUrl(id), alt: name }))));
   const identity = leaders.reduce((m, c) => m | index.columns.identity[c], 0);
   const colors = [..."WUBRG"].filter((_, i) => identity & (1 << i));
   $("commander-name").textContent = lead;
-  $("commander-meta").textContent = `${n.toLocaleString()} decks · ${colors.map(c => COLOR_NAMES[c]).join(", ") || "Colorless"}`;
+  $("commander-meta").textContent = [`${n.toLocaleString()} decks`, colors.map(c => COLOR_NAMES[c]).join(", ") || "Colorless",
+    shard.price >= 0 && `typical deck ${money.formatUsd(shard.price / 100)}`, shard.bracket && `bracket ${shard.bracket}`]
+    .filter(Boolean).join(" · ");
+  // What its decks are known for, each finding more commanders like it on Trends
+  $("commander-themes").hidden = !shard.themes.length;
+  $("commander-themes").replaceChildren(el("span", { className: "label", textContent: "Known for" }),
+    ...shard.themes.map(t => el("a", { className: "term", textContent: tagLabel(t),
+      href: "?" + new URLSearchParams({ trends: "", w: "all", theme: tagLabel(t) }) })));
 
   // Builds: lands are left out of telling them apart (they mostly show a deck's budget)
   const landBit = 1 << index.types.indexOf("Land");
@@ -697,6 +762,7 @@ async function showCommander(key) {
       : distinctive(shard, g.members, { n: SIGNATURE_SHOWN, ignore: lands })).slice(0, SIGNATURE_SHOWN).map(tile));
 
     showPlayed([...counts.keys()].filter(p => counts[p]).sort((a, b) => counts[b] - counts[a] || a - b).map(tile));
+    showCommanderTrends(g, counts);
 
     // The average deck: as many spells and nonbasic lands as these decks play on average, then
     // basic lands, split evenly between the colors, to make 100 cards
@@ -761,16 +827,212 @@ async function showCommander(key) {
     ]));
   }
 
+  // Trends: what the decks made lately play more of, for a window of days (index.json's windows)
+  const windows = (decks.windows ?? []).map((days, i) => ({ days, since: decks.since[i] }));
+  let shownWindow = windows.findIndex(w => w.days === DEFAULT_DAYS && w.since !== null);
+  if (shownWindow < 0) shownWindow = windows.findIndex(w => w.since !== null);
+  function showCommanderTrends(g, counts) {
+    const recentOf = w => (w.since === null ? [] : g.members.filter(d => shard.decks[d].id >= w.since));
+    $("commander-windows").replaceChildren(...windows.map((w, i) => ({ w, i })).reverse().map(({ w, i }) => el("button", {
+      type: "button", ariaPressed: String(i === shownWindow), disabled: w.since === null,
+      title: w.since === null ? "Not enough data yet" : "",
+      onclick: () => { shownWindow = i; showCommanderTrends(g, counts); },
+    }, `${w.days} days`, el("small", { textContent: w.since === null ? "–" : recentOf(w).length }))));
+    const w = windows[shownWindow];
+    const recent = w ? recentOf(w) : [];
+    const whose = g === groups[0] ? `${lead}'s` : "this build's";
+    $("commander-trends-lede").textContent = !w
+      ? "Not enough data yet: decks show up here once the crawler knows when they were made."
+      : `${recent.length.toLocaleString()} of ${whose} ${g.members.length.toLocaleString()} decks were made in the last ${w.days} days.`;
+    const pick = (p, detail, bar) => ({ card: shard.cards[p], type: typeOf(shard.cards[p]), detail, bar });
+    showRising(recent.length ? risingCards(shard, g.members, recent)
+      .map(x => pick(x.p, `${percent(x.was)} → ${percent(x.share)} of decks`, x.share)) : []);
+    showNewCards([...counts.keys()].filter(p => counts[p] && isNew(released, shard.cards[p]))
+      .sort((a, b) => counts[b] - counts[a] || a - b)
+      .map(p => pick(p, `in ${percent(counts[p] / g.members.length)} of decks`, counts[p] / g.members.length)));
+  }
+
   await showGroup(groups[0]);
   commanderMessage("");
   $("commander-page").hidden = false;
 }
 
+// === Trends ===
+const DEFAULT_DAYS = 30;
+const NEW_DAYS = 120; // a card first printed this recently is new
+const MAX_TRENDING = 300;
+const percent = x => `${Math.round(x * 100)}%`;
+let releasedPromise; // index/released.json: first release, in days since 1993-01-01
+const getReleased = () => (releasedPromise ??= getJson("index/released.json"));
+const today = Math.floor((Date.now() - Date.UTC(1993, 0, 1)) / 864e5);
+const isNew = (released, card) => released[card] >= today - NEW_DAYS;
+const showRising = typedGallery($("rising-types"), $("rising"), $("more-rising"));
+const showNewCards = typedGallery($("new-types"), $("new-cards"), $("more-new"));
+const showRisingCommanders = commanderGallery($("rising-commanders"), $("more-rising-commanders"));
+const showPopularCommanders = commanderGallery($("popular-commanders"), $("more-popular-commanders"));
+const showTrendRising = typedGallery($("trend-rising-types"), $("trend-rising"), $("more-trend-rising"));
+const showTrendPlayed = typedGallery($("trend-played-types"), $("trend-played"), $("more-trend-played"));
+const showTrendNew = typedGallery($("trend-new-types"), $("trend-new"), $("more-trend-new"));
+const trendsMessage = text => {
+  $("trends-message").textContent = text;
+  $("trends-message").hidden = !text;
+};
+
+let trendData; // decks/trends.json, with each commander's name and colors
+function loadTrends() {
+  trendData ??= Promise.all([loadDeckData(), getJson("decks/trends.json")]).then(([{ names }, data]) => {
+    const trends = decodeTrends(data);
+    for (const c of trends.commanders) {
+      c.name = commanderNames(c.key, names);
+      c.identity = c.key.split("-").reduce((m, card) => m | index.columns.identity[card], 0);
+    }
+    return trends;
+  });
+  return trendData;
+}
+// Most of each commander's cards (decks/trend-cards.json, about a MB): only for filters and card pages
+let cardsLoaded;
+const loadTrendCards = trends => (cardsLoaded ??= getJson("decks/trend-cards.json").then(data => withCards(trends.commanders, data)));
+
+async function showTrends() {
+  const [{ decks }, trends, released] = await Promise.all([loadDeckData(), loadTrends(), getReleased()]);
+  const windows = [{ days: null, since: 0 }, ...decks.windows.map((days, i) => ({ days, since: decks.since[i] }))];
+  const fromUrl = windows.findIndex(w => String(w.days ?? "all") === params.get("w"));
+  let w = windows[fromUrl]?.since != null ? fromUrl : windows.findIndex(x => x.days === DEFAULT_DAYS && x.since !== null);
+  if (w < 0) w = 0;
+
+  const tform = $("trend-form");
+  for (const input of tform.elements) {
+    if (input.type === "checkbox") input.checked = params.getAll(input.name).includes(input.value);
+    else if (input.name && params.has(input.name)) input.value = params.get(input.name);
+  }
+  linkColorless(tform);
+  $("trend-themes").replaceChildren(...trends.themes.map(t => el("option", { value: tagLabel(t) })));
+
+  const readFilters = () => {
+    const data = new FormData(tform);
+    const colors = data.getAll("c");
+    const theme = data.get("theme").trim().toLowerCase();
+    return {
+      window: w,
+      colors: !colors.length ? null : colors.includes("C") ? 0 : colors.reduce((m, c) => m | (1 << "WUBRG".indexOf(c)), 0),
+      maxPrice: data.get("budget") ? Math.round((data.get("budget") / (money.rate ?? 1)) * 100) : null,
+      themes: theme ? new Set(trends.themes.flatMap((t, i) => (tagLabel(t).toLowerCase().includes(theme) ? [i] : []))) : null,
+      brackets: data.getAll("b").map(Number),
+      kind: data.get("kind"),
+      min: Number(data.get("min")) || 0,
+    };
+  };
+
+  let shownFor;
+  async function update() {
+    const f = readFilters();
+    const active = (f.colors !== null) + (f.maxPrice !== null) + !!f.themes + !!f.brackets.length + !!f.kind + !!f.min;
+    $("trend-filter-count").textContent = active;
+    $("trend-filter-count").hidden = !active;
+    // The URL holds the period and filters, so a view of Trends is a link to share
+    const next = new URLSearchParams([["trends", ""], ...(w ? [["w", windows[w].days]] : [["w", "all"]]),
+      ...[...new FormData(tform)].filter(([, v]) => v)]);
+    history.replaceState(null, "", "?" + next);
+
+    $("trend-windows").replaceChildren(...windows.map((x, i) => ({ x, i })).reverse().map(({ x, i }) => el("button", {
+      type: "button", ariaPressed: String(i === w), disabled: x.since === null, title: x.since === null ? "Not enough data yet" : "",
+      onclick: () => { w = i; update(); },
+    }, x.days ? `${x.days} days` : "All time")));
+
+    const scope = active ? filterCommanders(trends.commanders, f) : trends.commanders;
+    const { popular, rising, total, recent } = trendingCommanders(scope, w);
+    const days = windows[w].days;
+    $("trend-summary").textContent = !scope.length ? "No commanders match these filters."
+      : (days ? `${recent.toLocaleString()} decks made in the last ${days} days, of ` : "")
+        + `${total.toLocaleString()} decks by ${scope.length.toLocaleString()} commanders`;
+    $("rising-commanders-panel").hidden = $("rising-cards-panel").hidden = !days;
+    showRisingCommanders(rising.map(c => ({ key: c.key, name: c.name,
+      detail: `${c.made[w]} new decks · ${c.ratio.toFixed(1)}× its usual share` })));
+    $("popular-commanders-lede").textContent = days ? `Most decks made in the last ${days} days.` : "Most decks of all time.";
+    showPopularCommanders(popular.map(c => ({ key: c.key, name: c.name,
+      detail: `${c.made[w].toLocaleString()} ${days ? "new " : ""}decks` })));
+
+    // Cards: over every deck at once, or the filtered commanders' (which needs most of their cards)
+    const asked = shownFor = {};
+    if (active) {
+      trendsMessage("Loading cards…");
+      await loadTrendCards(trends);
+      if (asked !== shownFor) return;
+      trendsMessage("");
+    }
+    const cards = trendingCards(active ? scope : [trends.everything], w);
+    const pick = (x, detail) => ({ card: x.card, type: typeOf(x.card), detail, bar: x.share });
+    showTrendRising(cards.rising.slice(0, MAX_TRENDING).map(x => pick(x, `${percent(x.was)} → ${percent(x.share)} of decks`)));
+    $("trend-played-lede").textContent = days ? `The share of the decks made in the last ${days} days that play each card.`
+      : "The share of all these decks that play each card.";
+    showTrendPlayed(cards.popular.slice(0, MAX_TRENDING).map(x => pick(x, `in ${percent(x.share)} of decks`)));
+    showTrendNew(cards.popular.filter(x => isNew(released, x.card)).slice(0, MAX_TRENDING)
+      .map(x => pick(x, `in ${percent(x.share)} of decks`)));
+  }
+  tform.addEventListener("input", update);
+  tform.addEventListener("submit", e => e.preventDefault());
+  $("trend-filters").open = [...params.keys()].some(k => !["trends", "w"].includes(k));
+  await update();
+  trendsMessage("");
+  $("trends-page").hidden = false;
+}
+
+// === A card's page: the commanders whose decks play it, by what those decks are known for ===
+const TREND_SHARE = 0.15; // TREND_SHARE in build_decks.py
+const MAX_STRATEGIES = 12;
+const showCardCommanders = commanderGallery($("card-commanders"), $("more-card-commanders"));
+async function showCardPage(card) {
+  const trends = await loadTrends();
+  if (!Number.isInteger(card) || card < 0 || card >= index.n) return commanderMessage("There's no such card.");
+  const [info] = await Promise.all([cardInfo(card), loadTrendCards(trends)]);
+  document.title = `${info.name} · MTG Vec2Search`;
+  $("card-art").replaceChildren(el("button", { type: "button", className: "card", onclick: () => openCard(info.id, card) },
+    el("img", { src: imageUrl(info.id), alt: info.name })));
+  $("card-name").textContent = info.name;
+  const { everything } = trends;
+  const i = everything.cards.indexOf(card);
+  const decksWith = i < 0 ? 0 : everything.plays[0][i];
+  const playing = commandersPlaying(trends.commanders, card);
+  $("card-meta").textContent = `In ${decksWith.toLocaleString()} of ${everything.made[0].toLocaleString()} decks (${percent(decksWith / everything.made[0])})`;
+  $("card-lede").textContent = playing.length
+    ? `${playing.length.toLocaleString()} commanders whose decks play it often (at least ${percent(TREND_SHARE)} of them), most often first. Pick a strategy to see the commanders known for it.`
+    : `No commander's decks play it often enough to show here (at least ${percent(TREND_SHARE)} of them).`;
+  // Strategies: what the commanders that play it are known for, by how many of their decks play it
+  const weight = new Map();
+  for (const c of playing) for (const t of c.themes) weight.set(t, (weight.get(t) ?? 0) + c.decks);
+  const strategies = [null, ...[...weight].sort((a, b) => b[1] - a[1]).slice(0, MAX_STRATEGIES).map(([t]) => t)];
+  const show = strategy => {
+    showCardCommanders(playing.filter(c => strategy === null || c.themes.includes(strategy)).map(c => ({ key: c.key, name: c.name,
+      detail: `in ${percent(c.share)} of ${c.made[0].toLocaleString()} decks` })));
+  };
+  $("card-themes").replaceChildren(...strategies.map(t => el("button", {
+    type: "button", ariaPressed: String(t === null),
+    onclick: e => {
+      for (const b of $("card-themes").children) b.ariaPressed = String(b === e.currentTarget);
+      show(t);
+    },
+  }, t === null ? "All" : tagLabel(trends.themes[t]),
+  el("small", { textContent: t === null ? playing.length : playing.filter(c => c.themes.includes(t)).length }))));
+  show(null);
+  commanderMessage("");
+  $("card-page").hidden = false;
+}
+
+
 if (commandersMode) {
   commanderMessage("Loading decks…");
-  (commanderKey !== null ? showCommander(commanderKey) : showCommanders()).catch(err => {
+  (cardKey !== null ? showCardPage(Number(cardKey)) : commanderKey !== null ? showCommander(commanderKey) : showCommanders()).catch(err => {
     console.error(err);
     commanderMessage("Couldn't load the deck data. Please try again.");
+  });
+}
+
+if (trendsMode) {
+  trendsMessage("Loading trends…");
+  showTrends().catch(err => {
+    console.error(err);
+    trendsMessage("Couldn't load the trends. Please try again.");
   });
 }
 

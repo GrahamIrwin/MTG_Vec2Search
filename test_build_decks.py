@@ -4,7 +4,8 @@ import json
 import os
 import tempfile
 import urllib.parse
-from collections import Counter
+from collections import Counter, defaultdict
+from datetime import date
 
 import build_decks
 from build_decks import build, load_corpus, save_corpus, slim_deck
@@ -55,7 +56,10 @@ with tempfile.TemporaryDirectory() as tmp:
     # c0 and c96 are in every deck, c1-c95 in 4 of 5: a tag needs 2 cards decks play, and none
     # about wording ("cycle-")
     tags = {"pump": ({"c0", "c96", "island"}, []), "cycle-test": ({"c0", "c96"}, []), "lone": ({"c0"}, [])}
-    build(corpus, cards, tags, out)
+    # Trends: deck 1 was made long ago, 4 three weeks ago and 5 three days ago; 2 and 3 have no date,
+    # but Archidekt numbers decks as they're made, so 2 and 3 are older than 4
+    corpus[1]["created"], corpus[4]["created"], corpus[5]["created"] = "2025-01-01", "2026-09-13", "2026-10-01"
+    build(corpus, cards, tags, out, prices={"cmdr": 2.0, "c0": 1.0, "island": 0.5}, today=date(2026, 10, 4))
     with open(os.path.join(out, "0.json"), encoding="utf-8") as f:
         shard = json.load(f)
     assert shard["cards"][:2] == [2, 98] and len(shard["cards"]) == 97  # c0 and c96 are in every deck
@@ -67,6 +71,20 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
         index = json.load(f)
     assert index["decks"] == 5 and index["commanders"][0][:2] == ["0", 5]
+    assert index["since"] == [4, 4, 5], index["since"]  # the 90, 30 and 7 day windows
+    assert shard["price"] == 300 and shard["bracket"] == 3  # basic lands are left out of the price
+    with open(os.path.join(out, "trends.json"), encoding="utf-8") as f:
+        trends = json.load(f)
+    key, made, price, bracket, _ = trends["commanders"][0]
+    assert key == "0" and made == [5, 2, 2, 1] and trends["everything"][0] == made, made
+    with open(os.path.join(out, "trend-cards.json"), encoding="utf-8") as f:
+        kept, plays = json.load(f)[0]
+    assert kept[0] == 2 and [counts[0] for counts in plays] == [5, 2, 2, 1]  # c0, in every deck
+
+    # Themes: what these decks play far more of than decks in general; "b" is mostly "a"'s cards
+    usual = Counter({"a": 0.2, "b": 0.1})
+    card_tags = defaultdict(list, {1: ["a", "b"], 2: ["a"], 3: ["c"]})
+    assert build_decks.themes(Counter({1: 10, 2: 10, 3: 1}), 10, usual, card_tags) == ["a"]
 
     # --top: the most played cards that can lead a deck, each topped up to per_commander decks,
     # from a fake Archidekt where every commander has 5 decks
@@ -110,7 +128,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Before uploading, the release's copy is merged in: decks only it has, and newer versions
     os.makedirs("release")
-    save_corpus({1: {**deck, "id": 1, "updated": "2026-01-01"}, 2: {**deck, "id": 2, "updated": "2026-12-01"},
+    save_corpus({1: {**deck, "id": 1, "updated": "2026-01-01", "created": "2025-12-01"}, 2: {**deck, "id": 2, "updated": "2026-12-01"},
                  99: {**deck, "id": 99}}, os.path.join("release", "decks.jsonl.gz"))
     with open(os.path.join("release", "crawl_state.json"), "w", encoding="utf-8") as f:
         json.dump({"A": "2027-01-01", "Z": "2026-01-01"}, f)
@@ -119,5 +137,6 @@ with tempfile.TemporaryDirectory() as tmp:
     assert build_decks.merge(mine, state, "release") == 2
     assert {i: d["updated"] for i, d in mine.items()} == {1: "2026-06-01", 2: "2026-12-01", 99: "2026-09-30"}
     assert state == {"A": "2027-01-01", "B // B2": "2026-10-01", "Z": "2026-01-01"}
+    assert mine[1]["created"] == "2025-12-01"  # an older copy can still tell when the deck was made
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 print("ok")

@@ -55,7 +55,8 @@ export function parseDecklist(text, lookup) {
 
 // === Similar decks ===
 // A commander's file (see build_decks.py): cards = card numbers, most played first;
-// decks = [id, name, updated, gaps between positions in `cards`]; tags = [tag, gaps between positions]
+// decks = [id, name, updated, gaps between positions in `cards`]; tags = [tag, gaps between positions];
+// price (US cents), bracket and themes: what a typical deck costs, its bracket, what they're known for
 export function decodeShard(shard) {
   const decks = shard.decks.map(([id, name, updated, gaps]) => {
     const cards = new Int32Array(gaps.length);
@@ -73,7 +74,8 @@ export function decodeShard(shard) {
     let p = 0;
     return { name, positions: gaps.map(gap => (p += gap)) };
   });
-  return { cards: shard.cards, decks, plays, weight, position, tags, signature: shard.signature };
+  return { cards: shard.cards, decks, plays, weight, position, tags, signature: shard.signature,
+    price: shard.price ?? -1, bracket: shard.bracket ?? 0, themes: shard.themes ?? [] };
 }
 
 // Cosine similarity between the pasted deck and every deck in the file, over the cards they
@@ -309,4 +311,100 @@ export function closestCommanders(index, deckCards, n = 6) {
     .filter(c => c.overlap > 0)
     .sort((a, b) => b.overlap - a.overlap || b.decks - a.decks)
     .slice(0, n);
+}
+
+// === Trends: decks/trends.json and trend-cards.json (see build_decks.py) ===
+// Window 0 is all time; 1, 2, 3 are the last 90, 30 and 7 days (index.json's windows).
+// Each commander: { key, made: decks made [ever, per window], price (US cents, -1 unknown),
+// bracket (0: none), themes (numbers in themes) }, and once trend-cards.json is read (withCards),
+// cards (card numbers) and plays ([per window, per card]). everything: all their decks, as one.
+const decodeCards = ([gaps, plays]) => {
+  let card = 0;
+  return { cards: gaps.map(g => (card += g)), plays };
+};
+export function decodeTrends(data) {
+  const [made, ...cards] = data.everything;
+  return {
+    themes: data.themes,
+    everything: { key: "", made, ...decodeCards(cards) },
+    commanders: data.commanders.map(([key, made, price, bracket, themes]) => ({ key, made, price, bracket, themes })),
+  };
+}
+export const withCards = (commanders, cardData) => commanders.forEach((c, i) => Object.assign(c, decodeCards(cardData[i])));
+
+// The commanders that pass the filters. identity: each commander's color identity bitmask, set by
+// the caller. colors: a bitmask they must fit within (0: colorless), or null; maxPrice: US cents;
+// themes: a Set of theme numbers, any of which will do; kind: "single" or "partners";
+// min: decks made in `window`
+export function filterCommanders(commanders, { window = 0, colors = null, maxPrice = null, themes = null,
+  brackets = [], kind = "", min = 0 } = {}) {
+  return commanders.filter(c =>
+    (colors === null || (c.identity & ~colors) === 0) &&
+    (maxPrice === null || (c.price >= 0 && c.price <= maxPrice)) &&
+    (!themes || c.themes.some(t => themes.has(t))) &&
+    (!brackets.length || brackets.includes(c.bracket)) &&
+    (!kind || (kind === "partners") === c.key.includes("-")) &&
+    c.made[window] >= min);
+}
+
+// Popular: most decks made in the window. Rising: the most more decks than their share of all
+// decks would give them, relative to that (so a commander going from 5 decks to 20 beats one going
+// from 300 to 330), from at least MIN_RISING decks. ratio: how many times their usual share.
+export const MIN_RISING = 3;
+// How far a share rose, relative to where it was: 1% -> 4% counts for more than 60% -> 66%
+const rise = x => (x.share - x.was) / Math.sqrt(x.was);
+export function trendingCommanders(scope, window) {
+  const total = scope.reduce((s, c) => s + c.made[0], 0);
+  const recent = scope.reduce((s, c) => s + c.made[window], 0);
+  const popular = scope.filter(c => c.made[window]).sort((a, b) => b.made[window] - a.made[window] || b.made[0] - a.made[0]);
+  const rising = !window || !recent ? [] : scope
+    .map(c => {
+      const expected = recent * c.made[0] / total;
+      return { ...c, score: (c.made[window] - expected) / Math.sqrt(expected), ratio: c.made[window] / expected };
+    })
+    .filter(c => c.score > 0 && c.made[window] >= MIN_RISING)
+    .sort((a, b) => b.score - a.score);
+  return { popular, rising, total, recent };
+}
+
+// Popular: the share of the window's decks (of these commanders) that play each card. Rising:
+// the most above the share of all their decks (was), relative to it (see rise), from at least
+// MIN_RISING decks and 1% of them.
+export function trendingCards(scope, window) {
+  const plays = new Map(); // card -> [decks ever, decks in the window]
+  let total = 0, recent = 0;
+  for (const c of scope) {
+    total += c.made[0];
+    recent += c.made[window];
+    c.cards.forEach((card, i) => {
+      const p = plays.get(card) ?? plays.set(card, [0, 0]).get(card);
+      p[0] += c.plays[0][i];
+      p[1] += c.plays[window][i];
+    });
+  }
+  const popular = [...plays].filter(([, [, now]]) => now)
+    .map(([card, [ever, now]]) => ({ card, decks: now, share: now / recent, was: ever / total }))
+    .sort((a, b) => b.share - a.share || a.card - b.card);
+  const rising = !window ? [] : popular
+    .filter(x => x.share > x.was && x.decks >= Math.max(MIN_RISING, 0.01 * recent))
+    .sort((a, b) => rise(b) - rise(a));
+  return { popular, rising, total, recent };
+}
+
+// The commanders whose decks play this card, most of their decks first: [{...commander, decks, share}]
+export function commandersPlaying(commanders, card) {
+  return commanders.flatMap(c => {
+    const i = c.cards.indexOf(card);
+    return i < 0 || !c.plays[0][i] ? [] : [{ ...c, decks: c.plays[0][i], share: c.plays[0][i] / c.made[0] }];
+  }).sort((a, b) => b.share - a.share || b.decks - a.decks);
+}
+
+// On a commander's page: the cards a group's recent decks (deck numbers in shard.decks) play more
+// often than all its decks do, most above first: [{p (position in shard.cards), share, was}]
+export function risingCards(shard, members, recent) {
+  const now = playCounts(shard, recent), ever = playCounts(shard, members);
+  return [...now.keys()]
+    .map(p => ({ p, decks: now[p], share: now[p] / recent.length, was: ever[p] / members.length }))
+    .filter(x => x.share > x.was && x.decks >= Math.max(MIN_RISING, 0.01 * recent.length))
+    .sort((a, b) => rise(b) - rise(a));
 }

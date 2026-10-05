@@ -2,7 +2,7 @@
 
 Search Magic: The Gathering cards by describing them in plain English
 ("cheap green elves that ramp"), with filters for color identity, card type,
-mana value, format and price. Or paste a Commander deck (a Moxfield or
+mana value, format, price and set. Or paste a Commander deck (a Moxfield or
 Archidekt link, or a decklist) to see which cards similar decks play that
 yours doesn't. Dark mode by
 default. It's a static site: all the heavy lifting happens at build time, and a
@@ -33,6 +33,8 @@ time, a few KB after that).
      popularity order, so top results come from the first few chunks
    - `names.json`, `released.json`: names and first-release dates, only fetched
      for card-name searches and the name/date sorts
+   - `s/<n>.json`: the cards printed in each set (`meta.json` lists the sets,
+     newest first), only fetched to filter by set
 2. In the browser, `site/search.js` maps the query to the same terms:
    - a tag matches when all its words (or an alias's) are in the query, after
      folding plurals, verb forms ("drawing" → draw) and a little slang
@@ -104,7 +106,36 @@ time, a few KB after that).
    more of than the commander's other decks ("Poison mechanics", "+1/+1
    counters matter"); `build_decks.py build` stores the tags of each
    commander's commonly played cards in its file for this, for commanders with
-   enough decks to split. Picking a build narrows everything on the page to it.
+   enough decks to split. Picking a build narrows everything on the page to it,
+   including its **trends**: the cards its decks made in the last 7, 30 or 90
+   days play more often than its decks overall, and the new cards (first
+   printed in the last 120 days) they've picked up. The page also shows what a
+   typical deck costs, its typical bracket, and what its decks are **known
+   for**: the Tagger tags whose cards they play far more of than decks in
+   general do (`buildTags`' scoring, against every deck instead of the
+   commander's own), so Teysa is known for aristocrats even though all her
+   builds are. Each links to Trends, filtered to commanders known for it.
+
+   A card's details link to its commander page, if it has one, and to its
+   page in commander decks (`?card=<number>`): the commanders whose decks
+   play it most often, grouped by what those decks are known for.
+5. **Trends** (`?trends`) shows rising and most popular commanders and cards,
+   and new cards, over decks made in the last 7, 30 or 90 days or all time.
+   Filters (color identity, typical deck price and bracket, a strategy, single
+   commanders or partners, a minimum of decks) narrow it to the commanders that
+   pass; the cards are then those commanders' decks'. Rising compares a share
+   of the window's decks with the share of all decks, relative to it, so a
+   commander or card going from 1% to 4% beats one going from 60% to 66%.
+   - Archidekt numbers decks as they're made, so the crawler keeps each deck's
+     creation date (and fills it in for decks it already had from the search
+     listings it reads anyway), and `build_decks.py build` turns each window
+     into the first deck id made in it: every deck, dated or not, falls in or
+     out by its id.
+   - `trends.json` holds each commander's decks made per window, price,
+     bracket and themes, plus exact card counts over all decks, for the
+     unfiltered page. `trend-cards.json` (about 1 MB) holds each commander's
+     cards that at least 15% of its decks play in some window, and is only
+     fetched for filters and card pages.
 
 ## Updating card data
 
@@ -112,7 +143,8 @@ GitHub Actions rebuilds the index and redeploys every Monday. To update right
 away (e.g. on a set's release day), open **Actions → Build and deploy → Run workflow**.
 
 The deck corpus is too big for git, so it lives on the `deck-corpus` release.
-**Actions → Crawl decks** adds to it for five hours every Sunday. To grow it
+**Actions → Crawl decks** adds to it for five hours every day, then redeploys
+the site so Trends stays current. To grow it
 faster, crawl locally:
 
 ```
@@ -123,7 +155,7 @@ python build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any ti
 When a crawl stops (Ctrl+C, or its hours run out) it uploads the corpus to the
 release (and starts a deploy, so the site has them), after first merging in any
 decks the release has that it doesn't (the
-weekly crawl's, say), so an upload never loses any. `--no-upload` skips that.
+daily crawl's, say), so an upload never loses any. `--no-upload` skips that.
 
 To fill in commanders the corpus barely has, top up the most played ones (by
 EDHREC rank) to a number of decks each, several at a time. Run one crawl at a
@@ -169,11 +201,11 @@ Tests: `python test_build_index.py`, `python test_build_decks.py` and `node --te
 - `build_decks.py`: crawls Archidekt decks, writes the per-commander deck files
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
-- `site/deck.js`: decklist parsing, similar decks and recommendations
+- `site/deck.js`: decklist parsing, similar decks, recommendations, builds and trends
 - `worker/deck-link.js`: Cloudflare Worker that turns a deck link into a decklist
 - `site/currency.js`: currency detection, exchange rate and price formatting
 - `.github/workflows/deploy.yml`: weekly rebuild and GitHub Pages deploy
-- `.github/workflows/crawl.yml`: weekly deck crawl
+- `.github/workflows/crawl.yml`: daily deck crawl, then a deploy
 
 Card data and images come from [Scryfall](https://scryfall.com), decklists from
 [Archidekt](https://archidekt.com). MTG Vec2Search is

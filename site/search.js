@@ -203,9 +203,10 @@ export function decodePosting(gaps) {
   return cards;
 }
 
-// filters: { colors: ["W","U"], types: ["Creature"], format: "modern", min: 0, max: 3, maxPrice: 5 }
+// filters: { colors: ["W","U"], types: ["Creature"], format: "modern", min: 0, max: 3, maxPrice: 5,
+//   printedIn: Set of the card numbers printed in a set }
 function filterFn(index, filters) {
-  const { colors = [], types = [], format = "", min = null, max = null, maxPrice = null } = filters;
+  const { colors = [], types = [], format = "", min = null, max = null, maxPrice = null, printedIn = null } = filters;
   const { identity, types: typeBits, cmc, legal, price } = index.columns;
   const colorMask = [...COLOR_BITS].reduce((m, c, i) => (colors.includes(c) ? m | (1 << i) : m), 0);
   const typeMask = types.reduce((m, t) => m | (1 << index.types.indexOf(t)), 0);
@@ -217,7 +218,8 @@ function filterFn(index, filters) {
     (!formatBit || legal[i] & formatBit) &&
     (min === null || cmc[i] >= min) &&
     (max === null || cmc[i] <= max) &&
-    (cents === null || (price[i] >= 0 && price[i] <= cents));
+    (cents === null || (price[i] >= 0 && price[i] <= cents)) &&
+    (!printedIn || printedIn.has(i));
 }
 
 // Cards are numbered in popularity order, so sorting by card number = most popular first

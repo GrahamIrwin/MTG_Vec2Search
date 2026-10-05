@@ -1,14 +1,15 @@
 name: Crawl decks
 
 # Adds public Commander decks from Archidekt to the deck corpus, which lives on the
-# "deck-corpus" release (too big for git). Monday's "Build and deploy" picks them up.
+# "deck-corpus" release (too big for git), then redeploys the site with them (Trends needs fresh decks).
 on:
   schedule:
-    - cron: "0 2 * * 0" # weekly (Sunday)
+    - cron: "0 2 * * *" # daily
   workflow_dispatch: # "Run workflow" button in the Actions tab
 
 permissions:
   contents: write # to update the release
+  actions: write # to start "Build and deploy"
 
 concurrency:
   group: crawl
@@ -27,3 +28,5 @@ jobs:
       # A failed crawl keeps what it fetched (each deck is saved as it arrives)
       - if: ${{ !cancelled() }}
         run: gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber
+      - if: ${{ !cancelled() }}
+        run: gh workflow run deploy.yml

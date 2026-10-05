@@ -123,6 +123,9 @@ test("search ranks by IDF-weighted coverage, then popularity, and applies filter
   assert.deepEqual(names("draw", { colors: ["G"] }), ["Opt"]);
   // Colorless alone keeps only colorless-identity cards
   assert.deepEqual(names("land", { colors: ["C"] }), ["Wasteland"]);
+  // Set: only cards printed in it
+  const inSet = new Set(cards.flatMap((c, i) => (["Big Dragon", "Common Flyer"].includes(c[0]) ? [i] : [])));
+  assert.deepEqual(names("flying", { printedIn: inSet }), ["Big Dragon", "Common Flyer"]);
   // Unrecognized query falls back to name search
   assert.deepEqual(names("dork"), ["Elf Dork"]);
   assert.deepEqual(names(""), []);

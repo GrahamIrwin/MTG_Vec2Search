@@ -149,8 +149,8 @@
 
     .examples { margin: 14px 4px 0; font-size: 15.5px; color: var(--ink-soft); text-align: center; }
     .examples .sep { color: var(--ink-faint); margin: 0 10px; }
-    #random span { display: inline-block; font-size: 1.15em; line-height: 1; text-decoration: none; transition: transform .3s; }
-    #random:hover span { transform: rotate(90deg); }
+    #random span, #random-commander span { display: inline-block; font-size: 1.15em; line-height: 1; text-decoration: none; transition: transform .3s; }
+    #random:hover span, #random-commander:hover span { transform: rotate(90deg); }
 
     /* ---------- Filters ---------- */
     .filters {
@@ -214,6 +214,7 @@
     .field input:focus, .field select:focus, .sort select:focus { border-color: var(--brass); outline: none; box-shadow: 0 0 0 3px rgb(168 131 74 / .22); }
     .range { display: flex; align-items: center; gap: 8px; color: var(--ink-faint); }
     .range input { width: 74px; }
+    #set { width: 240px; max-width: 100%; }
     .money { position: relative; }
     .money::before { content: attr(data-symbol); position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); }
     .money input { width: 110px; padding-left: 22px; }
@@ -434,6 +435,15 @@
     .commander-head .btn-quiet { display: inline-block; margin-top: 10px; text-decoration: none; }
     .commander-art { display: flex; gap: 12px; }
     .commander-art img { width: min(200px, 36vw); border-radius: 4.75% / 3.4%; box-shadow: var(--shadow-md); }
+    .theme-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 2px; }
+    .sub-heading { font-size: 19px; margin: 26px 0 4px; }
+    .type-filter button:disabled { opacity: .45; cursor: default; }
+    .trend-windows { justify-content: center; margin-bottom: 14px; }
+    .trend-summary { text-align: center; margin: 14px 0 0; }
+    .field input.short { width: 90px; }
+    #trend-theme { width: 220px; max-width: 100%; }
+    .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 10px; }
+    .card-actions a { text-decoration: none; }
     @media (max-width: 600px) {
       .commander-head { grid-template-columns: 1fr; }
       .commander-art { justify-content: center; }
@@ -491,6 +501,7 @@
         <a href="./" id="mode-cards">Find cards</a>
         <a href="?deck" id="mode-deck">Deck recommendations</a>
         <a href="?commanders" id="mode-commanders">Commanders</a>
+        <a href="?trends" id="mode-trends">Trends</a>
       </nav>
     </header>
 
@@ -554,6 +565,12 @@
               <label class="field">
                 <span class="label">Format</span>
                 <select name="f" id="format"><option value="">Any format</option></select>
+              </label>
+              <label class="field">
+                <span class="label">Set</span>
+                <input id="set" list="sets" placeholder="Any set" autocomplete="off">
+                <input type="hidden" name="s" id="set-code">
+                <datalist id="sets"></datalist>
               </label>
             </div>
 
@@ -641,11 +658,30 @@
         <p class="message" id="commander-message" hidden></p>
         <div id="commander-list" hidden>
           <div class="results-head">
-            <input type="search" id="commander-filter" class="filter-box" placeholder="Filter commanders, e.g. Atraxa" aria-label="Filter commanders">
+            <input type="search" id="commander-filter" class="filter-box" placeholder="Search commanders, e.g. Derevi" aria-label="Search commanders">
             <span class="count" id="commander-count" role="status"></span>
           </div>
+          <p class="examples"><button type="button" id="random-commander" class="link-button"><span aria-hidden="true">⚄</span> Random commander</button></p>
           <div class="gallery" id="commanders"></div>
           <div class="more-wrap"><button id="more-commanders" class="btn-quiet" type="button" hidden>Show more</button></div>
+        </div>
+
+        <div id="card-page" hidden>
+          <div class="commander-head">
+            <div class="commander-art" id="card-art"></div>
+            <div>
+              <a href="?commanders">← All commanders</a>
+              <h2 id="card-name"></h2>
+              <p class="muted" id="card-meta"></p>
+            </div>
+          </div>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Commanders that play it</h2></summary>
+            <p class="muted deck-lede" id="card-lede"></p>
+            <div class="chips type-filter" id="card-themes" role="group" aria-label="Strategy"></div>
+            <div class="gallery" id="card-commanders"></div>
+            <div class="more-wrap"><button id="more-card-commanders" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
         </div>
 
         <div id="commander-page" hidden>
@@ -655,6 +691,7 @@
               <a href="?commanders">← All commanders</a>
               <h2 id="commander-name"></h2>
               <p class="muted" id="commander-meta"></p>
+              <p class="theme-line" id="commander-themes" hidden></p>
               <a href="?deck" class="btn-quiet">Compare your deck with these</a>
             </div>
           </div>
@@ -662,6 +699,21 @@
             <summary><h2 class="deck-heading">Builds</h2></summary>
             <p class="muted deck-lede" id="builds-lede"></p>
             <div class="chips type-filter" id="builds" role="group" aria-label="Build"></div>
+          </details>
+          <details class="panel" open id="commander-trends">
+            <summary><h2 class="deck-heading">Trends</h2></summary>
+            <p class="muted deck-lede" id="commander-trends-lede"></p>
+            <div class="chips type-filter" id="commander-windows" role="group" aria-label="Period"></div>
+            <h3 class="sub-heading">Rising</h3>
+            <p class="muted deck-lede">Cards the newer decks play more often than these decks do overall.</p>
+            <div class="chips type-filter" id="rising-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="rising"></div>
+            <div class="more-wrap"><button id="more-rising" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">New cards</h3>
+            <p class="muted deck-lede">Cards from the last few months these decks have picked up.</p>
+            <div class="chips type-filter" id="new-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="new-cards"></div>
+            <div class="more-wrap"><button id="more-new" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
           <details class="panel" open>
             <summary><h2 class="deck-heading">Signature cards</h2></summary>
@@ -692,6 +744,97 @@
             <p class="muted deck-lede">Newest first. Open one to see its cards.</p>
             <ol class="deck-list plain" id="lists"></ol>
             <div class="more-wrap"><button id="more-lists" class="btn-quiet" type="button" hidden>Show more decks</button></div>
+          </details>
+        </div>
+      </section>
+      <section class="deck-view" id="trends-view" hidden>
+        <p class="message" id="trends-message" hidden></p>
+        <div id="trends-page" hidden>
+          <div class="chips type-filter trend-windows" id="trend-windows" role="group" aria-label="Period"></div>
+          <form class="filters-form" id="trend-form">
+            <details class="filters" id="trend-filters">
+              <summary><span class="label">Filters</span><span class="badge" id="trend-filter-count" hidden></span></summary>
+              <div class="filter-body">
+                <fieldset>
+                  <legend class="label">Color identity <span class="legend-note">— commanders that fit within these colors</span></legend>
+                  <div class="pips">
+                    <label class="pip pip-w" title="White"><input type="checkbox" name="c" value="W" aria-label="White"><span aria-hidden="true">W</span></label>
+                    <label class="pip pip-u" title="Blue"><input type="checkbox" name="c" value="U" aria-label="Blue"><span aria-hidden="true">U</span></label>
+                    <label class="pip pip-b" title="Black"><input type="checkbox" name="c" value="B" aria-label="Black"><span aria-hidden="true">B</span></label>
+                    <label class="pip pip-r" title="Red"><input type="checkbox" name="c" value="R" aria-label="Red"><span aria-hidden="true">R</span></label>
+                    <label class="pip pip-g" title="Green"><input type="checkbox" name="c" value="G" aria-label="Green"><span aria-hidden="true">G</span></label>
+                    <label class="pip pip-c" title="Colorless"><input type="checkbox" name="c" value="C" aria-label="Colorless"><span aria-hidden="true">C</span></label>
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend class="label">Bracket <span class="legend-note">— what their decks typically are</span></legend>
+                  <div class="chips">
+                    <label class="chip"><input type="checkbox" name="b" value="1"><span>1 Exhibition</span></label>
+                    <label class="chip"><input type="checkbox" name="b" value="2"><span>2 Core</span></label>
+                    <label class="chip"><input type="checkbox" name="b" value="3"><span>3 Upgraded</span></label>
+                    <label class="chip"><input type="checkbox" name="b" value="4"><span>4 Optimized</span></label>
+                    <label class="chip"><input type="checkbox" name="b" value="5"><span>5 cEDH</span></label>
+                  </div>
+                </fieldset>
+                <div class="field-row">
+                  <label class="field">
+                    <span class="label">Strategy</span>
+                    <input type="search" name="theme" id="trend-theme" list="trend-themes" placeholder="e.g. tokens, sacrifice" autocomplete="off">
+                    <datalist id="trend-themes"></datalist>
+                  </label>
+                  <label class="field">
+                    <span class="label" id="budget-label">Max deck price</span>
+                    <span class="money" id="budget-money" data-symbol="$"><input type="number" name="budget" min="0" step="any" inputmode="decimal" placeholder="any"></span>
+                  </label>
+                  <label class="field">
+                    <span class="label">Commanders</span>
+                    <select name="kind"><option value="">Any</option><option value="single">One commander</option><option value="partners">Partners</option></select>
+                  </label>
+                  <label class="field">
+                    <span class="label">Min. decks</span>
+                    <input type="number" name="min" min="0" inputmode="numeric" placeholder="any" class="short">
+                  </label>
+                </div>
+                <div class="filter-actions">
+                  <a href="?trends" id="clear-trend-filters">Clear filters</a>
+                </div>
+              </div>
+            </details>
+          </form>
+          <p class="muted trend-summary" id="trend-summary" role="status"></p>
+
+          <details class="panel" open id="rising-commanders-panel">
+            <summary><h2 class="deck-heading">Rising commanders</h2></summary>
+            <p class="muted deck-lede">Commanders with more new decks than their share of all decks would give them.</p>
+            <div class="gallery" id="rising-commanders"></div>
+            <div class="more-wrap"><button id="more-rising-commanders" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Most popular commanders</h2></summary>
+            <p class="muted deck-lede" id="popular-commanders-lede"></p>
+            <div class="gallery" id="popular-commanders"></div>
+            <div class="more-wrap"><button id="more-popular-commanders" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open id="rising-cards-panel">
+            <summary><h2 class="deck-heading">Rising cards</h2></summary>
+            <p class="muted deck-lede">Cards new decks play more often than these commanders' decks do overall.</p>
+            <div class="chips type-filter" id="trend-rising-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="trend-rising"></div>
+            <div class="more-wrap"><button id="more-trend-rising" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Most played cards</h2></summary>
+            <p class="muted deck-lede" id="trend-played-lede"></p>
+            <div class="chips type-filter" id="trend-played-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="trend-played"></div>
+            <div class="more-wrap"><button id="more-trend-played" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">New cards</h2></summary>
+            <p class="muted deck-lede">Cards from the last few months, by how many of these decks play them.</p>
+            <div class="chips type-filter" id="trend-new-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="trend-new"></div>
+            <div class="more-wrap"><button id="more-trend-new" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
         </div>
       </section>
@@ -744,6 +887,10 @@
       </div>
       <span class="label">Printings</span>
       <ul class="printings" id="printings"></ul>
+      <div class="card-actions" id="card-actions" hidden>
+        <a id="as-commander" class="btn-quiet" hidden>View as commander</a>
+        <a id="in-decks" class="btn-quiet">View in commander decks</a>
+      </div>
       <a id="scryfall-link" target="_blank" rel="noopener">View on Scryfall ↗</a>
     </div>
   </dialog>

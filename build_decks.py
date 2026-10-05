@@ -20,9 +20,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
-from datetime import date
+from datetime import date, timedelta
 
-from build_index import by_popularity, load_cards, load_oracle_tags, write_json
+from build_index import by_popularity, load_cards, load_oracle_tags, load_printings, write_json
 
 ARCHIDEKT = "https://archidekt.com/api"
 CORPUS = "decks.jsonl.gz"
@@ -45,8 +45,9 @@ def get_json(path):
     global _last
     for attempt in range(5):
         with _lock:
-            _last = max(_last + DELAY, time.time())
-            wait = _last - time.time()
+            now = time.time()  # one reading: a second, later one could make the wait negative
+            _last = max(_last + DELAY, now)
+            wait = _last - now
         time.sleep(wait)
         try:
             with urllib.request.urlopen(urllib.request.Request(ARCHIDEKT + path, headers=HEADERS), timeout=60) as r:
@@ -70,7 +71,7 @@ def get_json(path):
 
 
 def search_decks(commander=None, pages=MAX_PAGES):
-    """(id, last update date) of complete Commander decks, most recently updated first,
+    """(id, last update date, creation date) of complete Commander decks, most recently updated first,
     optionally only those led by this commander. A search stops after MAX_PAGES (3,000 decks),
     so a commander's search then goes on from its oldest decks: twice as many in all."""
     query = {"deckFormat": COMMANDER_FORMAT, "pageSize": 50}
@@ -81,7 +82,7 @@ def search_decks(commander=None, pages=MAX_PAGES):
             data = get_json("/decks/v3/?" + urllib.parse.urlencode({**query, "orderBy": order, "page": page}))
             for d in (data or {}).get("results") or []:
                 if MIN_CARDS <= d.get("size", 0) <= MAX_CARDS and not d.get("private") and not d.get("unlisted"):
-                    yield d["id"], (d.get("updatedAt") or "")[:10]
+                    yield d["id"], (d.get("updatedAt") or "")[:10], (d.get("createdAt") or "")[:10]
             if not data or not data.get("next"):
                 break
 
@@ -105,6 +106,7 @@ def slim_deck(deck):
     if not 1 <= len(commanders) <= 2 or not MIN_CARDS <= sum(cards.values()) <= MAX_CARDS:
         return None
     return {"id": deck["id"], "name": deck.get("name", ""), "updated": deck.get("updatedAt", "")[:10],
+            "created": (deck.get("createdAt") or "")[:10],
             "bracket": deck.get("edhBracket"), "views": deck.get("viewCount", 0),
             "commanders": sorted(commanders), "cards": cards}
 
@@ -172,9 +174,12 @@ def merge(corpus, state, other_dir, path=CORPUS, state_path=STATE):
     newer versions of decks. Crawl dates keep the later of the two. Returns how many decks it took."""
     taken = 0
     for i, d in load_corpus(os.path.join(other_dir, path)).items():
-        if i not in corpus or d["updated"] > corpus[i]["updated"]:
-            corpus[i] = d
+        mine = corpus.get(i)
+        if not mine or d["updated"] > mine["updated"]:
+            corpus[i], mine, d = d, d, mine or {}
             taken += 1
+        if not mine.get("created") and d.get("created"):  # a creation date either copy has
+            mine["created"] = d["created"]
     if os.path.exists(os.path.join(other_dir, state_path)):
         with open(os.path.join(other_dir, state_path), encoding="utf-8") as f:
             for commander, day in json.load(f).items():
@@ -243,11 +248,14 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
     with open(path, "ab") as out:
         def fetch(found, limit):
             added = 0
-            for deck_id, updated in found:
+            for deck_id, updated, created in found:
                 if added >= limit or time.time() > deadline or stop.is_set():
                     break
                 with lock:
                     if have.get(deck_id, "") >= updated:  # already have this version
+                        mine = corpus.get(deck_id)  # (None for one that isn't a usable deck)
+                        if created and mine and not mine.get("created"):  # crawled before dates were kept
+                            mine["created"] = created
                         continue
                     have[deck_id] = updated
                 deck = slim_deck(get_json(f"/decks/{deck_id}/") or {})
@@ -338,9 +346,18 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #       tags   [Scryfall Tagger tag, gaps between positions in `cards`], over the nonland cards
 #              at least COMMON of the decks play: what the site names a commander's builds by
 #              (only for BUILD_DECKS decks or more, as fewer aren't split into builds)
+#       price  what a typical (median) deck costs, in US cents (-1: unknown)
+#       bracket  the typical bracket of the decks that give one (0: none do)
+#       themes  the Tagger tags these decks play far more of than other decks do
 #   index.json  every commander with a file: [file name, deck count, signature cards], where the
 #              signature cards are what its decks play far more often than other decks do. Used to
 #              find decks with other commanders, and for commanders without enough decks.
+#              Also windows (days) and since: the first Archidekt deck id made in each window.
+#   trends.json  themes (tag names); every commander with a file, most decks first: [file name,
+#              decks made [ever, in each window], price, bracket, theme numbers]; and everything:
+#              [decks made, gaps between the cards they play, [how many play each card, per window]]
+#              over all their decks
+#   trend-cards.json  the same as everything, for each commander in trends.json (most of its cards)
 OUT_DIR = os.path.join("site", "decks")
 MIN_DECKS = 5  # fewer decks than this don't make useful recommendations
 MAX_DECKS = 3000  # per commander, newest first: keeps a file around 300 KB to download
@@ -349,6 +366,9 @@ SHOWN_SIGNATURE = 60
 COMMON = 0.02  # same as `rare` in findBuilds (site/deck.js)
 BUILD_DECKS = 100  # 2 * DECKS_PER_BUILD in site/deck.js
 MAX_TAG_CARDS = 2000  # tags on more cards than this ("removal") don't tell builds apart
+THEMES = 6  # Tagger tags a commander's decks are known for, which Trends finds commanders by
+WINDOWS = [90, 30, 7]  # days, for Trends: decks made in the last 90, 30 and 7 days
+TREND_SHARE, TREND_DECKS = 0.15, 3  # a commander's cards in trend-cards.json (see build)
 # Tags about how a card is worded or printed rather than what a deck does with it
 NOT_A_PLAN = re.compile(r"^cycle-|-effect$|vanilla|^multiple-|^passive-ability$|^delayed-trigger$|"
                         r"^inverted-effects$|^intervening-if|out-of-color|^noncreature-typal$|"
@@ -359,11 +379,58 @@ def gaps(numbers):
     return [b - a for a, b in zip([0] + numbers, numbers)]
 
 
-def build(corpus, cards, tags=None, out_dir=OUT_DIR):
+def themes(here, n, usual, card_tags, count=THEMES):
+    """The Scryfall Tagger tags whose cards these n decks (here: plays by card) play the most more of
+    than decks in general do (usual: plays per deck by tag), relative to how many they play anyway:
+    buildTags in site/deck.js, against every deck instead of the commander's own. A tag mostly on
+    the same cards as a better one is skipped."""
+    mine = Counter()
+    for c, k in here.items():
+        for t in card_tags[c]:
+            mine[t] += k
+    more = {t: mine[t] / n - usual[t] for t in mine}
+    picked = []
+    for t in sorted((t for t in more if more[t] >= 0.5), key=lambda t: -more[t] / (usual[t] + 1) ** .5):
+        if len(picked) >= count:
+            break
+        played = {c for c in here if t in card_tags[c]}
+        if all(len(played & p) / len(played | p) < 0.5 for _, p in picked):
+            picked.append((t, played))
+    return [t for t, _ in picked]
+
+
+def window_plays(decks, since):
+    """For [(deck, cards it plays)]: how many were made ever and in each window (since: the first deck
+    id in each), and how many of those play each card: {card: [ever, per window]}."""
+    windows = [[1] + [int(s is not None and d["id"] >= s) for s in since] for d, _ in decks]
+    made = [sum(col) for col in zip(*windows)] or [0] * (len(since) + 1)
+    plays = defaultdict(lambda: [0] * len(made))
+    for (_, played), w in zip(decks, windows):
+        for c in played:
+            for k, inside in enumerate(w):
+                plays[c][k] += inside
+    return made, plays
+
+
+def trend_cards(made, plays, share, least):
+    """[gaps between the cards at least `share` of the decks and `least` decks play in some window,
+    [how many play each, per window]]"""
+    kept = sorted(c for c, ks in plays.items() if any(k >= max(least, share * m) for k, m in zip(ks, made)))
+    return [gaps(kept), [[plays[c][k] for c in kept] for k in range(len(made))]]
+
+
+def median(values, missing):
+    values = sorted(values)
+    return values[len(values) // 2] if values else missing
+
+
+def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
     """corpus: {id: deck} (see slim_deck); cards: Scryfall cards in card-index order;
-    tags: Scryfall Tagger tags, {slug: (oracle ids, names)} (see load_oracle_tags)."""
+    tags: Scryfall Tagger tags, {slug: (oracle ids, names)} (see load_oracle_tags);
+    prices: {oracle id: cheapest USD price} (see load_printings)."""
     number = {c["oracle_id"]: i for i, c in enumerate(cards) if c.get("oracle_id")}
     basic = {c["oracle_id"] for c in cards if "Basic" in c.get("type_line", "")}
+    prices = prices or {}
     card_tags = defaultdict(list)
     for slug, (ids, _) in (tags or {}).items():
         if len(ids) <= MAX_TAG_CARDS and not NOT_A_PLAN.search(slug):
@@ -379,14 +446,41 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR):
                          if o in number and o not in basic and o not in d["commanders"]})
         groups[key].append((d, played))
 
+    # Archidekt numbers decks as they're made, so a window is every deck from the first one made in
+    # it on: decks crawled before creation dates were kept count too. None: no known deck is older,
+    # so where the window starts isn't known yet.
+    today = today or date.today()
+    known = [(d["created"], d["id"]) for d in corpus.values() if d.get("created")]
+    since = []
+    for days in WINDOWS:
+        cutoff = (today - timedelta(days)).isoformat()
+        after = [i for made, i in known if made >= cutoff]
+        since.append(min(after) if after and any(made < cutoff for made, _ in known) else None)
+
     everywhere = Counter(c for decks in groups.values() for _, played in decks for c in played)
     total = sum(len(decks) for decks in groups.values())
+    usual = Counter()
+    for c, k in everywhere.items():
+        for t in card_tags[c]:
+            usual[t] += k / total
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
-    commanders = []
+    commanders, trends = [], []
     for key, decks in groups.items():
         if len(decks) < MIN_DECKS:
             continue
+        here = Counter(c for _, played in decks for c in played)
+        known_themes = themes(here, len(decks), usual, card_tags)
+        price = median([round(100 * sum(prices[o] * k for o, k in d["cards"].items() if o in prices and o not in basic))
+                        for d, _ in decks], -1)
+        bracket = median([d["bracket"] for d, _ in decks if d.get("bracket")], 0)
+        # Trends: decks made ever and in each window, and how many of them play each card. Only cards
+        # at least TREND_SHARE of the decks play in some window, which keeps the file to about a MB.
+        # ponytail: a card under that in every commander's decks is missing from filtered Trends;
+        # per-identity totals (exact) if that matters
+        made, plays = window_plays(decks, since)
+        trends.append([key, made, price, bracket, known_themes, trend_cards(made, plays, TREND_SHARE, TREND_DECKS)])
+
         decks = sorted(decks, key=lambda x: (x[0]["updated"], x[0]["id"]), reverse=True)[:MAX_DECKS]
         here = Counter(c for _, played in decks for c in played)
         played_most = sorted(here, key=lambda c: (-here[c], c))
@@ -404,12 +498,25 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR):
                       for d, played in decks],
             "signature": signature[:SHOWN_SIGNATURE],
             "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
+            "price": price, "bracket": bracket, "themes": known_themes,
         })
-        commanders.append([key, len(decks), signature[:SIGNATURE]])
+        commanders.append([key, made[0], signature[:SIGNATURE]])
     commanders.sort(key=lambda c: -c[1])
-    write_json(os.path.join(out_dir, "index.json"), {"decks": total, "commanders": commanders})
-    size = sum(os.path.getsize(os.path.join(out_dir, f)) for f in os.listdir(out_dir))
-    print(f"Wrote {out_dir}: {total} decks, {len(commanders)} commanders, {size / 1e6:.1f} MB in total")
+    write_json(os.path.join(out_dir, "index.json"),
+               {"decks": total, "commanders": commanders, "windows": WINDOWS, "since": since})
+    trends.sort(key=lambda c: -c[1][0])
+    names = sorted({t for c in trends for t in c[4]})
+    for c in trends:
+        c[4] = [names.index(t) for t in c[4]]
+    # Every deck of these commanders, exactly: what Trends shows until a filter is picked
+    made, plays = window_plays([x for key, *_ in trends for x in groups[key]], since)
+    write_json(os.path.join(out_dir, "trends.json"), {
+        "themes": names, "everything": [made, *trend_cards(made, plays, 0, TREND_DECKS)],
+        "commanders": [c[:5] for c in trends]})
+    write_json(os.path.join(out_dir, "trend-cards.json"), [c[5] for c in trends])
+    size = lambda f: os.path.getsize(os.path.join(out_dir, f)) / 1e6
+    print(f"Wrote {out_dir}: {total} decks, {len(commanders)} commanders, {sum(map(size, os.listdir(out_dir))):.1f} MB "
+          f"in total (trends.json {size('trends.json'):.1f} MB, trend-cards.json {size('trend-cards.json'):.1f} MB)")
 
 
 if __name__ == "__main__":
@@ -431,4 +538,4 @@ if __name__ == "__main__":
         DELAY = 1 / args.rate
         crawl(args.per_commander, args.only, args.hours, args.top, upload=not args.no_upload)
     else:
-        build(load_corpus(), by_popularity(load_cards()), load_oracle_tags())
+        build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=load_printings()[0])
