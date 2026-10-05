@@ -55,14 +55,15 @@ export function parseDecklist(text, lookup) {
 
 // === Similar decks ===
 // A commander's file (see build_decks.py): cards = card numbers, most played first;
-// decks = [id, name, updated, gaps between positions in `cards`]; tags = [tag, gaps between positions];
+// decks = [id (Archidekt's number or Moxfield's string), name, updated, gaps between positions in
+// `cards`, made (date, "" if unknown)]; tags = [tag, gaps between positions];
 // price (US cents), bracket and themes: what a typical deck costs, its bracket, what they're known for
 export function decodeShard(shard) {
-  const decks = shard.decks.map(([id, name, updated, gaps]) => {
+  const decks = shard.decks.map(([id, name, updated, gaps, made = ""]) => {
     const cards = new Int32Array(gaps.length);
     let p = 0;
     gaps.forEach((gap, i) => (cards[i] = p += gap));
-    return { id, name, updated, cards };
+    return { id, name, updated, cards, made };
   });
   // How many decks play each card, and its weight: cards every deck plays (Sol Ring) say little
   // about a deck, rare ones say a lot (IDF)

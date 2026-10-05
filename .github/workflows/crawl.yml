@@ -1,6 +1,6 @@
 name: Crawl decks
 
-# Adds public Commander decks from Archidekt to the deck corpus, which lives on the
+# Adds public Commander decks from Archidekt and Moxfield to the deck corpus, which lives on the
 # "deck-corpus" release (too big for git), then redeploys the site with them (Trends needs fresh decks).
 on:
   schedule:
@@ -23,9 +23,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: gh release download deck-corpus
-      - run: python3 -c "import build_index; build_index.download_bulk_data()" # card names for commanders
-      - run: python3 build_decks.py crawl --hours 5 --no-upload # the next step uploads, even after a failed crawl
-      # A failed crawl keeps what it fetched (each deck is saved as it arrives)
+      - run: python3 -c "import build_index; build_index.download_bulk_data()" # card names for commanders, printings for Moxfield
+      # Half the time on each site. The upload step runs even after a failed crawl: a failed crawl
+      # keeps what it fetched (each deck is saved as it arrives)
+      - run: python3 build_decks.py crawl --hours 2.5 --no-upload
+      - if: ${{ !cancelled() }}
+        run: python3 build_decks.py crawl --site moxfield --hours 2.5 --no-upload
       - if: ${{ !cancelled() }}
         run: gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber
       - if: ${{ !cancelled() }}

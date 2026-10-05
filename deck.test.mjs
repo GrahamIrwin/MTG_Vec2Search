@@ -54,6 +54,12 @@ test("similar decks rank by shared rare cards", () => {
   assert.deepEqual(folded.map(r => [r.deck.id, r.copies]), [[1, 1], [2, 0], [3, 0], [5, 0]]);
 });
 
+test("a deck row keeps its Moxfield id and when it was made", () => {
+  const [deck] = decodeShard({ cards: CARDS, decks: [["Q-mgAa", "m", "2026-09-30", [0, 2], "2026-09-29"]] }).decks;
+  assert.deepEqual([deck.id, deck.made, [...deck.cards]], ["Q-mgAa", "2026-09-29", [0, 2]]);
+  assert.equal(decodeShard(raw).decks[0].made, ""); // unknown
+});
+
 test("recommendations: what similar decks play that you don't; cuts: what they don't", () => {
   const shard = decodeShard(raw);
   const mine = [11, 12, 13, 99];

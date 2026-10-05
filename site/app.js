@@ -422,6 +422,11 @@ function updatePrice() {
 // neither site lets other sites' pages call its API directly.
 const DECK_LINK = "https://mtg-deck-link.grahamirwin.workers.dev";
 const LINK = /^https?:\/\/(?:www\.)?(?:moxfield|archidekt)\.com\/\S+$/i;
+// A crawled deck's page: Moxfield's ids are strings, Archidekt's numbers (build_decks.py)
+const openDeck = id => {
+  const [site, href] = typeof id === "string" ? ["Moxfield", `https://moxfield.com/decks/${id}`] : ["Archidekt", `https://archidekt.com/decks/${id}`];
+  return el("a", { className: "open", href, target: "_blank", rel: "noopener", textContent: `${site} ↗` });
+};
 const BASIC = /^(Snow-Covered )?(Plains|Island|Swamp|Mountain|Forest|Wastes)$/;
 const MAX_ADDS = 150;
 const PAGE_ADDS = 30;
@@ -545,7 +550,7 @@ async function findSimilar(key) {
       el("summary", {},
         el("span", { className: "sim", textContent: `${Math.round(r.similarity * 100)}%` }),
         el("span", { className: "deck-name", textContent: r.deck.name || "Untitled deck" }),
-        el("a", { className: "open", href: `https://archidekt.com/decks/${r.deck.id}`, target: "_blank", rel: "noopener", textContent: "Archidekt ↗" }),
+        openDeck(r.deck.id),
         el("span", { className: "deck-meta", textContent: meta })));
     details.addEventListener("toggle", () => {
       const theirs = [...r.deck.cards].map(p => shard.cards[p]).filter(c => !have.has(c)).sort((a, b) => a - b);
@@ -805,7 +810,7 @@ async function showCommander(key) {
         const details = el("details", {},
           el("summary", {},
             el("span", { className: "deck-name", textContent: deck.name || "Untitled deck" }),
-            el("a", { className: "open", href: `https://archidekt.com/decks/${deck.id}`, target: "_blank", rel: "noopener", textContent: "Archidekt ↗" }),
+            openDeck(deck.id),
             el("span", { className: "deck-meta", textContent: `updated ${deck.updated} · ${deck.cards.length} cards besides basic lands` })));
         details.addEventListener("toggle", () => details.append(el("div", { className: "deck-body type-groups" },
           ...typeGroups([...deck.cards].map(p => shard.cards[p]), names))), { once: true });
@@ -832,7 +837,7 @@ async function showCommander(key) {
   let shownWindow = windows.findIndex(w => w.days === DEFAULT_DAYS && w.since !== null);
   if (shownWindow < 0) shownWindow = windows.findIndex(w => w.since !== null);
   function showCommanderTrends(g, counts) {
-    const recentOf = w => (w.since === null ? [] : g.members.filter(d => shard.decks[d].id >= w.since));
+    const recentOf = w => (w.since === null ? [] : g.members.filter(d => shard.decks[d].made >= w.since));
     $("commander-windows").replaceChildren(...windows.map((w, i) => ({ w, i })).reverse().map(({ w, i }) => el("button", {
       type: "button", ariaPressed: String(i === shownWindow), disabled: w.since === null,
       title: w.since === null ? "Not enough data yet" : "",

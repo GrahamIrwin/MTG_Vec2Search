@@ -61,11 +61,16 @@ time, a few KB after that).
 
    **Browse all search terms** on the page lists every term with its card count.
 3. **Deck recommendations** compares a Commander deck with public decks from
-   [Archidekt](https://archidekt.com):
+   [Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com):
    - `build_decks.py crawl` downloads decks through Archidekt's API (one request a
      second) into `decks.jsonl.gz`: each deck's commanders and cards, by Scryfall
      oracle id. It takes the recently updated decks first, then takes turns
      through every commander it has seen, least recently crawled first.
+     `--site moxfield` does the same on Moxfield, whose search finds a commander
+     by its own card id (looked up by name) and stops at 10,000 decks, and whose
+     decks list printings (turned into oracle ids with Scryfall's
+     `default_cards`). A deck's id says where it's from: Archidekt's are
+     numbers, Moxfield's strings.
    - `build_decks.py build` writes `site/decks/`: one file per commander (or
      partner pair) with its newest 3,000 decks. Each deck is stored as positions
      in that commander's list of cards, most played first, gap-encoded like the
@@ -126,11 +131,11 @@ time, a few KB after that).
    pass; the cards are then those commanders' decks'. Rising compares a share
    of the window's decks with the share of all decks, relative to it, so a
    commander or card going from 1% to 4% beats one going from 60% to 66%.
-   - Archidekt numbers decks as they're made, so the crawler keeps each deck's
-     creation date (and fills it in for decks it already had from the search
-     listings it reads anyway), and `build_decks.py build` turns each window
-     into the first deck id made in it: every deck, dated or not, falls in or
-     out by its id.
+   - The crawler keeps each deck's creation date (and fills it in for decks it
+     already had from the search listings it reads anyway). Archidekt decks
+     crawled before dates were kept get the date of the last dated deck before
+     them, as Archidekt numbers decks as they're made. Each window starts on a
+     date, and every deck falls in or out by when it was made.
    - `trends.json` holds each commander's decks made per window, price,
      bracket and themes, plus exact card counts over all decks, for the
      unfiltered page. `trend-cards.json` (about 1 MB) holds each commander's
@@ -143,13 +148,15 @@ GitHub Actions rebuilds the index and redeploys every Monday. To update right
 away (e.g. on a set's release day), open **Actions → Build and deploy → Run workflow**.
 
 The deck corpus is too big for git, so it lives on the `deck-corpus` release.
-**Actions → Crawl decks** adds to it for five hours every day, then redeploys
-the site so Trends stays current. To grow it
+**Actions → Crawl decks** adds to it every day (two and a half hours on each
+site), then redeploys the site so Trends stays current. To grow it
 faster, crawl locally:
 
 ```
 gh release download deck-corpus             # decks.jsonl.gz, crawl_state.json
 python build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any time
+python build_index.py                       # Moxfield needs default_cards.jsonl.gz first
+python build_decks.py crawl --site moxfield --hours 24
 ```
 
 When a crawl stops (Ctrl+C, or its hours run out) it uploads the corpus to the
@@ -198,7 +205,7 @@ Tests: `python test_build_index.py`, `python test_build_decks.py` and `node --te
 ## Files
 
 - `build_index.py`: downloads data from Scryfall, vectorizes the cards, writes the index
-- `build_decks.py`: crawls Archidekt decks, writes the per-commander deck files
+- `build_decks.py`: crawls Archidekt and Moxfield decks, writes the per-commander deck files
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
 - `site/deck.js`: decklist parsing, similar decks, recommendations, builds and trends
@@ -208,7 +215,7 @@ Tests: `python test_build_index.py`, `python test_build_decks.py` and `node --te
 - `.github/workflows/crawl.yml`: daily deck crawl, then a deploy
 
 Card data and images come from [Scryfall](https://scryfall.com), decklists from
-[Archidekt](https://archidekt.com). MTG Vec2Search is
+[Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com). MTG Vec2Search is
 unofficial Fan Content permitted under the Fan Content Policy. Not
 approved/endorsed by Wizards. Portions of the materials used are property of
 Wizards of the Coast. ©Wizards of the Coast LLC.

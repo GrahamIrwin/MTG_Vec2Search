@@ -1,11 +1,13 @@
-"""Crawl public Commander decks from Archidekt into decks.jsonl.gz, the deck corpus, and turn
-it into site/decks/, the data behind "Find similar decks".
+"""Crawl public Commander decks from Archidekt and Moxfield into decks.jsonl.gz, the deck corpus,
+and turn it into site/decks/, the data behind "Find similar decks".
 
     python build_decks.py crawl --hours 5     # resumable: stop and restart any time
+    python build_decks.py crawl --site moxfield --hours 5
     python build_decks.py crawl --top 3500 --per-commander 20 --rate 3   # fill in popular commanders
     python build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
+import bisect
 import gzip
 import json
 import os
@@ -25,6 +27,7 @@ from datetime import date, timedelta
 from build_index import by_popularity, load_cards, load_oracle_tags, load_printings, write_json
 
 ARCHIDEKT = "https://archidekt.com/api"
+MOXFIELD = "https://api2.moxfield.com"
 CORPUS = "decks.jsonl.gz"
 HEADERS = {"User-Agent": "MTG_Vec2Search/1.0 (+https://github.com/grahamirwin/MTG_Vec2Search)",
            "Accept": "application/json", "Accept-Encoding": "gzip"}
@@ -32,25 +35,29 @@ COMMANDER_FORMAT = 3  # Archidekt's deckFormat id for Commander / EDH
 DELAY = 1.0  # seconds between requests; Archidekt is a small team, so crawl politely
 MIN_CARDS, MAX_CARDS = 95, 105  # roughly complete 100-card decks
 MAX_PAGES = 50  # the search API stops returning results after ~50 pages
+MOX_PAGES = 100  # Moxfield's search stops at 10,000 decks: 100 pages of 100
 STATE = "crawl_state.json"  # when each commander was last crawled, so crawls take turns
+# (Moxfield's turns are "moxfield:<commander>"). A deck's id says where it's from: Archidekt's are
+# numbers, Moxfield's strings (its public id, the one in the deck's link).
 RELEASE = "deck-corpus"  # the GitHub release the corpus lives on (too big for git)
 
 
-_last = 0.0
+_last = {}  # per site: when its next request may go out
 _lock = threading.Lock()
 
 
-def get_json(path):
-    """GET an Archidekt API path, at most one request per DELAY seconds (across threads), retrying on errors."""
-    global _last
+def get_json(path, base=ARCHIDEKT):
+    """GET an Archidekt (or Moxfield) API path, at most one request per DELAY seconds to each site
+    (across threads), retrying on errors."""
+    site = "Moxfield" if base == MOXFIELD else "Archidekt"
     for attempt in range(5):
         with _lock:
             now = time.time()  # one reading: a second, later one could make the wait negative
-            _last = max(_last + DELAY, now)
-            wait = _last - now
+            _last[base] = max(_last.get(base, 0) + DELAY, now)
+            wait = _last[base] - now
         time.sleep(wait)
         try:
-            with urllib.request.urlopen(urllib.request.Request(ARCHIDEKT + path, headers=HEADERS), timeout=60) as r:
+            with urllib.request.urlopen(urllib.request.Request(base + path, headers=HEADERS), timeout=60) as r:
                 body = r.read()
                 if r.headers.get("Content-Encoding") == "gzip":
                     body = gzip.decompress(body)
@@ -65,9 +72,9 @@ def get_json(path):
             problem = f"didn't answer ({getattr(e, 'reason', e)})"
         wait = 30 * 2 ** attempt  # back off: 30s, 1m, 2m, 4m, 8m
         with _lock:  # every thread backs off, not just this one
-            _last = max(_last, time.time() + wait)
-        print(f"  ! Archidekt {problem}; trying again in {duration(wait)}", flush=True)
-    raise RuntimeError(f"Archidekt keeps failing for {path}")
+            _last[base] = max(_last.get(base, 0), time.time() + wait)
+        print(f"  ! {site} {problem}; trying again in {duration(wait)}", flush=True)
+    raise RuntimeError(f"{site} keeps failing for {path}")
 
 
 def search_decks(commander=None, pages=MAX_PAGES):
@@ -109,6 +116,60 @@ def slim_deck(deck):
             "created": (deck.get("createdAt") or "")[:10],
             "bracket": deck.get("edhBracket"), "views": deck.get("viewCount", 0),
             "commanders": sorted(commanders), "cards": cards}
+
+
+def search_moxfield(commander=None, pages=MOX_PAGES):
+    """search_decks, on Moxfield: (public id, last update date, creation date) of complete public
+    Commander decks, most recently updated first; for a commander, then its oldest too."""
+    query = {"fmt": "commander", "pageSize": 100, "sortType": "updated"}
+    if commander:  # Moxfield finds a commander's decks by its own card id
+        found = get_json("/v2/cards/search?" + urllib.parse.urlencode({"q": commander}), MOXFIELD) or {}
+        ids = [c["id"] for c in found.get("data") or [] if c.get("name", "").lower() == commander.lower()]
+        if not ids:
+            return
+        query["commanderCardId"] = ids[0]
+    for order in ["Descending", "Ascending"] if commander else ["Descending"]:
+        for page in range(1, pages + 1):
+            data = get_json("/v2/decks/search?" + urllib.parse.urlencode(
+                {**query, "sortDirection": order, "pageNumber": page}), MOXFIELD)
+            for d in (data or {}).get("data") or []:
+                # mainboardCount counts the commanders too
+                if MIN_CARDS <= d.get("mainboardCount", 0) <= MAX_CARDS and d.get("visibility") == "public":
+                    yield d["publicId"], (d.get("lastUpdatedAtUtc") or "")[:10], (d.get("createdAtUtc") or "")[:10]
+            if not data or page >= data.get("totalPages", 0):
+                break
+
+
+def slim_moxfield(deck, oracles):
+    """slim_deck, for a Moxfield deck. Its cards are printings: oracles is {Scryfall id: oracle id}."""
+    boards = deck.get("boards") or {}
+
+    def board(name):
+        for e in ((boards.get(name) or {}).get("cards") or {}).values():
+            oracle = oracles.get((e.get("card") or {}).get("scryfall_id"))
+            if oracle:
+                yield oracle, e.get("quantity", 1)
+    commanders = sorted({o for o, _ in board("commanders")})
+    cards = {}
+    for o, k in [*board("commanders"), *board("mainboard")]:  # the sideboard and maybeboard aren't in the deck
+        cards[o] = cards.get(o, 0) + k
+    if not 1 <= len(commanders) <= 2 or not MIN_CARDS <= sum(cards.values()) <= MAX_CARDS:
+        return None
+    return {"id": deck["publicId"], "name": deck.get("name", ""), "updated": (deck.get("lastUpdatedAtUtc") or "")[:10],
+            "created": (deck.get("createdAtUtc") or "")[:10],
+            "bracket": deck.get("bracket"), "views": deck.get("viewCount", 0),
+            "commanders": commanders, "cards": cards}
+
+
+def printing_oracles(printings_file="default_cards.jsonl.gz"):
+    """{Scryfall id: oracle id} for every printing (from build_index.py), digital ones too."""
+    oracles = {}
+    with gzip.open(printings_file, "rt", encoding="utf-8") as f:
+        for c in map(json.loads, filter(str.strip, f)):
+            oracle_id = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
+            if oracle_id:
+                oracles[c["id"]] = oracle_id
+    return oracles
 
 
 def load_corpus(path=CORPUS):
@@ -214,12 +275,22 @@ def share(corpus, state, path=CORPUS, state_path=STATE):
               f"  gh release upload {RELEASE} {path} {state_path} --clobber", flush=True)
 
 
-def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=CORPUS, state_path=STATE):
-    """First the decks updated most recently (new decks, and new versions of ones we have), then up
-    to per_commander more decks for each commander: commanders never crawled first (most common
-    in the corpus first), then the ones crawled longest ago, until `hours` run out.
-    With `top`: instead, the `top` most played commanders, each topped up to per_commander decks,
-    several at once (as fast as DELAY allows)."""
+def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=CORPUS, state_path=STATE,
+          site="archidekt"):
+    """First the decks updated most recently on `site` (new decks, and new versions of ones we have),
+    then up to per_commander more decks for each commander: commanders never crawled there first
+    (most common in the corpus first), then the ones crawled longest ago, until `hours` run out.
+    With `top`: instead, the `top` most played commanders, each topped up to per_commander of the
+    site's decks, several at once (as fast as DELAY allows)."""
+    moxfield = site == "moxfield"
+    if moxfield:
+        oracles = printing_oracles()  # Moxfield decks list printings
+        search, link = search_moxfield, "moxfield.com/decks/{}"
+        get_deck = lambda i: slim_moxfield(get_json(f"/v3/decks/all/{i}", MOXFIELD) or {}, oracles)
+    else:
+        search, link = search_decks, "archidekt.com/decks/{}"
+        get_deck = lambda i: slim_deck(get_json(f"/decks/{i}/") or {})
+    turn = (lambda c: f"moxfield:{c}") if moxfield else (lambda c: c)  # a commander's key in state
     deadline = time.time() + hours * 3600 if hours else float("inf")
     stop = threading.Event()  # Ctrl+C: threads finish their request but save nothing more
     lock = threading.Lock()  # around the corpus, the file and the counts
@@ -258,7 +329,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                             mine["created"] = created
                         continue
                     have[deck_id] = updated
-                deck = slim_deck(get_json(f"/decks/{deck_id}/") or {})
+                deck = get_deck(deck_id)
                 with lock:
                     if not deck or stop.is_set():
                         continue
@@ -270,7 +341,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                     added += 1
                     lead = " & ".join(names.get(o, "?") for o in deck["commanders"])
                     print(f"  {'~' if kind == 'updated' else '+'} {len(corpus):>7,}  {deck['name'][:40]:<40}  "
-                          f"{lead[:40]:<40}  archidekt.com/decks/{deck_id}", flush=True)
+                          f"{lead[:40]:<40}  {link.format(deck_id)}", flush=True)
             return added
 
         def take_turns(queue):  # threads take commanders off the queue: [(name, decks wanted)]
@@ -280,9 +351,9 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                 for i, (commander, want) in jobs:
                     if time.time() > deadline or stop.is_set():
                         return
-                    added = fetch(search_decks(commander), want)
+                    added = fetch(search(commander), want)
                     with lock:
-                        state[commander] = date.today().isoformat()
+                        state[turn(commander)] = date.today().isoformat()
                         with open(state_path, "w", encoding="utf-8") as f:
                             json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
                         print(f"[{i:,}/{len(queue):,}] {commander}: +{added} decks ({progress()})", flush=True)
@@ -296,27 +367,29 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 
         try:
             if top:
-                count = Counter(o for d in corpus.values() for o in d["commanders"])
+                count = Counter(o for d in corpus.values() if isinstance(d["id"], str) == moxfield
+                                for o in d["commanders"])
                 queue = [(name, per_commander - count[o]) for o, name in top_commanders(top) if count[o] < per_commander]
                 print(f"{len(queue):,} of the top {top:,} commanders have fewer than {per_commander} decks\n", flush=True)
                 take_turns(queue)
             elif not only:
-                print("Recently updated decks on Archidekt:", flush=True)
-                print(f"Recently updated: +{fetch(search_decks(), float('inf'))} decks ({progress()})\n", flush=True)
+                print(f"Recently updated decks on {site.capitalize()}:", flush=True)
+                print(f"Recently updated: +{fetch(search(), float('inf'))} decks ({progress()})\n", flush=True)
             done = set()
             while not top and per_commander and time.time() < deadline:
                 if only:
                     queue = [c for c in only if c not in done]
                 else:  # recounted each time: crawling one commander turns up decks for others
                     by_lead = Counter(names[o] for d in corpus.values() for o in d["commanders"] if o in names)
-                    queue = sorted((c for c in by_lead if c not in done), key=lambda c: (state.get(c, ""), -by_lead[c]))
+                    queue = sorted((c for c in by_lead if c not in done), key=lambda c: (state.get(turn(c), ""), -by_lead[c]))
                 if not queue:
                     break
                 commander = queue[0]
                 done.add(commander)
-                print(f"[{len(done)}] {commander}" + (f" (last crawled {state[commander]})" if commander in state else ""), flush=True)
-                added = fetch(search_decks(commander), per_commander)
-                state[commander] = date.today().isoformat()
+                last = state.get(turn(commander))
+                print(f"[{len(done)}] {commander}" + (f" (last crawled {last})" if last else ""), flush=True)
+                added = fetch(search(commander), per_commander)
+                state[turn(commander)] = date.today().isoformat()
                 with open(state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
                 print(f"[{len(done)}] {commander}: +{added} decks ({progress()})\n", flush=True)
@@ -339,9 +412,10 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 # a search downloads just the decks for the pasted deck's commander:
 #   <card>.json / <card>-<card>.json
 #       cards  the cards these decks play (card numbers), most played first
-#       decks  [archidekt id, name, last updated, cards], the newest MAX_DECKS; cards are
-#              positions in `cards`, sorted and stored as gaps (popular cards have small
-#              positions, so the gaps are small numbers; same idea as index/t/)
+#       decks  [id, name, last updated, cards, made], the newest MAX_DECKS; id is Archidekt's (a
+#              number) or Moxfield's (a string); cards are positions in `cards`, sorted and stored
+#              as gaps (popular cards have small positions, so the gaps are small numbers; same
+#              idea as index/t/); made: when the deck was made (see made_dates; "" if unknown)
 #       signature  the SHOWN_SIGNATURE cards these decks play far more often than other decks do
 #       tags   [Scryfall Tagger tag, gaps between positions in `cards`], over the nonland cards
 #              at least COMMON of the decks play: what the site names a commander's builds by
@@ -352,7 +426,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #   index.json  every commander with a file: [file name, deck count, signature cards], where the
 #              signature cards are what its decks play far more often than other decks do. Used to
 #              find decks with other commanders, and for commanders without enough decks.
-#              Also windows (days) and since: the first Archidekt deck id made in each window.
+#              Also windows (days) and since: the date each window starts (null: not known yet).
 #   trends.json  themes (tag names); every commander with a file, most decks first: [file name,
 #              decks made [ever, in each window], price, bracket, theme numbers]; and everything:
 #              [decks made, gaps between the cards they play, [how many play each card, per window]]
@@ -399,17 +473,33 @@ def themes(here, n, usual, card_tags, count=THEMES):
     return [t for t, _ in picked]
 
 
-def window_plays(decks, since):
-    """For [(deck, cards it plays)]: how many were made ever and in each window (since: the first deck
-    id in each), and how many of those play each card: {card: [ever, per window]}."""
-    windows = [[1] + [int(s is not None and d["id"] >= s) for s in since] for d, _ in decks]
-    made = [sum(col) for col in zip(*windows)] or [0] * (len(since) + 1)
-    plays = defaultdict(lambda: [0] * len(made))
+def made_dates(corpus):
+    """{deck id: when it was made}: its creation date, or for an Archidekt deck crawled before those
+    were kept, that of the last dated deck before it (Archidekt numbers decks as they're made), so
+    it's in a window just when it would be by id. "" when nothing tells."""
+    dated = sorted((d["id"], d["created"]) for d in corpus.values() if isinstance(d["id"], int) and d.get("created"))
+    ids = [i for i, _ in dated]
+    made = {}
+    for d in corpus.values():
+        if d.get("created"):
+            made[d["id"]] = d["created"]
+        else:
+            k = bisect.bisect(ids, d["id"]) if isinstance(d["id"], int) else 0
+            made[d["id"]] = dated[k - 1][1] if k else ""
+    return made
+
+
+def window_plays(decks, since, made):
+    """For [(deck, cards it plays)]: how many were made ever and in each window (since: the date each
+    starts; made: see made_dates), and how many of those play each card: {card: [ever, per window]}."""
+    windows = [[1] + [int(s is not None and made[d["id"]] >= s) for s in since] for d, _ in decks]
+    counts = [sum(col) for col in zip(*windows)] or [0] * (len(since) + 1)
+    plays = defaultdict(lambda: [0] * len(counts))
     for (_, played), w in zip(decks, windows):
         for c in played:
             for k, inside in enumerate(w):
                 plays[c][k] += inside
-    return made, plays
+    return counts, plays
 
 
 def trend_cards(made, plays, share, least):
@@ -446,16 +536,15 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
                          if o in number and o not in basic and o not in d["commanders"]})
         groups[key].append((d, played))
 
-    # Archidekt numbers decks as they're made, so a window is every deck from the first one made in
-    # it on: decks crawled before creation dates were kept count too. None: no known deck is older,
-    # so where the window starts isn't known yet.
+    # A window is every deck made from its first day on. None: no deck known to be made in it, or no
+    # known deck is older, so the window isn't filled in yet.
     today = today or date.today()
-    known = [(d["created"], d["id"]) for d in corpus.values() if d.get("created")]
+    made = made_dates(corpus)
+    known = [d["created"] for d in corpus.values() if d.get("created")]
     since = []
     for days in WINDOWS:
         cutoff = (today - timedelta(days)).isoformat()
-        after = [i for made, i in known if made >= cutoff]
-        since.append(min(after) if after and any(made < cutoff for made, _ in known) else None)
+        since.append(cutoff if any(c >= cutoff for c in known) and any(c < cutoff for c in known) else None)
 
     everywhere = Counter(c for decks in groups.values() for _, played in decks for c in played)
     total = sum(len(decks) for decks in groups.values())
@@ -478,10 +567,10 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
         # at least TREND_SHARE of the decks play in some window, which keeps the file to about a MB.
         # ponytail: a card under that in every commander's decks is missing from filtered Trends;
         # per-identity totals (exact) if that matters
-        made, plays = window_plays(decks, since)
-        trends.append([key, made, price, bracket, known_themes, trend_cards(made, plays, TREND_SHARE, TREND_DECKS)])
+        counts, plays = window_plays(decks, since, made)
+        trends.append([key, counts, price, bracket, known_themes, trend_cards(counts, plays, TREND_SHARE, TREND_DECKS)])
 
-        decks = sorted(decks, key=lambda x: (x[0]["updated"], x[0]["id"]), reverse=True)[:MAX_DECKS]
+        decks = sorted(decks, key=lambda x: (x[0]["updated"], str(x[0]["id"])), reverse=True)[:MAX_DECKS]
         here = Counter(c for _, played in decks for c in played)
         played_most = sorted(here, key=lambda c: (-here[c], c))
         position = {c: i for i, c in enumerate(played_most)}
@@ -494,13 +583,13 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
                     by_tag[t].append(i)
         write_json(os.path.join(out_dir, f"{key}.json"), {
             "cards": played_most,
-            "decks": [[d["id"], d["name"][:80], d["updated"], gaps(sorted(position[c] for c in played))]
+            "decks": [[d["id"], d["name"][:80], d["updated"], gaps(sorted(position[c] for c in played)), made[d["id"]]]
                       for d, played in decks],
             "signature": signature[:SHOWN_SIGNATURE],
             "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
             "price": price, "bracket": bracket, "themes": known_themes,
         })
-        commanders.append([key, made[0], signature[:SIGNATURE]])
+        commanders.append([key, counts[0], signature[:SIGNATURE]])
     commanders.sort(key=lambda c: -c[1])
     write_json(os.path.join(out_dir, "index.json"),
                {"decks": total, "commanders": commanders, "windows": WINDOWS, "since": since})
@@ -509,9 +598,9 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
     for c in trends:
         c[4] = [names.index(t) for t in c[4]]
     # Every deck of these commanders, exactly: what Trends shows until a filter is picked
-    made, plays = window_plays([x for key, *_ in trends for x in groups[key]], since)
+    counts, plays = window_plays([x for key, *_ in trends for x in groups[key]], since, made)
     write_json(os.path.join(out_dir, "trends.json"), {
-        "themes": names, "everything": [made, *trend_cards(made, plays, 0, TREND_DECKS)],
+        "themes": names, "everything": [counts, *trend_cards(counts, plays, 0, TREND_DECKS)],
         "commanders": [c[:5] for c in trends]})
     write_json(os.path.join(out_dir, "trend-cards.json"), [c[5] for c in trends])
     size = lambda f: os.path.getsize(os.path.join(out_dir, f)) / 1e6
@@ -522,7 +611,9 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("crawl", help="download decks from Archidekt into the corpus")
+    c = sub.add_parser("crawl", help="download decks from Archidekt or Moxfield into the corpus")
+    c.add_argument("--site", choices=["archidekt", "moxfield"], default="archidekt",
+                   help="where to crawl (default: %(default)s); moxfield needs build_index.py's default_cards")
     c.add_argument("--per-commander", type=int, default=100,
                    help="new decks to fetch per commander (0: only recently updated decks)")
     c.add_argument("--only", nargs="*", help="crawl just these commanders (card names; double-faced ones by either)")
@@ -536,6 +627,6 @@ if __name__ == "__main__":
     sys.stdout.reconfigure(errors="replace")  # deck names with emoji can't crash a non-UTF-8 console
     if args.cmd == "crawl":
         DELAY = 1 / args.rate
-        crawl(args.per_commander, args.only, args.hours, args.top, upload=not args.no_upload)
+        crawl(args.per_commander, args.only, args.hours, args.top, upload=not args.no_upload, site=args.site)
     else:
         build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=load_printings()[0])
