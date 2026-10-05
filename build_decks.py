@@ -67,10 +67,11 @@ def get_json(path, base=ARCHIDEKT):
                 return None
             if e.code not in (429, 500, 502, 503, 504):
                 raise
-            problem = f"answered {e.code}"
+            problem, asked = f"answered {e.code}", e.headers.get("Retry-After", "")
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-            problem = f"didn't answer ({getattr(e, 'reason', e)})"
-        wait = 30 * 2 ** attempt  # back off: 30s, 1m, 2m, 4m, 8m
+            problem, asked = f"didn't answer ({getattr(e, 'reason', e)})", ""
+        # As long as the site asks (Moxfield's 429s say a few seconds), else back off: 30s, 1m, 2m, 4m, 8m
+        wait = int(asked) + 1 if asked.isdigit() else 30 * 2 ** attempt
         with _lock:  # every thread backs off, not just this one
             _last[base] = max(_last.get(base, 0), time.time() + wait)
         print(f"  ! {site} {problem}; trying again in {duration(wait)}", flush=True)

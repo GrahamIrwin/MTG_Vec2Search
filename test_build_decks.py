@@ -1,9 +1,12 @@
 """Self-check for the deck corpus and site/decks/: python test_build_decks.py"""
 import gzip
+import io
 import json
 import os
 import tempfile
+import urllib.error
 import urllib.parse
+import urllib.request
 from collections import Counter, defaultdict
 from datetime import date
 
@@ -144,6 +147,23 @@ with tempfile.TemporaryDirectory() as tmp:
         raise AssertionError("an unknown name should stop the crawl")
     except SystemExit as e:
         assert "Nope" in str(e)
+
+    # A 429 waits as long as its Retry-After says (6s, then a second to spare), else backs off (1m on a second try)
+    answers, slept = [6, None, {}], []
+    def fake_urlopen(request, timeout):
+        a = answers.pop(0)
+        if not isinstance(a, dict):
+            raise urllib.error.HTTPError(request.full_url, 429, "", {"Retry-After": str(a)} if a else {}, None)
+        response = io.BytesIO(json.dumps(a).encode())
+        response.headers = {}
+        return response
+    real = urllib.request.urlopen, build_decks.time.sleep
+    urllib.request.urlopen, build_decks.time.sleep = fake_urlopen, slept.append
+    try:
+        assert build_decks.get_json("/x", base="https://test") == {}
+    finally:
+        urllib.request.urlopen, build_decks.time.sleep = real
+    assert [round(s) for s in slept] == [0, 1 + 7, 1 + 60], slept  # plus a second between requests
 
     lead = {}
     def fake_get_json(path, base=build_decks.ARCHIDEKT):
