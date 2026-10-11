@@ -6,7 +6,7 @@ the data behind "Find similar decks" and the commander pages.
     python build_decks.py crawl --site moxfield --hours 5
     python build_decks.py crawl --top 3500 --per-commander 20 --rate 3   # fill in popular commanders
     python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000
-    python build_decks.py results --hours 1   # resumable: the last year's tournaments, newest first
+    python build_decks.py results --hours 1   # resumable: the last two years' tournaments, newest first
     python build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
@@ -211,7 +211,7 @@ def save_corpus(corpus, path=CORPUS):
 #    entries: [[commander(s) ("A / B" for partners), standing, wins, losses, draws, decklist link,
 #               [card names]]]}, only the entries edhtop16 has a decklist for
 RESULTS = "results.jsonl.gz"
-RESULT_DAYS = 365
+RESULT_DAYS = 730
 MIN_EVENT = 16  # players: smaller events are few games against few decks
 REFETCH_DAYS = 3  # recent events are fetched again: results and decklists come in after they start
 FETCHERS = 4  # tournaments fetched at once: each takes edhtop16 a few seconds, and DELAY still spaces the requests
@@ -532,7 +532,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #       price  what a typical (median) deck costs, in US cents (-1: unknown)
 #       bracket  the typical bracket of the decks that give one (0: none do)
 #       themes  the Tagger tags these decks play far more of than other decks do
-#       results  how many of its decks are in the last year's cEDH tournament results (absent: none)
+#       results  how many of its decks are in the last two years' cEDH tournament results (absent: none)
 #   results/<card>.json  a commander's cEDH tournament results (from results.jsonl.gz), for each
 #              of RESULT_WINDOWS (days back): totals: [decks, games, wins, decks in events with a
 #              top cut, top cuts] per window; cards: what the decks play (card numbers, most
@@ -554,9 +554,13 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #              decks made [ever, in each window], price, bracket, theme numbers]; and everything:
 #              [decks made, gaps between the cards they play, [how many play each card, per window]]
 #              over all their decks
-#   trend-cards.json  the same as everything, for each commander in trends.json (most of its cards)
+#   trend-cards/<identity>.json  the same as everything, for each commander in trends.json of that
+#              color identity (WUBRG bits, as in the card index): [its number in trends.json, gaps,
+#              per window]. Most of its cards; a filter fetches just the identities it keeps.
+#   card-commanders/<block>.json  for each of a block of CARD_BLOCK cards, the commanders in
+#              trends.json that play it, flat: [commander number, decks playing it ever, ...]
 OUT_DIR = os.path.join("site", "decks")
-RESULT_WINDOWS = [90, 180, 365]  # days back: the periods commander pages show tournament results for
+RESULT_WINDOWS = [90, 180, 365, 730]  # days back: the periods commander pages show tournament results for
 MIN_RESULT_DECKS = 2  # a card fewer of a commander's tournament decks play says nothing yet
 MIN_POOLED_DECKS = 10  # tournament decks playing a card for the Tournaments tab to list it
 POOL_DECKS = 3  # a commander's decks with a card, and without it, for it to count toward the card's overall result
@@ -571,7 +575,8 @@ BUILD_DECKS = 100  # 2 * DECKS_PER_BUILD in site/deck.js
 MAX_TAG_CARDS = 2000  # tags on more cards than this ("removal") don't tell builds apart
 THEMES = 6  # Tagger tags a commander's decks are known for, which Trends finds commanders by
 WINDOWS = [90, 30, 7]  # days, for Trends: decks made in the last 90, 30 and 7 days
-TREND_SHARE, TREND_DECKS = 0.15, 3  # a commander's cards in trend-cards.json (see build)
+TREND_SHARE, TREND_DECKS = 0.15, 3  # a commander's cards in trend-cards/ (see build)
+CARD_BLOCK = 16  # cards per card-commanders/ file: the most played are in most commanders' decks
 # Tags about how a card is worded or printed rather than what a deck does with it
 NOT_A_PLAN = re.compile(r"^cycle-|-effect$|vanilla|^multiple-|^passive-ability$|^delayed-trigger$|"
                         r"^inverted-effects$|^intervening-if|out-of-color|^noncreature-typal$|"
@@ -654,34 +659,57 @@ def tournament_stats(results, cards, today):
     basic = {i for i, c in enumerate(cards) if "Basic" in c.get("type_line", "")}
     since = [(today - timedelta(days)).isoformat() for days in RESULT_WINDOWS]
 
-    def add(counts, t, row):  # row: [decks, games, wins, decks in events with a top cut, top cuts]
-        for w, day in enumerate(since):
-            if t["date"] >= day:
-                for i, x in enumerate(row):
-                    counts[w][i] += x
+    # The windows nest, so a deck is added once, to the narrowest it's in, and each window then takes
+    # in the narrower ones' (cumulative)
+    def add(counts, w, row):  # row: [decks, games, wins, decks in events with a top cut, top cuts]
+        for i, x in enumerate(row):
+            counts[w][i] += x
 
+    def cumulative(counts):
+        for w in range(1, len(counts)):
+            for i in range(5):
+                counts[w][i] += counts[w - 1][i]
+        return counts
+
+    # Each name as written, looked up once: the same few thousand names fill every decklist
+    written = {n for t in results.values() for e in t["entries"] for n in e[6]}
+    card_of = {n: number.get(n.lower()) for n in written}
     by_key = defaultdict(list)
     field = [[0] * 5 for _ in since]
     for t in results.values():
+        w = next((w for w, day in enumerate(since) if t["date"] >= day), None)
+        if w is None:
+            continue
         for lead, standing, wins, losses, draws, link, names in t["entries"]:
             cut = t["top_cut"]
             row = [1, wins + losses + draws, wins, int(cut > 0), int(0 < standing <= cut)]
-            add(field, t, row)
+            add(field, w, row)
             leads = [number.get(n.lower()) for n in lead.split(" / ")] if lead else [None]
             if None in leads:
                 continue
-            played = {number[n.lower()] for n in names if n.lower() in number} - basic - set(leads)
-            by_key["-".join(str(n) for n in sorted(leads))].append((t, standing, [wins, losses, draws], link, played, row))
+            played = {card_of[n] for n in names} - {None} - basic - set(leads)
+            by_key["-".join(str(n) for n in sorted(leads))].append((t, w, standing, [wins, losses, draws], link, played, row))
+    cumulative(field)
     out = {}
     for key, entries in by_key.items():
         totals = [[0] * 5 for _ in since]
         stats = defaultdict(lambda: [[0] * 5 for _ in since])
         top = []
-        for t, standing, record, link, played, row in entries:
-            for counts in [totals] + [stats[c] for c in played]:
-                add(counts, t, row)
+        for t, w, standing, record, link, played, row in entries:
+            add(totals, w, row)
+            decks, games, wins, cut_decks, cuts = row
+            for c in played:  # add(), unrolled: this runs once per card of every deck
+                s = stats[c][w]
+                s[0] += decks
+                s[1] += games
+                s[2] += wins
+                s[3] += cut_decks
+                s[4] += cuts
             if standing <= TOP_FINISH:
                 top.append([t["date"], t["name"], t["size"], standing, *record, link])
+        cumulative(totals)
+        for counts in stats.values():
+            cumulative(counts)
         kept = sorted((c for c in stats if stats[c][-1][0] >= MIN_RESULT_DECKS), key=lambda c: (-stats[c][-1][0], c))
         out[key] = {"windows": RESULT_WINDOWS, "totals": totals, "cards": kept,
                     "stats": [sum(stats[c], []) for c in kept],
@@ -828,10 +856,29 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
     write_json(os.path.join(out_dir, "trends.json"), {
         "themes": names, "everything": [counts, *trend_cards(counts, plays, 0, TREND_DECKS)],
         "commanders": [c[:5] for c in trends]})
-    write_json(os.path.join(out_dir, "trend-cards.json"), [c[5] for c in trends])
-    size = lambda f: os.path.getsize(os.path.join(out_dir, f)) / 1e6
-    print(f"Wrote {out_dir}: {total} decks, {len(commanders)} commanders, {sum(map(size, os.listdir(out_dir))):.1f} MB "
-          f"in total (trends.json {size('trends.json'):.1f} MB, trend-cards.json {size('trend-cards.json'):.1f} MB)")
+    # Most of each commander's cards, split two ways so a page fetches only what it needs: by color
+    # identity for a filtered Trends (a color filter keeps one), and by card for a card's page
+    by_identity, by_card = defaultdict(list), defaultdict(list)
+    for i, c in enumerate(trends):
+        leads = [int(n) for n in c[0].split("-")]
+        colors = sum(1 << j for j, color in enumerate("WUBRG")
+                     if any(color in cards[n].get("color_identity", []) for n in leads))
+        by_identity[colors].append([i, *c[5]])
+        card = 0
+        for gap, ever in zip(c[5][0], c[5][1][0]):
+            card += gap
+            if ever:
+                by_card[card] += [i, ever]
+    for colors, rows in by_identity.items():
+        write_json(os.path.join(out_dir, "trend-cards", f"{colors}.json"), rows)
+    for k in range(0, len(cards), CARD_BLOCK):
+        write_json(os.path.join(out_dir, "card-commanders", f"{k // CARD_BLOCK}.json"),
+                   [by_card.get(n, []) for n in range(k, min(k + CARD_BLOCK, len(cards)))])
+    size = lambda *path: sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(os.path.join(out_dir, *path))
+                             for f in fs) if os.path.isdir(os.path.join(out_dir, *path)) else os.path.getsize(os.path.join(out_dir, *path))
+    print(f"Wrote {out_dir}: {total} decks, {len(commanders)} commanders, {size() / 1e6:.1f} MB in total "
+          f"(trends.json {size('trends.json') / 1e6:.1f} MB, trend-cards/ {size('trend-cards') / 1e6:.1f} MB "
+          f"in {len(by_identity)} files)")
 
 
 if __name__ == "__main__":
@@ -849,7 +896,7 @@ if __name__ == "__main__":
     c.add_argument("--rate", type=float, default=1 / DELAY, help="requests a second (default: %(default)g)")
     c.add_argument("--no-upload", action="store_true",
                    help="don't merge with and upload to the deck-corpus release when the crawl stops")
-    r = sub.add_parser("results", help="download the last year's cEDH tournament results from edhtop16")
+    r = sub.add_parser("results", help="download the last two years' cEDH tournament results from edhtop16")
     r.add_argument("--hours", type=float, help="stop after this long")
     sub.add_parser("build", help="write site/decks/ from the corpus")
     args = p.parse_args()

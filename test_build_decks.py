@@ -121,20 +121,21 @@ with tempfile.TemporaryDirectory() as tmp:
     assert sorted(stats) == ["0", "0-1"], stats.keys()
     lead = stats["0"]
     # [decks, games, wins, decks in events with a top cut, top cuts]: in 90 and 180 days event 1's
-    # two decks (one made the cut), in a year event 2's too (which had no cut)
-    assert lead["totals"] == [[2, 12, 5, 2, 1], [2, 12, 5, 2, 1], [3, 17, 10, 2, 1]], lead["totals"]
+    # two decks (one made the cut), in one and two years event 2's too (which had no cut)
+    assert lead["totals"] == [[2, 12, 5, 2, 1], [2, 12, 5, 2, 1], [3, 17, 10, 2, 1], [3, 17, 10, 2, 1]], lead["totals"]
     assert lead["cards"] == [3, 4]  # Bolt and Front, each in 2 decks; not the commander or a basic land
-    assert lead["stats"] == [[2, 12, 5, 2, 1] * 3, [1, 6, 4, 1, 1] * 2 + [2, 11, 9, 1, 1]], lead["stats"]
+    assert lead["stats"] == [[2, 12, 5, 2, 1] * 4, [1, 6, 4, 1, 1] * 2 + [2, 11, 9, 1, 1] * 2], lead["stats"]
     assert lead["top"] == [["2026-09-30", "Event 1", 40, 1, 4, 1, 1, "link1"], ["2026-01-01", "Event 2", 40, 1, 5, 0, 0, "link4"]]
     assert stats["0-1"]["cards"] == []  # in 1 deck: too few to say anything
     assert lead["field"][-1] == [5, 29, 16, 4, 3]  # every deck, the unknown commander's too
 
     # A card across commanders: in A's decks and B's it wins 10 points more than their decks without it,
     # A's counting three times as much (300 games each side, against 100); card 8 is in too few of B's
-    window = lambda *row: [list(row)] * 3
+    window = lambda *row: [list(row)] * len(build_decks.RESULT_WINDOWS)
     overall = build_decks.pooled({
-        "A": {"totals": window(60, 600, 150, 0, 0), "cards": [7], "stats": [[30, 300, 90, 0, 0] * 3]},
-        "B": {"totals": window(20, 200, 40, 0, 0), "cards": [7, 8], "stats": [[10, 100, 25, 0, 0] * 3, [2, 20, 10, 0, 0] * 3]},
+        "A": {"totals": window(60, 600, 150, 0, 0), "cards": [7], "stats": [sum(window(30, 300, 90, 0, 0), [])]},
+        "B": {"totals": window(20, 200, 40, 0, 0), "cards": [7, 8],
+              "stats": [sum(window(10, 100, 25, 0, 0), []), sum(window(2, 20, 10, 0, 0), [])]},
     }, window(80, 800, 190, 0, 0))
     decks, commanders, lift, evidence = overall[7][0]
     assert (decks, commanders) == (40, 2) and abs(lift - 0.1 * 200 / 300) < 1e-9, overall[7]
@@ -142,7 +143,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert overall[8][0] == [2, 0, 0.0, 0.0]
 
     # Results from a fake edhtop16: events without decklists aren't fetched, nor ones fetched before
-    # unless their decklists changed in number (or they're recent), and a year back is the limit
+    # unless their decklists changed in number (or they're recent), and two years back is the limit
     listed = [{"TID": "new", "tournamentDate": "2026-09-20T00:00:00Z", "breakdown": [{"entries": 2}]},
               {"TID": "none", "tournamentDate": "2026-09-01T00:00:00Z", "breakdown": []},
               {"TID": "same", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 1}]},
@@ -161,7 +162,7 @@ with tempfile.TemporaryDirectory() as tmp:
     path = os.path.join(tmp, "results.jsonl.gz")
     save_corpus({"same": {"id": "same", "date": "2026-08-01", "decklists": 1, "entries": []},
                  "more": {"id": "more", "date": "2026-08-01", "decklists": 1, "entries": []},
-                 "old": {"id": "old", "date": "2025-01-01", "entries": []}}, path)
+                 "old": {"id": "old", "date": "2024-01-01", "entries": []}}, path)
     real_edhtop16, build_decks.edhtop16 = build_decks.edhtop16, fake_edhtop16
     try:
         build_decks.fetch_results(path=path, today=date(2026, 10, 4))
@@ -169,15 +170,17 @@ with tempfile.TemporaryDirectory() as tmp:
         build_decks.edhtop16 = real_edhtop16
     assert sorted(asked) == ["more", "new"], asked
     got = load_corpus(path)
-    assert sorted(got) == ["more", "new", "same"], got.keys()  # over a year old: dropped
+    assert sorted(got) == ["more", "new", "same"], got.keys()  # over two years old: dropped
     assert got["new"]["entries"] == [["Lead", 1, 3, 1, 0, "x", ["Bolt"]]] and got["new"]["decklists"] == 2
     with open(os.path.join(out, "trends.json"), encoding="utf-8") as f:
         trends = json.load(f)
     key, made, price, bracket, _ = trends["commanders"][0]
     assert key == "0" and made == [5, 2, 2, 1] and trends["everything"][0] == made, made
-    with open(os.path.join(out, "trend-cards.json"), encoding="utf-8") as f:
-        kept, plays = json.load(f)[0]
-    assert kept[0] == 2 and [counts[0] for counts in plays] == [5, 2, 2, 1]  # c0, in every deck
+    with open(os.path.join(out, "trend-cards", "0.json"), encoding="utf-8") as f:  # colorless: no colors in the test cards
+        (i, kept, plays), = json.load(f)
+    assert i == 0 and kept[0] == 2 and [counts[0] for counts in plays] == [5, 2, 2, 1]  # c0, in every deck
+    with open(os.path.join(out, "card-commanders", "0.json"), encoding="utf-8") as f:
+        assert json.load(f)[2] == [0, 5]  # c0: commander 0's 5 decks play it
 
     # An undated Archidekt deck was made when the last dated one before it was (or who knows: "")
     assert build_decks.made_dates({d["id"]: d for d in [{"id": 1, "created": "2026-01-01"}, {"id": 2}, {"id": 0},

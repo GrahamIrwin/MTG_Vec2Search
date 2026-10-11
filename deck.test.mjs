@@ -134,7 +134,9 @@ test("trends: rising commanders and cards, within the filters", () => {
   const { commanders, everything } = decodeTrends({ themes: ["tokens", "lifegain"],
     everything: [[150, 36, 20, 7], [5, 4], [[110, 16], [30, 6], [17, 3], [7, 0]]],
     commanders: [["1", [100, 10, 5, 1], 20000, 3, [0]], ["2", [20, 20, 12, 6], 8000, 2, [1]], ["3-4", [30, 6, 3, 0], 5000, 2, [0, 1]]] });
-  withCards(commanders, [[[5, 4], [[90, 10], [10, 0], [5, 0], [1, 0]]], [[5, 4], [[20, 0], [20, 0], [12, 0], [6, 0]]], [[9], [[6], [6], [3], [0]]]]);
+  // Two trend-cards/ files (one per color identity), each [commander number, gaps, plays] for its commanders
+  withCards(commanders, [[0, [5, 4], [[90, 10], [10, 0], [5, 0], [1, 0]]], [2, [9], [[6], [6], [3], [0]]]]);
+  withCards(commanders, [[1, [5, 4], [[20, 0], [20, 0], [12, 0], [6, 0]]]]);
   assert.deepEqual(commanders[0].cards, [5, 9]);
   assert.deepEqual(trendingCards([everything], 2), trendingCards(commanders, 2)); // all of them, as one
   commanders.forEach((c, i) => (c.identity = [0b1, 0b11, 0b100][i])); // W, WU, B
@@ -152,13 +154,15 @@ test("trends: rising commanders and cards, within the filters", () => {
   // Only commander 1: card 9 fell from 10% of its decks to none
   assert.deepEqual(trendingCards(commanders.slice(0, 1), 2).rising.map(x => x.card), [5]);
 
-  assert.deepEqual(keys(filterCommanders(commanders, { colors: 0b11 })), ["1", "2"]); // fit within WU
+  assert.deepEqual(keys(filterCommanders(commanders, { colors: 0b11 })), ["2"]); // exactly WU, not W alone
+  assert.deepEqual(keys(filterCommanders(commanders, { colors: 0b1 })), ["1"]);
   assert.deepEqual(keys(filterCommanders(commanders, { colors: 0 })), []); // colorless
   assert.deepEqual(keys(filterCommanders(commanders, { maxPrice: 10000, kind: "single" })), ["2"]);
   assert.deepEqual(keys(filterCommanders(commanders, { themes: new Set([0]), brackets: [2] })), ["3-4"]);
   assert.deepEqual(keys(filterCommanders(commanders, { window: 3, min: 1 })), ["1", "2"]);
 
-  assert.deepEqual(commandersPlaying(commanders, 9).map(c => [c.key, c.decks]), [["3-4", 6], ["1", 10]]);
+  // Card 9, from its row of card-commanders/: commander 0 ("1") in 10 of 100 decks, 2 ("3-4") in 6 of 20
+  assert.deepEqual(commandersPlaying(commanders, [0, 10, 2, 6]).map(c => [c.key, c.decks]), [["3-4", 6], ["1", 10]]);
 });
 
 test("a commander's rising cards: what its recent decks play more than its decks overall", () => {

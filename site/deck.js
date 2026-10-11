@@ -314,10 +314,10 @@ export function closestCommanders(index, deckCards, n = 6) {
     .slice(0, n);
 }
 
-// === Trends: decks/trends.json and trend-cards.json (see build_decks.py) ===
+// === Trends: decks/trends.json, trend-cards/ and card-commanders/ (see build_decks.py) ===
 // Window 0 is all time; 1, 2, 3 are the last 90, 30 and 7 days (index.json's windows).
 // Each commander: { key, made: decks made [ever, per window], price (US cents, -1 unknown),
-// bracket (0: none), themes (numbers in themes) }, and once trend-cards.json is read (withCards),
+// bracket (0: none), themes (numbers in themes) }, and once its trend-cards/ file is read (withCards),
 // cards (card numbers) and plays ([per window, per card]). everything: all their decks, as one.
 const decodeCards = ([gaps, plays]) => {
   let card = 0;
@@ -331,16 +331,17 @@ export function decodeTrends(data) {
     commanders: data.commanders.map(([key, made, price, bracket, themes]) => ({ key, made, price, bracket, themes })),
   };
 }
-export const withCards = (commanders, cardData) => commanders.forEach((c, i) => Object.assign(c, decodeCards(cardData[i])));
+// rows: a trend-cards/ file, [commander number, gaps, plays] for some of the commanders
+export const withCards = (commanders, rows) => rows.forEach(([i, ...cards]) => Object.assign(commanders[i], decodeCards(cards)));
 
 // The commanders that pass the filters. identity: each commander's color identity bitmask, set by
-// the caller. colors: a bitmask they must fit within (0: colorless), or null; maxPrice: US cents;
+// the caller. colors: the bitmask theirs must be exactly (0: colorless), or null; maxPrice: US cents;
 // themes: a Set of theme numbers, any of which will do; kind: "single" or "partners";
 // min: decks made in `window`
 export function filterCommanders(commanders, { window = 0, colors = null, maxPrice = null, themes = null,
   brackets = [], kind = "", min = 0 } = {}) {
   return commanders.filter(c =>
-    (colors === null || (c.identity & ~colors) === 0) &&
+    (colors === null || c.identity === colors) &&
     (maxPrice === null || (c.price >= 0 && c.price <= maxPrice)) &&
     (!themes || c.themes.some(t => themes.has(t))) &&
     (!brackets.length || brackets.includes(c.bracket)) &&
@@ -392,12 +393,15 @@ export function trendingCards(scope, window) {
   return { popular, rising, total, recent };
 }
 
-// The commanders whose decks play this card, most of their decks first: [{...commander, decks, share}]
-export function commandersPlaying(commanders, card) {
-  return commanders.flatMap(c => {
-    const i = c.cards.indexOf(card);
-    return i < 0 || !c.plays[0][i] ? [] : [{ ...c, decks: c.plays[0][i], share: c.plays[0][i] / c.made[0] }];
-  }).sort((a, b) => b.share - a.share || b.decks - a.decks);
+// The commanders whose decks play a card, most of their decks first: [{...commander, decks, share}].
+// pairs: its row of a card-commanders/ file, [commander number, decks playing it, ...]
+export function commandersPlaying(commanders, pairs) {
+  const playing = [];
+  for (let j = 0; j < pairs.length; j += 2) {
+    const c = commanders[pairs[j]];
+    playing.push({ ...c, decks: pairs[j + 1], share: pairs[j + 1] / c.made[0] });
+  }
+  return playing.sort((a, b) => b.share - a.share || b.decks - a.decks);
 }
 
 // On a commander's page: the cards a group's recent decks (deck numbers in shard.decks) play more

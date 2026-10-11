@@ -50,7 +50,7 @@ async function getJson(url) {
   return res.json();
 }
 
-const imageUrl = id => `https://cards.scryfall.io/normal/front/${id[0]}/${id[1]}/${id}.jpg`;
+const imageUrl = (id, face = "front") => `https://cards.scryfall.io/normal/${face}/${id[0]}/${id[1]}/${id}.jpg`;
 const year = days => new Date(Date.UTC(1993, 0, 1) + days * 864e5).getUTCFullYear();
 
 // Readable, lowercase labels for terms: "tag:hate-nonbasic-land" -> "hate nonbasic land"
@@ -249,14 +249,44 @@ const chunks = new Map();
 async function cardInfo(card) {
   const k = Math.floor(card / CHUNK);
   if (!chunks.has(k)) chunks.set(k, getJson(`index/c/${k}.json`));
-  const [name, id] = (await chunks.get(k))[card % CHUNK];
-  return { name, id };
+  const [name, id, back] = (await chunks.get(k))[card % CHUNK];
+  return { name, id, back: !!back };
+}
+
+// Turns a card's image over to src: edge-on, the other face in, and back (the face loaded first, so
+// it never turns to a blank). `rotate` rather than `transform`, which the hover lift is using
+async function turnOver(img, src) {
+  const next = new Image();
+  next.src = src;
+  await next.decode().catch(() => {});
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    img.src = src;
+    return;
+  }
+  const art = img.parentElement;
+  await art.animate([{ rotate: "y 0deg" }, { rotate: "y 90deg" }], { duration: 140, easing: "ease-in" }).finished;
+  img.src = src;
+  art.animate([{ rotate: "y -90deg" }, { rotate: "y 0deg" }], { duration: 160, easing: "ease-out" });
+}
+
+// A double-faced card's tile, with a button over the top right of its art that turns it over
+// (beside the tile, not in it: a button can't hold another)
+function withFlip(tile, img, { id, back }) {
+  if (!back) return tile;
+  let face = "front";
+  const flip = el("button", { type: "button", className: "flip", ariaLabel: "Flip card", title: "Flip card", textContent: "↻" });
+  flip.onclick = () => {
+    face = face === "front" ? "back" : "front";
+    turnOver(img, imageUrl(id, face));
+    flip.ariaPressed = String(face === "back");
+  };
+  return el("div", { className: "flip-wrap" }, tile, flip);
 }
 
 // A card in a results gallery: image, name, price, a detail line and an optional bar (0 to 1)
-// extra: a tone for the detail ("up" or "down"), faint (too little to go on), a note under it, and a
-// title with the whole story
-function cardTile(card, { name, id }, detail, bar, i, { tone, faint, note, title } = {}) {
+// extra: a tone for the detail ("up" or "down"), faint (too little to go on) and a note under it
+function cardTile(card, info, detail, bar, i, { tone, faint, note } = {}) {
+  const { name, id } = info;
   const price = index.columns.price[card];
   const img = el("img", { alt: name, loading: "lazy", decoding: "async" });
   img.onload = () => img.classList.add("loaded");
@@ -268,10 +298,10 @@ function cardTile(card, { name, id }, detail, bar, i, { tone, faint, note, title
       el("span", { textContent: price >= 0 ? money.formatUsd(price / 100) : "No price" }),
       el("span", { textContent: detail, className: [tone, faint && "faint"].filter(Boolean).join(" ") })));
   if (note) tile.append(el("span", { className: "card-note", textContent: note }));
-  if (title) tile.title = title;
+  tile.title = name;
   if (bar !== null) tile.append(el("span", { className: "match-bar" }, el("span", { style: `width:${bar * 100}%` })));
   tile.style.setProperty("--i", i);
-  return tile;
+  return withFlip(tile, img, info);
 }
 
 let shown = 0;
@@ -379,13 +409,13 @@ async function showCardResults(card) {
   const here = tournament?.byCard.get(card);
   if (here) {
     lines.push(el("p", {}, el("strong", { className: here.lift > 0 ? "up" : "down", textContent: points(here.lift) }),
-      ` with ${tournament.lead} in the last ${tournament.period}. ${here.title}`));
+      ` with ${tournament.lead} in the last ${tournament.period}. ${here.story}`));
   }
   const all = await getResultsIndex();
   if (actionsFor !== card) return; // another card was opened meanwhile
   const i = all ? all.cards.indexOf(card) : -1;
   if (i >= 0) {
-    const w = all.windows.length - 1;
+    const w = Math.max(0, all.windows.indexOf(365)); // the last year's: recent enough to go on
     const [decks, commanders, lift, evidence] = all.stats[i].slice(4 * w, 4 * w + 4);
     const fieldDecks = all.field[w][0];
     lines.push(el("p", {}, `In the last ${periodName(all.windows[w])}, ${percent1(decks / fieldDecks)} of ${fieldDecks.toLocaleString()} tournament decks play it. `
@@ -408,6 +438,7 @@ async function openCard(id, card) {
   $("modal-type").textContent = $("modal-set").textContent = $("price").textContent = "";
   $("foil-label").hidden = true;
   $("modal-img").src = imageUrl(id);
+  $("modal-flip").hidden = true;
   modal.showModal();
   try {
     showPrinting(await getJson(`https://api.scryfall.com/cards/${id}`));
@@ -434,6 +465,13 @@ function showPrinting(card) {
   const face = card.image_uris ?? card.card_faces[0].image_uris;
   $("modal-img").src = face.normal;
   $("modal-img").alt = card.name;
+  const faces = (card.card_faces ?? []).filter(f => f.image_uris);
+  let showing = 0;
+  $("modal-flip").hidden = faces.length < 2;
+  $("modal-flip").onclick = () => {
+    showing = 1 - showing;
+    turnOver($("modal-img"), faces[showing].image_uris.normal);
+  };
   $("modal-name").textContent = card.name;
   $("modal-type").textContent = card.type_line;
   $("modal-set").textContent = `${card.set_name} · ${card.rarity[0].toUpperCase() + card.rarity.slice(1)} · ${card.released_at.slice(0, 4)}`;
@@ -553,7 +591,7 @@ async function findSimilar(key) {
   const tw = tourney && firstPeriod(tourney);
   const tested = tourney ? cardResults(tourney, tw) : [];
   tournament = tourney && { lead, period: periodName(tourney.windows[tw]),
-    byCard: new Map(tested.map(x => [x.card, { ...x, title: resultTile(x, tourney.totals[tw][0]).title }])) };
+    byCard: new Map(tested.map(x => [x.card, { ...x, story: resultTile(x, tourney.totals[tw][0]).story }])) };
   const summary = [];
   const note = text => summary.push(el("span", { className: "muted", textContent: text }));
   if (deck.site) summary.push(el("span", { className: "term-chip", textContent: `${deck.name} (${deck.site})` }));
@@ -595,7 +633,7 @@ async function findSimilar(key) {
     const yours = new Set(mine);
     $("deck-tournament-lede").textContent = `From ${decksThere.toLocaleString()} ${lead} decks in cEDH tournaments in the last ${tournament.period}. `
       + "Each card's decks are measured against the commander's other decks. A card can stand for a style of build, "
-      + "so weigh them together rather than one at a time. Hover a card for the full numbers.";
+      + "so weigh them together rather than one at a time. Open a card for the full numbers.";
     const less = tested.filter(x => yours.has(x.card) && x.lift < 0 && x.evidence <= -SIGNAL).sort((a, b) => a.lift - b.lift);
     const more = tested.filter(x => !yours.has(x.card) && (identity[x.card] & ~colors) === 0 && x.lift > 0 && x.evidence >= SIGNAL)
       .sort((a, b) => b.lift - a.lift);
@@ -738,12 +776,12 @@ function commanderGallery(gallery, moreButton) {
         img.src = imageUrl(info.id);
         return img;
       });
-      const tile = el("a", { className: "card", href: commanderLink(c.key) },
+      const tile = el("a", { className: "card", href: commanderLink(c.key), title: c.name },
         imgs.length > 1 ? overlap(imgs, "card-art") : el("span", { className: "card-art" }, ...imgs),
         el("span", { className: "card-name", textContent: c.name }),
         el("span", { className: "card-meta" }, el("span", { textContent: c.detail })));
       tile.style.setProperty("--i", i);
-      return tile;
+      return imgs.length > 1 ? tile : withFlip(tile, imgs[0], infos[i][0]);
     }));
     shown += page.length;
     moreButton.hidden = shown >= current.length;
@@ -759,15 +797,16 @@ function commanderGallery(gallery, moreButton) {
 const showCommanderList = commanderGallery($("commanders"), $("more-commanders"));
 
 async function showCommanders() {
-  const [{ names, decks }, trends] = await Promise.all([loadDeckData(), loadTrends()]);
+  const { names, decks } = await loadDeckData();
   const all = decks.commanders.map(([key, count]) => ({ key, name: commanderNames(key, names), detail: `${count.toLocaleString()} decks` }));
   $("random-commander").onclick = () => (location.search = commanderLink(pick(all).key));
   // The Trends filters, over all time
   $("commander-list").insertBefore($("trend-form"), $("commanders"));
+  const trends = { themes: [] }; // filled in once the filters are used
   const readFilters = trendFilters(trends, ["commanders"]);
   const update = () => {
     const f = readFilters(0);
-    const kept = f.active && new Set(filterCommanders(trends.commanders, f).map(c => c.key));
+    const kept = f.active && trends.commanders && new Set(filterCommanders(trends.commanders, f).map(c => c.key));
     const q = $("commander-filter").value.trim().toLowerCase();
     const matches = all.filter(c => (!kept || kept.has(c.key)) && c.name.toLowerCase().includes(q));
     $("commander-count").textContent = `${matches.length.toLocaleString()} ${matches.length === 1 ? "commander" : "commanders"}`
@@ -777,6 +816,7 @@ async function showCommanders() {
   $("commander-filter").oninput = update;
   $("trend-form").addEventListener("input", update);
   update();
+  whenFiltering(trends, update);
   commanderMessage("");
   $("commander-list").hidden = false;
 }
@@ -815,7 +855,7 @@ async function showCommander(key) {
 
   const art = infos.map(({ name, id }, i) =>
     el("button", { type: "button", className: "card", onclick: () => openCard(id, leaders[i]) }, el("img", { src: imageUrl(id), alt: name })));
-  $("commander-art").replaceChildren(art.length > 1 ? overlap(art) : art[0]);
+  $("commander-art").replaceChildren(art.length > 1 ? overlap(art) : withFlip(art[0], art[0].querySelector("img"), infos[0]));
   const identity = leaders.reduce((m, c) => m | index.columns.identity[c], 0);
   const colors = [..."WUBRG"].filter((_, i) => identity & (1 << i));
   $("commander-name").textContent = lead;
@@ -1001,7 +1041,7 @@ async function showCommander(key) {
 }
 
 // === A commander's cEDH tournament results (decks/results/<key>.json, from edhtop16) ===
-const RESULT_PERIODS = { 90: "3 months", 180: "6 months", 365: "year" };
+const RESULT_PERIODS = { 90: "3 months", 180: "6 months", 365: "year", 730: "2 years" };
 const MIN_PERIOD_DECKS = 150; // the period shown first: the shortest with this many decks
 const SAME = 0.01; // a win rate this close to the field's is about the same
 const SIGNAL = 2; // standard errors: a difference this clear or more counts (see cardResults)
@@ -1031,7 +1071,7 @@ function resultTile(x, decks) {
     card: x.card, type: typeOf(x.card), bar: null, detail: points(x.lift), tone: x.lift > 0 ? "up" : "down",
     faint: Math.abs(x.evidence) < SIGNAL,
     note: `${percent(x.winRate)} vs ${percent(x.winRateWithout)} won · ${percent(x.share)} play it`,
-    title: `Decks with it won ${percent1(x.winRate)} of ${x.games.toLocaleString()} games; decks without it, ${percent1(x.winRateWithout)}.`
+    story: `Decks with it won ${percent1(x.winRate)} of ${x.games.toLocaleString()} games; decks without it, ${percent1(x.winRateWithout)}.`
       + (x.conversion === null || x.conversionWithout === null ? ""
         : ` ${percent1(x.conversion)} of decks with it made the top cut, ${percent1(x.conversionWithout)} without.`)
       + ` ${x.decks.toLocaleString()} of ${decks.toLocaleString()} decks play it.`
@@ -1052,10 +1092,10 @@ const theCommanders = n => (n === 1 ? "the one commander" : `each of the ${n} co
 // A note for a card tile: how the card did in the current commander's tournament decks
 function tournamentNote(card) {
   const r = tournament?.byCard.get(card);
-  return r ? { note: `In tournaments: ${points(r.lift)}`, title: r.title } : {};
+  return r ? { note: `In tournaments: ${points(r.lift)}` } : {};
 }
 // The commander page's results for the period shown, for card details and bracket 5's notes:
-// {lead, period, byCard: card -> cardResults' result, with a title telling the whole story}
+// {lead, period, byCard: card -> cardResults' result, with a story: the whole of it, in words}
 let tournament = null;
 // onPeriod: called after another period is picked
 function showResults(results, leads, released, onPeriod) {
@@ -1092,12 +1132,12 @@ function showResults(results, leads, released, onPeriod) {
     // Cards: how much more (or less) often the decks playing each one win
     const cards = cardResults(results, w);
     const tile = x => resultTile(x, decks);
-    tournament = { lead, period: period(), byCard: new Map(cards.map(x => [x.card, { ...x, title: tile(x).title }])) };
+    tournament = { lead, period: period(), byCard: new Map(cards.map(x => [x.card, { ...x, story: tile(x).story }])) };
     const few = !usable(w) ? `There are too few ${lead} decks in the last ${period()} to compare cards. Try a longer period.` : "";
     const more = cards.filter(x => x.lift > 0 && x.evidence >= SIGNAL).sort((a, b) => b.lift - a.lift);
     $("wins-more-lede").textContent = few || (more.length
       ? "Decks that play these won more of their games than the commander's other decks. ▲ is how many points more, allowing for how few decks play a card. "
-        + "It's the decks that won: a card can stand for a style of build. Hover a card for the full numbers."
+        + "It's the decks that won: a card can stand for a style of build. Open a card for the full numbers."
       : `No card's decks clearly won more than the rest in these ${decks.toLocaleString()} decks.`);
     showWinsMore(more.map(tile));
     const fresh = cards.filter(x => isNew(released, x.card)).sort((a, b) => b.lift - a.lift);
@@ -1153,6 +1193,20 @@ const SORTS_BY = { decks: r => r.decks, wins: r => r.rate, cut: r => r.cut ?? -1
 async function showTournaments() {
   const [all, { names, files }, released] = await Promise.all([getResultsIndex(), loadDeckData(), getReleased()]);
   if (!all) return tournamentsMessage("No tournament results yet.");
+  // The Trends filters, less what doesn't apply: bracket (every deck here is cEDH), deck price (a
+  // casual deck's) and min decks (the table has its own, of tournament decks). Disabled fields
+  // aren't read, counted or put in the URL. Strategies are from a commander's casual decks.
+  const tform = $("trend-form");
+  $("tour-filters").append(tform);
+  for (const name of ["b", "budget", "min"]) {
+    for (const input of tform.querySelectorAll(`[name="${name}"]`)) {
+      input.disabled = true;
+      input.closest("fieldset, .field").hidden = true;
+    }
+  }
+  const trends = { themes: [] }; // filled in once the filters are used
+  const readFilters = trendFilters(trends, ["tournaments"]);
+  let themesOf = new Map();
   const totals = all.windows.length;
   let w = all.windows.indexOf(Number(params.get("results")));
   if (w < 0) w = all.windows.indexOf(180) >= 0 ? all.windows.indexOf(180) : totals - 1;
@@ -1162,8 +1216,6 @@ async function showTournaments() {
 
   function show() {
     const days = all.windows[w];
-    setParams({ results: days === 180 ? null : days, by: by === "decks" ? null : by,
-      min: Number($("tour-min").value) === DEFAULT_MIN_DECKS ? null : $("tour-min").value || null });
     $("tour-windows").replaceChildren(...all.windows.map((d, i) => el("button", {
       type: "button", ariaPressed: String(i === w), onclick: () => { w = i; show(); },
     }, `Last ${periodName(d)}`, el("small", { textContent: all.field[i][0].toLocaleString() }))));
@@ -1188,9 +1240,6 @@ async function showTournaments() {
       card: x.card, type: typeOf(x.card), bar: null, detail: points(x.lift), tone: x.lift > 0 ? "up" : "down",
       faint: Math.abs(x.evidence) < SIGNAL,
       note: `${percent(x.decks / fieldDecks)} of decks · ${x.n} ${x.n === 1 ? "commander" : "commanders"}`,
-      title: `${x.decks.toLocaleString()} of ${fieldDecks.toLocaleString()} tournament decks play it. Within ${theCommanders(x.n)}, `
-        + `decks with it won ${Math.abs(x.lift * 100).toFixed(1)} points ${x.lift > 0 ? "more" : "less"} of their games, on average.`
-        + (Math.abs(x.evidence) < SIGNAL ? " Too few decks to be sure yet." : ""),
     });
     const more = cards.filter(x => x.lift > 0 && x.evidence >= SIGNAL).sort((a, b) => b.lift - a.lift);
     const less = cards.filter(x => x.lift < 0 && x.evidence <= -SIGNAL).sort((a, b) => a.lift - b.lift);
@@ -1221,7 +1270,15 @@ async function showTournaments() {
     const { rows, fieldRate, fieldCut } = current;
     const min = Number($("tour-min").value) || 1;
     const q = $("tour-filter").value.trim().toLowerCase();
-    const list = rows.filter(r => r.decks >= min && r.name.toLowerCase().includes(q))
+    // The filters, which also put the period, sort and min decks in the URL
+    const days = all.windows[w];
+    const f = readFilters(0, [...(days === 180 ? [] : [["results", days]]), ...(by === "decks" ? [] : [["by", by]]),
+      ...(min === DEFAULT_MIN_DECKS ? [] : [["min", min]])]);
+    const kept = f.active && new Set(filterCommanders(rows.map(r => ({
+      key: r.key, identity: r.key.split("-").reduce((m, c) => m | index.columns.identity[c], 0),
+      themes: themesOf.get(r.key) ?? [], price: -1, bracket: 0, made: [0],
+    })), { ...f, window: 0, min: 0, maxPrice: null, brackets: [] }).map(c => c.key));
+    const list = rows.filter(r => r.decks >= min && r.name.toLowerCase().includes(q) && (!kept || kept.has(r.key)))
       .sort((a, b) => SORTS_BY[by](b) - SORTS_BY[by](a) || b.decks - a.decks);
     for (const th of document.querySelectorAll(".leaderboard th")) {
       const sort = th.querySelector("button")?.dataset.sort;
@@ -1229,6 +1286,7 @@ async function showTournaments() {
       else th.removeAttribute("aria-sort");
     }
     $("tour-commanders-lede").textContent = `${list.length.toLocaleString()} commanders with ${min} decks or more`
+      + (f.active ? " that match the filters" : "")
       + `, by ${{ decks: "tournament decks", wins: "share of games won", cut: "share of decks making the top cut" }[by]}. `
       + "Games won and top cut are compared with every deck's.";
     const page = list.slice(0, shownRows);
@@ -1252,11 +1310,16 @@ async function showTournaments() {
   }
   $("more-tour").onclick = () => { shownRows += PAGE_ROWS; drawRows(); };
   $("tour-filter").oninput = () => { shownRows = PAGE_ROWS; drawRows(); };
-  $("tour-min").oninput = () => { shownRows = PAGE_ROWS; show(); };
+  $("tour-min").oninput = $("tour-filter").oninput;
+  tform.addEventListener("input", () => { shownRows = PAGE_ROWS; drawRows(); });
   for (const button of document.querySelectorAll(".leaderboard th button")) {
     button.onclick = () => { by = button.dataset.sort; shownRows = PAGE_ROWS; show(); };
   }
   show();
+  whenFiltering(trends, () => {
+    themesOf = new Map(trends.commanders.map(c => [c.key, c.themes]));
+    drawRows();
+  });
   tournamentsMessage("");
   $("tournaments-page").hidden = false;
 }
@@ -1294,11 +1357,33 @@ function loadTrends() {
   });
   return trendData;
 }
-// Most of each commander's cards (decks/trend-cards.json, about a MB): only for filters and card pages
-let cardsLoaded;
-const loadTrendCards = trends => (cardsLoaded ??= getJson("decks/trend-cards.json").then(data => withCards(trends.commanders, data)));
+// Most of each commander's cards, for a filtered Trends: decks/trend-cards/<identity>.json, only for
+// the color identities of the commanders it keeps (one, with a color filter)
+const identityCards = new Map();
+function loadTrendCards(trends, scope) {
+  return Promise.all([...new Set(scope.map(c => c.identity))].map(colors => {
+    if (!identityCards.has(colors)) {
+      const loading = getJson(`decks/trend-cards/${colors}.json`).then(rows => withCards(trends.commanders, rows));
+      loading.catch(() => identityCards.delete(colors)); // try again next time
+      identityCards.set(colors, loading);
+    }
+    return identityCards.get(colors);
+  }));
+}
 
-// The Trends filters, shared with the commander list: restored from the URL, then a function of the
+// On pages that don't need Trends' data (decks/trends.json, a few hundred KB) but for their filters:
+// fetches it into `trends` once the filters are opened (or open already, from the URL), then done()
+function whenFiltering(trends, done) {
+  const load = () => loadTrends().then(data => {
+    Object.assign(trends, data);
+    $("trend-themes").replaceChildren(...data.themes.map(t => el("option", { value: tagLabel(t) })));
+    done();
+  }).catch(err => console.error(err));
+  if ($("trend-filters").open) load();
+  else $("trend-filters").addEventListener("toggle", load, { once: true });
+}
+
+// The Trends filters, shared with the commander list and the Tournaments tab: restored from the URL, then a function of the
 // period that reads them as filterCommanders' options (with how many are active) and puts them in
 // the URL after `lead` and `extra`, so a filtered view is a link to share
 function trendFilters(trends, lead) {
@@ -1369,7 +1454,7 @@ async function showTrends() {
     const asked = shownFor = {};
     if (active) {
       trendsMessage("Loading cards…");
-      await loadTrendCards(trends);
+      await loadTrendCards(trends, scope);
       if (asked !== shownFor) return;
       trendsMessage("");
     }
@@ -1390,12 +1475,14 @@ async function showTrends() {
 
 // === A card's page: the commanders whose decks play it, by what those decks are known for ===
 const TREND_SHARE = 0.15; // TREND_SHARE in build_decks.py
+const CARD_BLOCK = 16; // CARD_BLOCK in build_decks.py: cards per decks/card-commanders/ file
 const MAX_STRATEGIES = 12;
 const showCardCommanders = commanderGallery($("card-commanders"), $("more-card-commanders"));
 async function showCardPage(card) {
   const trends = await loadTrends();
   if (!Number.isInteger(card) || card < 0 || card >= index.n) return commanderMessage("There's no such card.");
-  const [info] = await Promise.all([cardInfo(card), loadTrendCards(trends)]);
+  const [info, pairs] = await Promise.all([cardInfo(card),
+    getJson(`decks/card-commanders/${Math.floor(card / CARD_BLOCK)}.json`).then(rows => rows[card % CARD_BLOCK] ?? [])]);
   document.title = `${info.name} · MTG Vec2Search`;
   $("card-art").replaceChildren(el("button", { type: "button", className: "card", onclick: () => openCard(info.id, card) },
     el("img", { src: imageUrl(info.id), alt: info.name })));
@@ -1403,7 +1490,7 @@ async function showCardPage(card) {
   const { everything } = trends;
   const i = everything.cards.indexOf(card);
   const decksWith = i < 0 ? 0 : everything.plays[0][i];
-  const playing = commandersPlaying(trends.commanders, card);
+  const playing = commandersPlaying(trends.commanders, pairs);
   $("card-meta").textContent = `In ${decksWith.toLocaleString()} of ${everything.made[0].toLocaleString()} decks (${percent(decksWith / everything.made[0])})`;
   $("card-lede").textContent = playing.length
     ? `${playing.length.toLocaleString()} commanders whose decks play it often (at least ${percent(TREND_SHARE)} of them), most often first. Pick a strategy to see the commanders known for it.`

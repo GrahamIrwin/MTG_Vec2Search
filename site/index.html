@@ -14,7 +14,7 @@
   <style>
     @font-face {
       font-family: 'Beleren Bold';
-      src: url('fonts/Beleren2016-Bold.ttf') format('truetype');
+      src: url('fonts/Beleren2016-Bold.woff') format('woff'); /* hinting removed (pyftsubset --no-hinting): 23 KB, not 137 */
       font-display: swap;
     }
 
@@ -279,6 +279,19 @@
       transform: translateY(-4px); box-shadow: 0 2px 3px rgb(0 0 0 / .25), 0 18px 28px -12px rgb(0 0 0 / .6);
     }
     .card:focus-visible { outline: none; }
+    /* A double-faced card's flip button, over the top right of its art */
+    .flip-wrap { position: relative; }
+    .flip-wrap > .card, .card-sheet-art { perspective: 1000px; } /* depth for a card turning over */
+    .flip {
+      position: absolute; top: 8px; right: 8px; z-index: 2; display: grid; place-items: center;
+      width: 34px; height: 34px; padding: 0; border-radius: 50%; cursor: pointer;
+      background: rgb(20 14 10 / .55); color: #fff; border: 1px solid rgb(255 255 255 / .5);
+      font-size: 19px; line-height: 1; backdrop-filter: blur(2px); opacity: .85;
+      transition: opacity .15s, background .15s, transform .25s ease;
+    }
+    .flip:hover, .flip:focus-visible { opacity: 1; background: rgb(20 14 10 / .8); }
+    .flip-wrap:hover .flip { transform: translateY(-4px); }
+    .flip-wrap:hover .card-art { transform: translateY(-4px); box-shadow: 0 2px 3px rgb(0 0 0 / .25), 0 18px 28px -12px rgb(0 0 0 / .6); }
     .card:focus-visible .card-art { outline: 2px solid var(--focus); outline-offset: 3px; }
     .card-name { font-family: 'Beleren Bold', Georgia, serif; font-size: 15px; line-height: 1.25; color: var(--ink); }
     .card-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
@@ -307,6 +320,7 @@
 
     #modal[open] { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 30px; }
     @media (max-width: 700px) { #modal[open] { grid-template-columns: 1fr; } .card-sheet-art { max-width: 300px; margin: 0 auto; } }
+    .card-sheet-art { position: relative; }
     .foil-wrapper { position: relative; overflow: hidden; border-radius: 4.75% / 3.4%; box-shadow: var(--shadow-md); background: var(--paper-2); }
     .foil-wrapper img { display: block; width: 100%; aspect-ratio: 488 / 680; }
     .card-sheet-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-right: 30px; }
@@ -870,7 +884,7 @@
               <summary><span class="label">Filters</span><span class="badge" id="trend-filter-count" hidden></span></summary>
               <div class="filter-body">
                 <fieldset>
-                  <legend class="label">Color identity <span class="legend-note">— commanders that fit within these colors</span></legend>
+                  <legend class="label">Color identity <span class="legend-note">— commanders of exactly these colors</span></legend>
                   <div class="pips">
                     <label class="pip pip-w" title="White"><input type="checkbox" name="c" value="W" aria-label="White"><span aria-hidden="true">W</span></label>
                     <label class="pip pip-u" title="Blue"><input type="checkbox" name="c" value="U" aria-label="Blue"><span aria-hidden="true">U</span></label>
@@ -960,6 +974,7 @@
           <details class="panel" open>
             <summary><h2 class="deck-heading">Commanders</h2></summary>
             <p class="muted deck-lede" id="tour-commanders-lede"></p>
+            <div id="tour-filters"></div>
             <div class="tour-controls">
               <input type="search" id="tour-filter" class="filter-box" placeholder="Search commanders" aria-label="Search commanders">
               <label class="field inline-field"><span class="label">Min. decks</span>
@@ -1044,6 +1059,7 @@
     <form method="dialog"><button class="close" aria-label="Close">×</button></form>
     <div class="card-sheet-art">
       <div class="foil-wrapper" id="foil-wrapper"><img id="modal-img" alt=""></div>
+      <button type="button" class="flip" id="modal-flip" aria-label="Flip card" title="Flip card" hidden>↻</button>
     </div>
     <div class="card-sheet-info">
       <h2 id="modal-name"></h2>

@@ -4,7 +4,8 @@ Search Magic: The Gathering cards by describing them in plain English
 ("cheap green elves that ramp"), with filters for color identity, card type,
 mana value, format, price and set. Or paste a Commander deck (a Moxfield or
 Archidekt link, or a decklist) to see which cards similar decks play that
-yours doesn't. Dark mode by
+yours doesn't, browse every commander's decks and what's trending, and see
+which cards' decks win more in cEDH tournaments. Dark mode by
 default. It's a static site: all the heavy lifting happens at build time, and a
 search only downloads the small pieces of the index it needs (~200 KB the first
 time, a few KB after that).
@@ -60,6 +61,11 @@ time, a few KB after that).
    least 75% as good a match as the best one are kept.
 
    **Browse all search terms** on the page lists every term with its card count.
+
+   Hovering a card shows its name; clicking it opens its details. A
+   double-faced card has a button over the top right of its art that turns it
+   over (`index/c/` marks the cards with a back face, whose image is the same
+   Scryfall id under `back/`).
 3. **Deck recommendations** compares a Commander deck with public decks from
    [Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com):
    - `build_decks.py crawl` downloads decks through Archidekt's API (one request a
@@ -98,7 +104,9 @@ time, a few KB after that).
    decks and recommending them back. Card overlap alone did best (about 39% of
    hidden cards in the top 20, against 31% for "most played with this
    commander"), so that's all the browser computes.
-4. **Commanders** (`?commanders`) lists every commander with decks; each one's
+4. **Commanders** (`?commanders`) lists every commander with decks, which
+   Trends' filters narrow down; partners show both cards, overlapped, the one
+   behind coming forward when pointed at. Each one's
    page (`?commander=<file name>`) shows its signature cards, every card its
    decks play, an average deck and the decklists themselves. The average deck
    takes as many spells and nonbasic lands as the decks play on average (the
@@ -121,18 +129,25 @@ time, a few KB after that).
    commander's own), so Teysa is known for aristocrats even though all her
    builds are. Each links to Trends, filtered to commanders known for it.
 
+   Decks can also be narrowed to a **bracket**, the one each deck's builder
+   gave it (most Moxfield decks have one, few Archidekt ones), alone or with a
+   build. The build and bracket are in the address bar
+   (`?commander=…&build=…&bracket=5`), so a view is a link to share.
+   `build_decks.py crawl --bracket 5` fetches just one bracket's decks.
+
    A card's details link to its commander page, if it has one, and to its
    page in commander decks (`?card=<number>`): the commanders whose decks
    play it most often, grouped by what those decks are known for.
 
    **Tournament results**, for commanders with cEDH decklists on
    [edhtop16](https://edhtop16.com) (whose results come from
-   [TopDeck.gg](https://topdeck.gg)), over the last 3, 6 or 12 months:
+   [TopDeck.gg](https://topdeck.gg)), over the last 3, 6, 12 or 24 months:
    - `build_decks.py results` keeps `results.jsonl.gz`: every tournament of 16
-     players or more from the last year, each entry's commander, record,
+     players or more from the last two years, each entry's commander, record,
      standing, decklist link and cards. It fetches only the tournaments it
      lacks, newest first (and the last 3 days' again, as results come in),
-     so it can stop and go on; the first run takes about 4 hours.
+     so it can stop and go on. Events without decklists (about 40%) are skipped,
+     and a year takes about 2 hours at 4 events at a time.
    - `build_decks.py build` writes `results/<file name>.json` per commander:
      how many decks, games, wins and top cuts its decks had in each period,
      the same for the decks that play each card, and its newest top 4
@@ -157,24 +172,11 @@ time, a few KB after that).
      whose decks win more that you don't play), and notes on cards to add and
      cut. A card's details say how its decks did, with that commander and
      across commanders.
-6. **Tournaments** (`?tournaments`) ranks every commander with tournament
-   decks by decks, share of games won or share of decks making the top cut,
-   each against every deck's, over the last 3, 6 or 12 months. Its cards are
-   compared across commanders without letting commanders count: `pooled()` in
-   `build_decks.py` takes, for each commander with 3 or more decks with a card
-   and without it, the difference in games won between them, and averages
-   those differences weighted by how much each can be trusted, then pulls the
-   result toward none by 100 games' worth (`results/index.json`).
-
-   A card can stand for a style of deck: within Kinnan, the creature-heavy
-   lists win more than the ones with Force of Will and Mana Vault. So these
-   say what winning decks play, not that a card wins on its own, and the page
-   says so.
 5. **Trends** (`?trends`) shows rising and most popular commanders and cards,
    and new cards, over decks made in the last 7, 30 or 90 days or all time.
-   Filters (color identity, typical deck price and bracket, a strategy, single
-   commanders or partners, a minimum of decks) narrow it to the commanders that
-   pass; the cards are then those commanders' decks'. Rising compares a share
+   Filters (color identity, where a commander must be exactly the colors
+   picked; typical deck price and bracket; a strategy; single commanders or
+   partners; a minimum of decks) narrow it to the commanders that pass; the cards are then those commanders' decks'. Rising compares a share
    of the window's decks with the share of all decks, relative to it, so a
    commander or card going from 1% to 4% beats one going from 60% to 66%.
    - The crawler keeps each deck's creation date (and fills it in for decks it
@@ -184,9 +186,29 @@ time, a few KB after that).
      date, and every deck falls in or out by when it was made.
    - `trends.json` holds each commander's decks made per window, price,
      bracket and themes, plus exact card counts over all decks, for the
-     unfiltered page. `trend-cards.json` (about 1 MB) holds each commander's
-     cards that at least 15% of its decks play in some window, and is only
-     fetched for filters and card pages.
+     unfiltered page. Each commander's cards that at least 15% of its decks
+     play in some window are split two ways, so a page fetches only what it
+     needs: `trend-cards/<color identity>.json` for a filtered page (a color
+     filter keeps one of the 32), and `card-commanders/<block>.json` for a
+     card's page (the commanders playing each of 16 cards). The Commanders and
+     Tournaments tabs fetch `trends.json` only once their filters are used.
+6. **Tournaments** (`?tournaments`) ranks every commander with tournament
+   decks by decks, share of games won or share of decks making the top cut,
+   each against every deck's, over the last 3, 6, 12 or 24 months. Its cards are
+   compared across commanders without letting commanders count: `pooled()` in
+   `build_decks.py` takes, for each commander with 3 or more decks with a card
+   and without it, the difference in games won between them, and averages
+   those differences weighted by how much each can be trusted, then pulls the
+   result toward none by 100 games' worth (`results/index.json`).
+   The commanders can be narrowed with Trends' filters, less the ones that
+   don't fit tournament decks (bracket: they're all cEDH; deck price: a
+   casual deck's; minimum decks: the table has its own), and the period,
+   sort and filters are in the address bar.
+
+   A card can stand for a style of deck: within Kinnan, the creature-heavy
+   lists win more than the ones with Force of Will and Mana Vault. So these
+   say what winning decks play, not that a card wins on its own, and the page
+   says so.
 
 ## Updating card data
 
@@ -243,6 +265,7 @@ Python 3.11+ (standard library only):
 ```
 python build_index.py              # download data + build site/index/ (~1 min)
 gh release download deck-corpus --pattern decks.jsonl.gz
+gh release download deck-corpus --pattern results.jsonl.gz   # tournament results (optional)
 python build_decks.py build        # site/decks/, for Find similar decks
 python -m http.server -d site      # http://localhost:8000
 ```
@@ -255,7 +278,7 @@ Tests: `python test_build_index.py`, `python test_build_decks.py` and `node --te
 - `build_decks.py`: crawls Archidekt and Moxfield decks and edhtop16's tournament results, writes the per-commander deck files
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
-- `site/deck.js`: decklist parsing, similar decks, recommendations, builds and trends
+- `site/deck.js`: decklist parsing, similar decks, recommendations, builds, trends and tournament results
 - `worker/deck-link.js`: Cloudflare Worker that turns a deck link into a decklist
 - `site/currency.js`: currency detection, exchange rate and price formatting
 - `.github/workflows/deploy.yml`: weekly rebuild and GitHub Pages deploy

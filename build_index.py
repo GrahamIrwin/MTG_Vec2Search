@@ -225,7 +225,8 @@ def load_printings():
 #   meta.json      terms, card counts and tag names, for parsing queries (small, always loaded)
 #   columns.json   per-card filter data: colors, types, mana value, formats, price
 #   t/<term>.json  the cards with each term (one file per term, fetched when a query uses it)
-#   c/<chunk>.json name + Scryfall id for each block of CHUNK cards, fetched to show results
+#   c/<chunk>.json name + Scryfall id (+ 1 when it has a back face to flip to) for each block of
+#                  CHUNK cards, fetched to show results
 #   names.json     all card names, only fetched for card-name searches and sorting by name
 #   released.json  first release date per card (days since 1993-01-01), only fetched to sort by date
 #   s/<set>.json   the cards printed in each set (numbered as in meta's sets), fetched to filter by set
@@ -250,8 +251,8 @@ def by_popularity(cards):
 
 def write_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+    with open(path, "w", encoding="utf-8") as f:  # dumps, not dump: dump streams through the slow pure-Python encoder
+        f.write(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
 
 
 def build_index(cards, updated, tags, printings):
@@ -307,7 +308,10 @@ def build_index(cards, updated, tags, printings):
     for s, code in enumerate(sets):  # numbered, not named: Conflux's code "con" is no file name on Windows
         write_json(os.path.join(OUT_DIR, "s", f"{s}.json"), gaps(set_cards[code]))
     for k in range(0, len(cards), CHUNK):
-        write_json(os.path.join(OUT_DIR, "c", f"{k // CHUNK}.json"), [[c["name"], c["id"]] for c in cards[k:k + CHUNK]])
+        # Two faces with images of their own (transform, modal double-faced): split cards and adventures have one
+        write_json(os.path.join(OUT_DIR, "c", f"{k // CHUNK}.json"),
+                   [[c["name"], c["id"]] + ([1] if "image_uris" not in c and len(c.get("card_faces") or []) > 1 else [])
+                    for c in cards[k:k + CHUNK]])
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(OUT_DIR) for f in fs)
     print(f"Wrote {OUT_DIR}: {len(cards)} cards, {len(terms)} terms, {size / 1e6:.1f} MB in total")
 
