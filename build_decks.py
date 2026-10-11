@@ -573,6 +573,10 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #              top TOP_FINISH, [date, event, players, standing, wins, losses, draws, decklist link];
 #              field: the totals of every tournament deck (with draws, a deck wins less than a
 #              quarter of its games, so this is what a commander's decks are measured against)
+#   results/lists/<card>.json  a commander's tournament decks one by one, fetched to test a package
+#              of cards: cards (every card they play, most played first) and decks: [narrowest
+#              window, games, wins, top cut (0: none in the event, 1: missed, 2: made), gaps
+#              between the positions in cards of the cards it plays]
 #   results/index.json  the Tournaments tab: windows and field as above; commanders: every commander
 #              with tournament decks, [file name, totals one window after another], most decks first;
 #              cards: the cards at least MIN_POOLED_DECKS decks play; stats: for each card, per window,
@@ -743,9 +747,15 @@ def tournament_stats(results, cards, today):
         for counts in stats.values():
             cumulative(counts)
         kept = sorted((c for c in stats if stats[c][-1][0] >= MIN_RESULT_DECKS), key=lambda c: (-stats[c][-1][0], c))
+        # Every deck, for testing a package of cards: its narrowest window, games, wins, top cut
+        # (0: none in its event, 1: missed it, 2: made it) and cards (positions in `cards`, as gaps)
+        everything = sorted(stats, key=lambda c: (-stats[c][-1][0], c))
+        position = {c: p for p, c in enumerate(everything)}
         out[key] = {"windows": RESULT_WINDOWS, "totals": totals, "cards": kept,
                     "stats": [sum(stats[c], []) for c in kept],
-                    "top": sorted(top, key=lambda f: (f[0], -f[2]), reverse=True)[:MAX_FINISHES], "field": field}
+                    "top": sorted(top, key=lambda f: (f[0], -f[2]), reverse=True)[:MAX_FINISHES], "field": field,
+                    "lists": {"cards": everything, "decks": [[w, row[1], row[2], row[3] + row[4], *gaps(sorted(position[c] for c in played))]
+                                                             for t, w, standing, record, link, played, row in entries]}}
     return out
 
 
@@ -874,7 +884,8 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             **({"results": standings[key]["totals"][-1][0]} if key in standings else {}),
         })
         if key in standings:
-            write_json(os.path.join(out_dir, "results", f"{key}.json"), standings[key])
+            write_json(os.path.join(out_dir, "results", f"{key}.json"), {k: v for k, v in standings[key].items() if k != "lists"})
+            write_json(os.path.join(out_dir, "results", "lists", f"{key}.json"), standings[key]["lists"])
         commanders.append([key, counts[0], signature[:SIGNATURE]])
     commanders.sort(key=lambda c: -c[1])
     write_json(os.path.join(out_dir, "index.json"),

@@ -486,6 +486,10 @@
     .finish .place { grid-row: span 2; font: 20px/1 'Beleren Bold', Georgia, serif; color: var(--accent); }
     .finish .deck-meta { grid-column: 2 / -1; }
     .source-note { font-size: 14px; margin: 26px 0 0; }
+    .package-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 12px 0 4px; }
+    .package-pick .filter-box { flex: 1 1 280px; }
+    .package-pick .term-items { margin: 0; }
+    .package-pick .term span { margin-left: 6px; color: var(--ink-soft); }
     .card-results { margin: 14px 0 4px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper-2); }
     .card-results p { margin: 6px 0 0; font-size: 15px; line-height: 1.45; }
     .tour-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 20px; margin: 14px 0 6px; }
@@ -717,9 +721,11 @@
             <div class="more-wrap"><button id="more-adds" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
           <details class="panel" open id="cuts-section">
-              <summary><h2 class="deck-heading">Cards to cut</h2></summary>
-              <p class="muted deck-lede">Your cards that the most similar decks rarely play.</p>
-              <div class="term-items" id="cuts"></div>
+            <summary><h2 class="deck-heading">Cards to cut</h2></summary>
+            <p class="muted deck-lede" id="cuts-lede"></p>
+            <div class="chips type-filter" id="cut-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="cuts"></div>
+            <div class="more-wrap"><button id="more-cuts" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
           <details class="panel" open id="deck-tournament" hidden>
             <summary><h2 class="deck-heading">Tournament check</h2></summary>
@@ -795,6 +801,17 @@
             <p class="muted deck-lede" id="results-lede"></p>
             <div class="chips type-filter" id="results-windows" role="group" aria-label="Period"></div>
             <div class="result-stats" id="results-stats"></div>
+            <h3 class="sub-heading">Test a card or a package</h3>
+            <p class="muted deck-lede">Add one card, or several that go together, to compare the decks that play all of
+              them with the decks that play none, over the period above.</p>
+            <div class="package-pick">
+              <input type="search" id="package-input" class="filter-box" list="package-cards" autocomplete="off"
+                     placeholder="Add a card, e.g. Sleep-Cursed Faerie" aria-label="Add a card to test">
+              <datalist id="package-cards"></datalist>
+              <div class="term-items" id="package-chips"></div>
+            </div>
+            <div class="result-stats" id="package-result" hidden></div>
+            <p class="muted deck-lede" id="package-note"></p>
             <h3 class="sub-heading">Cards that win more</h3>
             <p class="muted deck-lede" id="wins-more-lede"></p>
             <div class="chips type-filter" id="wins-more-types" role="group" aria-label="Card type"></div>

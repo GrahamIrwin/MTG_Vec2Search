@@ -104,6 +104,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert index["since"] == ["2026-07-06", "2026-09-04", "2026-09-27"], index["since"]  # the 90, 30 and 7 day windows
     assert shard["price"] == 300 and shard["bracket"] == 3  # basic lands are left out of the price
     assert shard["results"] == 1 and os.path.exists(os.path.join(out, "results", "0.json"))  # 1 tournament deck
+    assert os.path.exists(os.path.join(out, "results", "lists", "0.json"))
 
     # Tournament results: each commander's decks and the decks playing each card, per window, and
     # its best finishes. Cards by name (a double-faced one by its front face), partners either way.
@@ -127,6 +128,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert lead["stats"] == [[2, 12, 5, 2, 1] * 4, [1, 6, 4, 1, 1] * 2 + [2, 11, 9, 1, 1] * 2], lead["stats"]
     assert lead["top"] == [["2026-09-30", "Event 1", 40, 1, 4, 1, 1, "link1"], ["2026-01-01", "Event 2", 40, 1, 5, 0, 0, "link4"]]
     assert stats["0-1"]["cards"] == []  # in 1 deck: too few to say anything
+    # Each deck, for testing packages: narrowest window (event 2 is in the year's, 2), games, wins,
+    # top cut (2: made it, 1: missed it, 0: none) and its cards as gaps between positions in cards
+    assert lead["lists"] == {"cards": [3, 4], "decks": [[0, 6, 4, 2, 0, 1], [0, 6, 1, 1, 0], [2, 5, 5, 0, 1]]}, lead["lists"]
     assert lead["field"][-1] == [5, 29, 16, 4, 3]  # every deck, the unknown commander's too
 
     # A card across commanders: in A's decks and B's it wins 10 points more than their decks without it,

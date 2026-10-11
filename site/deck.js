@@ -431,17 +431,50 @@ export function cardResults(results, w) {
   const [decks, games, wins, cutDecks, cuts] = results.totals[w];
   if (decks < 2 * MIN_RESULT_DECKS) return [];
   const rate = wins / games;
-  const toward = (k, n) => (k + PRIOR_GAMES * rate) / (n + PRIOR_GAMES);
   const share = (k, n) => (n ? k / n : null);
   return results.cards.flatMap((card, i) => {
     const [d, g, k, cd, c] = results.stats[i].slice(5 * w, 5 * w + 5);
     if (d < MIN_RESULT_DECKS || decks - d < MIN_RESULT_DECKS) return [];
-    const winRate = k / g, winRateWithout = (wins - k) / (games - g);
     return [{
-      card, decks: d, share: d / decks, games: g, winRate, winRateWithout,
-      lift: toward(k, g) - toward(wins - k, games - g),
-      evidence: (winRate - winRateWithout) / Math.sqrt(DESIGN_EFFECT * rate * (1 - rate) * (1 / g + 1 / (games - g))),
+      card, decks: d, share: d / decks, games: g, winRate: k / g, winRateWithout: (wins - k) / (games - g),
+      ...compare(k, g, wins - k, games - g, rate),
       conversion: share(c, cd), conversionWithout: share(cuts - c, cutDecks - cd),
     }];
   });
+}
+
+// Decks winning k1 of n1 games against decks winning k2 of n2, where the commander's decks win
+// `rate` of theirs: lift and evidence, as in cardResults
+function compare(k1, n1, k2, n2, rate) {
+  const toward = (k, n) => (k + PRIOR_GAMES * rate) / (n + PRIOR_GAMES);
+  return {
+    lift: toward(k1, n1) - toward(k2, n2),
+    evidence: (k1 / n1 - k2 / n2) / Math.sqrt(DESIGN_EFFECT * rate * (1 - rate) * (1 / n1 + 1 / n2)),
+  };
+}
+
+// A package of cards (one or more) in a commander's tournament decks (results/lists/<key>.json),
+// over window w: the decks that play all of them against the decks that play none, as cardResults
+// compares a card's. Decks playing only some of them are counted apart. Each side: {decks, games,
+// wins, cutDecks (in events with a top cut), cuts}; lift and evidence: null with no decks on a side.
+export function packageResults(lists, cards, w) {
+  const position = new Map(lists.cards.map((c, p) => [c, p]));
+  const wanted = cards.map(c => position.get(c));
+  const side = () => ({ decks: 0, games: 0, wins: 0, cutDecks: 0, cuts: 0 });
+  const all = side(), none = side(), some = side();
+  for (const [narrowest, games, wins, cut, ...gaps] of lists.decks) {
+    if (narrowest > w) continue;
+    let p = 0;
+    const plays = new Set(gaps.map(g => (p += g)));
+    const n = wanted.filter(q => plays.has(q)).length;
+    const s = n === wanted.length ? all : n ? some : none;
+    s.decks++;
+    s.games += games;
+    s.wins += wins;
+    s.cutDecks += cut > 0;
+    s.cuts += cut === 2;
+  }
+  const rate = (all.wins + none.wins + some.wins) / (all.games + none.games + some.games);
+  const comparable = all.games && none.games && rate > 0 && rate < 1;
+  return { all, none, some, ...(comparable ? compare(all.wins, all.games, none.wins, none.games, rate) : { lift: null, evidence: null }) };
 }

@@ -7,7 +7,7 @@ import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags,
   decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
-  cardResults, MIN_RESULT_DECKS,
+  cardResults, packageResults, MIN_RESULT_DECKS,
 } from "./deck.js";
 
 const PAGE_SIZE = 30;
@@ -621,10 +621,10 @@ async function findSimilar(key) {
   // Cuts only make sense against decks with your own commander: another's never play its cards
   $("cuts-section").hidden = key !== ownKey;
   const rare = cuts.filter(c => c.share < CUT_BELOW).slice(0, SHOW_CUTS);
-  $("cuts").replaceChildren(...(rare.length
-    ? rare.map(c => cardButton(c.card, names, `${names[c.card]} · ${Math.round(c.share * 100)}%`
-      + (tournament?.byCard.has(c.card) ? ` · ${points(tournament.byCard.get(c.card).lift)} in tournaments` : "")))
-    : [el("span", { className: "muted", textContent: "None: similar decks play almost all of your cards." })]));
+  $("cuts-lede").textContent = rare.length ? "Your cards that the most similar decks rarely play, the rarest first."
+    : "None: similar decks play almost all of your cards.";
+  await showCuts(rare.map(c => ({ card: c.card, type: typeOf(c.card), detail: `in ${percent(c.share)} of similar decks`,
+    bar: c.share, ...tournamentNote(c.card) })));
 
   // The tournament check: your cards whose decks win less, and cards whose decks win more that you don't play
   $("deck-tournament").hidden = !tourney;
@@ -713,6 +713,7 @@ function typedGallery(types, gallery, more) {
   };
 }
 const showAdds = typedGallery($("add-types"), $("adds"), $("more-adds"));
+const showCuts = typedGallery($("cut-types"), $("cuts"), $("more-cuts"));
 const showMineLess = typedGallery($("mine-less-types"), $("mine-less"), $("more-mine-less"));
 const showMissingMore = typedGallery($("missing-more-types"), $("missing-more"), $("more-missing-more"));
 
@@ -1033,7 +1034,7 @@ async function showCommander(key) {
   // Tournament results; picking bracket 5 also notes each card's on its tile
   tournament = null;
   $("results-panel").hidden = !results;
-  if (results) showResults(results, leaders.map(c => names[c]), released, () => bracket === 5 && showBuild());
+  if (results) showResults(key, results, names, released, () => bracket === 5 && showBuild());
   const cedh = card => (bracket === 5 ? tournamentNote(card) : {});
   await showBuild();
   commanderMessage("");
@@ -1098,7 +1099,8 @@ function tournamentNote(card) {
 // {lead, period, byCard: card -> cardResults' result, with a story: the whole of it, in words}
 let tournament = null;
 // onPeriod: called after another period is picked
-function showResults(results, leads, released, onPeriod) {
+function showResults(key, results, names, released, onPeriod) {
+  const leads = key.split("-").map(c => names[c]);
   const lead = leads.join(" & ");
   $("results-source").href = "https://edhtop16.com/commander/" + encodeURIComponent([...leads].sort().join(" / "));
   const usable = w => results.totals[w][0] >= 2 * MIN_RESULT_DECKS;
@@ -1107,10 +1109,60 @@ function showResults(results, leads, released, onPeriod) {
   if (w < 0) w = first;
   const period = () => periodName(results.windows[w]);
 
+  // A package of cards to test (one or more; in the URL): the decks one by one, fetched the first time
+  let pkg = (params.get("package") ?? "").split(".").filter(Boolean).map(Number).filter(c => names[c] !== undefined);
+  let lists, byName;
+  const getLists = () => (lists ??= getJson(`decks/results/lists/${key}.json`).then(data => {
+    byName = new Map();
+    for (const c of data.cards) for (const n of [names[c], names[c].split(" // ")[0]]) byName.set(n.toLowerCase(), c);
+    $("package-cards").replaceChildren(...data.cards.map(c => el("option", { value: names[c] })));
+    return data;
+  }));
+  async function showPackage() {
+    setParams({ package: pkg.length ? pkg.join(".") : null });
+    $("package-chips").replaceChildren(...pkg.map(c => el("button", {
+      type: "button", className: "term", title: `Take ${names[c]} out`,
+      onclick: () => { pkg = pkg.filter(x => x !== c); showPackage(); },
+    }, names[c], el("span", { ariaHidden: "true", textContent: "×" }))));
+    $("package-result").hidden = !pkg.length;
+    $("package-note").textContent = "";
+    if (!pkg.length) return;
+    const shown = pkg, data = await getLists();
+    if (shown !== pkg) return; // changed while loading
+    const r = packageResults(data, pkg, w);
+    const one = pkg.length === 1;
+    const sides = s => `${s.decks.toLocaleString()} ${s.decks === 1 ? "deck" : "decks"}, ${s.games.toLocaleString()} games`
+      + (s.cutDecks ? `; ${percent(s.cuts / s.cutDecks)} made the top cut` : "");
+    const sure = r.lift !== null && Math.abs(r.evidence) >= SIGNAL;
+    $("package-result").replaceChildren(
+      statTile(`${one ? "With it" : "With all of them"}: games won`, r.all.games ? percent1(r.all.wins / r.all.games) : "–", sides(r.all)),
+      statTile(`${one ? "Without it" : "With none"}: games won`, r.none.games ? percent1(r.none.wins / r.none.games) : "–", sides(r.none)),
+      r.lift === null ? statTile("Difference", "–", `Too few decks ${r.all.decks ? "without" : "with"} ${one ? "it" : "them"} to compare`)
+        : statTile("Difference", points(r.lift), sure ? `Decks with ${one ? "it" : "them"} clearly won ${r.lift > 0 ? "more" : "less"}`
+          : "Too few decks to be sure yet", sure ? (r.lift > 0 ? "up" : "down") : ""));
+    $("package-note").textContent = (r.some.decks ? `${r.some.decks.toLocaleString()} ${r.some.decks === 1 ? "deck plays" : "decks play"} only some of them, left out. ` : "")
+      + `In the last ${period()}. As for single cards, both sides are pulled toward ${lead}'s win rate, so a few decks need a big difference to show one; `
+      + "and a card can stand for a style of build rather than win on its own.";
+  }
+  $("package-input").onfocus = () => getLists();
+  $("package-input").onchange = async () => {
+    const typed = $("package-input").value.trim();
+    if (!typed) return;
+    await getLists();
+    const card = byName.get(typed.toLowerCase());
+    if (card === undefined) {
+      $("package-note").textContent = `No ${lead} tournament deck plays “${typed}”. Pick a card from the list as you type.`;
+      return;
+    }
+    if (!pkg.includes(card)) pkg = [...pkg, card];
+    $("package-input").value = "";
+    showPackage();
+  };
+
   function show() {
     setParams({ results: w === first ? null : results.windows[w] });
     $("results-windows").replaceChildren(...results.windows.map((days, i) => el("button", {
-      type: "button", ariaPressed: String(i === w), onclick: () => { w = i; show(); onPeriod(); },
+      type: "button", ariaPressed: String(i === w), onclick: () => { w = i; show(); showPackage(); onPeriod(); },
     }, `Last ${periodName(days)}`, el("small", { textContent: results.totals[i][0].toLocaleString() }))));
 
     // The headline: how its decks do against every deck in these tournaments
@@ -1174,6 +1226,7 @@ function showResults(results, leads, released, onPeriod) {
     $("more-finishes").onclick();
   }
   show();
+  showPackage();
 }
 const TOP_FINISH = 4; // TOP_FINISH in build_decks.py
 

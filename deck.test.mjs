@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, distinctive, averageDeck, buildName, buildTags,
-  decodeTrends, cardResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
+  decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "./site/deck.js";
 
 const NAMES = ["Sol Ring", "Atraxa, Praetors' Voice", "Delver of Secrets // Insectile Aberration", "Island",
@@ -202,4 +202,29 @@ test("tournament results: a card's decks against the commander's other decks, sm
   assert.ok(byCard[5].lift < byCard[1].lift && byCard[5].lift > 0);
   assert.equal(byCard[5].conversion, null); // no events with a top cut
   assert.deepEqual(cardResults(results, 1), []);
+});
+
+test("a package of cards: the decks playing all of them against those playing none", () => {
+  // Cards 7, 8 and 9; decks: [narrowest window, games, wins, top cut (0 none, 1 missed, 2 made), gaps]
+  const lists = {
+    cards: [7, 8, 9],
+    decks: [
+      [0, 6, 3, 2, 0, 1], // 7 and 8, won 3 of 6, made the cut
+      [0, 6, 2, 1, 0, 1, 1], // all three
+      [1, 6, 0, 1, 0], // only 7: some of 7 and 8
+      [0, 6, 1, 0, 2], // only 9: none of 7 and 8
+      [3, 6, 6, 0, 2], // only 9, but two years back
+    ],
+  };
+  const result = packageResults(lists, [7, 8], 1);
+  assert.deepEqual(result.all, { decks: 2, games: 12, wins: 5, cutDecks: 2, cuts: 1 });
+  assert.deepEqual(result.none, { decks: 1, games: 6, wins: 1, cutDecks: 0, cuts: 0 });
+  assert.deepEqual(result.some, { decks: 1, games: 6, wins: 0, cutDecks: 1, cuts: 0 });
+  assert.ok(result.lift > 0 && result.evidence > 0);
+  // One card is the same comparison as cardResults' (here, 9 over every window)
+  const nine = packageResults(lists, [9], 3);
+  assert.equal(nine.all.decks, 3);
+  assert.equal(nine.none.decks, 2);
+  // A card no deck plays: nothing to compare
+  assert.equal(packageResults(lists, [42], 3).lift, null);
 });

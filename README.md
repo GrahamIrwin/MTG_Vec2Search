@@ -89,7 +89,8 @@ time, a few KB after that).
      nothing. The 25 most similar decks vote on **cards to consider**, by
      similarity, minus half of how often any deck with that commander plays the
      card, so the list is what decks like yours play more than usual rather than
-     staples. **Cards to reconsider** are yours that similar decks rarely play.
+     staples. **Cards to cut** are yours that similar decks rarely play, shown
+     with their images like the cards to add.
    - A pasted Moxfield or Archidekt link is read by `worker/deck-link.js`, a
      small Cloudflare Worker: neither site's API can be called from another
      site's page (CORS). It fetches just that one deck and returns it as a
@@ -166,6 +167,12 @@ time, a few KB after that).
    - The headline numbers compare the commander's decks with every deck in
      the period: with draws, an average deck wins about a fifth of its games,
      not a quarter.
+   - **Test a card or a package**: pick one or more cards (in the address bar
+     as `package=`) to compare the decks that play all of them with those that
+     play none, over the chosen period, pulled toward the commander's win rate
+     the same way (`packageResults`). It needs each tournament deck's cards, so
+     `results/lists/<file name>.json` holds them one by one, fetched only when
+     a card is picked.
    - Picking **bracket 5** notes each card's tournament result on the page's
      card tiles. **Deck recommendations** gets a **tournament check** when the
      deck's commander has results (your cards whose decks win less, and cards
