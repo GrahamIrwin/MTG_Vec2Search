@@ -145,14 +145,19 @@ time, a few KB after that).
    [TopDeck.gg](https://topdeck.gg)), over the last 3, 6, 12 or 24 months:
    - `build_decks.py results` keeps `results.jsonl.gz`: every tournament of 16
      players or more from the last two years, each entry's commander, record,
-     standing, decklist link and cards. It fetches only the tournaments it
+     standing, decklist link, cards and pilot (with their TopDeck profile). It fetches only the tournaments it
      lacks, newest first (and the last 3 days' again, as results come in),
      so it can stop and go on. Events without decklists (about 40%) are skipped,
-     and a year takes about 2 hours at 4 events at a time.
+     and a year takes about 2 hours at 4 events at a time. Events fetched before
+     pilots were kept get just their pilots, a far quicker question.
    - `build_decks.py build` writes `results/<file name>.json` per commander:
      how many decks, games, wins and top cuts its decks had in each period,
-     the same for the decks that play each card, and its newest top 4
-     finishes. Cards are matched by name.
+     the same for the decks that play each card and for each pilot, and its
+     newest top 4 finishes with who played them. Cards are matched by name.
+   - **Pilots**: who played its decks, and how it does without the 2 who won
+     the most: a commander can look strong because of one or two players.
+   - **Points per game** count 5 for a win and 1 for a draw; with draws, the
+     average deck scores a little over 1.2.
    - Each card's decks are measured against the commander's other decks, not
      against every deck, so a card in strong commanders' decks doesn't look
      good for it. The measure is games won rather than top cuts (a deck plays
@@ -167,7 +172,8 @@ time, a few KB after that).
    - The headline numbers compare the commander's decks with every deck in
      the period: with draws, an average deck wins about a fifth of its games,
      not a quarter.
-   - **Test a card or a package**: pick one or more cards (in the address bar
+   - **Test a card or a package**: its example is a random niche card, one
+     5 to 25% of the commander's tournament decks play. Pick one or more cards (in the address bar
      as `package=`) to compare the decks that play all of them with those that
      play none, over the chosen period, pulled toward the commander's win rate
      the same way (`packageResults`). It needs each tournament deck's cards, so
@@ -200,7 +206,7 @@ time, a few KB after that).
      card's page (the commanders playing each of 16 cards). The Commanders and
      Tournaments tabs fetch `trends.json` only once their filters are used.
 6. **Tournaments** (`?tournaments`) ranks every commander with tournament
-   decks by decks, share of games won or share of decks making the top cut,
+   decks by decks, points per game, share of games won or share of decks making the top cut,
    each against every deck's, over the last 3, 6, 12 or 24 months. Its cards are
    compared across commanders without letting commanders count: `pooled()` in
    `build_decks.py` takes, for each commander with 3 or more decks with a card
@@ -210,7 +216,39 @@ time, a few KB after that).
    The commanders can be narrowed with Trends' filters, less the ones that
    don't fit tournament decks (bracket: they're all cEDH; deck price: a
    casual deck's; minimum decks: the table has its own), and the period,
-   sort and filters are in the address bar.
+   sort and filters are in the address bar. Above it, **the last 30 days**: the
+   commander with the most points per game (20 decks or more), the breakout
+   (the most decks for its share of the 90 days before) and the one whose
+   points per game rose most (15 decks or more on each side), three different
+   ones (`highlights()`).
+   - **Pilots** ranks the players with 5 or more tournament decks in two years
+     (`results/ranking.json`) by match points, points per game, games won or
+     top cuts. The search at the top of the tab finds pilots by name, with the
+     commanders they play (`results/pilots.json`: each pilot's decks of each
+     commander). A commander's page lists all its pilots in the period it shows. A pilot's page (`?tournaments&pilot=<number>`)
+     is their profile: their main commander, rank by match points, best finish
+     (the highest place for the field's size), record against every deck's,
+     what they play and how they do on it, a link to their TopDeck profile, and
+     every deck they played, from `results/pilots/<block>.json` (64 players a
+     file, by edhtop16's number for them).
+   - **Favorite cards** (`pilot_cards()`): the cards in more of a pilot's decks
+     than if their decks were like other decks of the same commanders, from 2
+     of their decks or more, with their games won with each card and without.
+   - **List over time**, for each commander a pilot played 2 or more times:
+     their games won in their earlier events against their later ones; the
+     cards in some of their lists but not all, with their games won with each
+     and without (the clearest differences first: a difference counts for more
+     with more games on both sides); and event by event, what they added and
+     cut since the list before. All from `results/lists/`, in the browser.
+   - **Compare** on any tournament deck (a pilot's, or a commander's best
+     finishes) compares your deck with it in Deck recommendations
+     (`?deck&from=<commander file name>.<number>&pilot=<number>`): the cards
+     in their list and not yours, and in yours and not theirs, each ranked by
+     how the commander's tournament decks with it did against those without
+     (as on its page), so the first are what to add and what to cut. The list
+     comes from the cards kept for it in `results/lists/`, since almost every
+     decklist is on TopDeck, which Deck recommendations can't read; it can
+     also get recommendations for that list itself (without saving it as yours).
 
    A card can stand for a style of deck: within Kinnan, the creature-heavy
    lists win more than the ones with Force of Will and Mana Vault. So these

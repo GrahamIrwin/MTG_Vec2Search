@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MTG Vec2Search</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='17' y='3' width='66' height='94' rx='8' fill='%23111'/><rect x='22' y='8' width='56' height='84' rx='5' fill='%236b3f1d'/><ellipse cx='50' cy='50' rx='21' ry='32' fill='%23d9822b'/><ellipse cx='50' cy='50' rx='14' ry='24' fill='%23345f93'/></svg>">
   <meta name="description" content="Search Magic: The Gathering cards by describing what they do, in plain English.">
   <script>
     // Dark by default; the toggle's choice is remembered
@@ -294,7 +294,7 @@
     .flip-wrap:hover .card-art { transform: translateY(-4px); box-shadow: 0 2px 3px rgb(0 0 0 / .25), 0 18px 28px -12px rgb(0 0 0 / .6); }
     .card:focus-visible .card-art { outline: 2px solid var(--focus); outline-offset: 3px; }
     .card-name { font-family: 'Beleren Bold', Georgia, serif; font-size: 15px; line-height: 1.25; color: var(--ink); }
-    .card-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+    .card-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 8px; font-size: 14px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
     .match-bar { height: 3px; border-radius: 2px; background: var(--paper-3); overflow: hidden; }
     .match-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--brass)); }
     #sentinel { height: 1px; }
@@ -485,7 +485,21 @@
     }
     .finish .place { grid-row: span 2; font: 20px/1 'Beleren Bold', Georgia, serif; color: var(--accent); }
     .finish .deck-meta { grid-column: 2 / -1; }
+    .finish-links { display: flex; gap: 12px; justify-self: end; }
+    .deck-body .added { color: var(--up); }
+    .deck-body .cut { color: var(--down); }
+    #pilot-changed .term small.up { color: var(--up); }
+    #pilot-changed .term small.down { color: var(--down); }
     .source-note { font-size: 14px; margin: 26px 0 0; }
+    .highlights { margin-bottom: 22px; }
+    .pilot-search { display: grid; justify-items: center; gap: 6px; margin: 0 0 22px; }
+    .pilot-search .filter-box { width: 100%; max-width: 560px; }
+    .search-results { width: 100%; max-width: 760px; padding: 4px 22px 18px; background: var(--paper-2); border: 1px solid var(--rule); border-radius: 14px; }
+    .search-results .sub-heading { margin-top: 16px; }
+    .found-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+    .found-list small { color: var(--ink-soft); }
+    .pilot-kicker { margin: 14px 0 0; }
+    .commander-head .pilot-kicker + h2 { margin-top: 2px; }
     .package-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 12px 0 4px; }
     .package-pick .filter-box { flex: 1 1 280px; }
     .package-pick .term-items { margin: 0; }
@@ -702,6 +716,11 @@
 
       <section class="deck-view" id="deck-view" hidden>
         <form id="deck-form">
+          <div class="card-results" id="compare-target" hidden>
+            <span class="label">Comparing your deck with</span>
+            <p id="compare-target-text"></p>
+            <button type="button" class="btn-quiet" id="compare-instead">Get recommendations for this list instead</button>
+          </div>
           <label class="label" for="decklist">Your Commander deck</label>
           <textarea id="decklist" rows="10" spellcheck="false" required
                     placeholder="Paste a Moxfield or Archidekt link, or a decklist&#10;https://moxfield.com/decks/…&#10;&#10;1 Atraxa, Praetors' Voice *CMDR*&#10;1 Sol Ring"></textarea>
@@ -713,6 +732,20 @@
         <p class="message" id="deck-message" hidden></p>
         <div id="deck-results" hidden>
           <div class="results-head"><div class="recognized" id="deck-summary"></div></div>
+          <details class="panel" open id="against-panel" hidden>
+            <summary><h2 class="deck-heading">Against their list</h2></summary>
+            <p class="muted deck-lede" id="against-lede"></p>
+            <h3 class="sub-heading">Theirs, not yours: what to add</h3>
+            <p class="muted deck-lede" id="against-adds-lede"></p>
+            <div class="chips type-filter" id="against-adds-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="against-adds"></div>
+            <div class="more-wrap"><button id="more-against-adds" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">Yours, not theirs: what to cut</h3>
+            <p class="muted deck-lede" id="against-cuts-lede"></p>
+            <div class="chips type-filter" id="against-cuts-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="against-cuts"></div>
+            <div class="more-wrap"><button id="more-against-cuts" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
           <details class="panel" open>
             <summary><h2 class="deck-heading">Cards to add</h2></summary>
             <p class="muted deck-lede" id="adds-lede"></p>
@@ -801,12 +834,17 @@
             <p class="muted deck-lede" id="results-lede"></p>
             <div class="chips type-filter" id="results-windows" role="group" aria-label="Period"></div>
             <div class="result-stats" id="results-stats"></div>
+            <div id="pilots-section" hidden>
+              <h3 class="sub-heading">Pilots</h3>
+              <p class="muted deck-lede" id="pilots-lede"></p>
+              <div class="term-items" id="pilots"></div>
+            </div>
             <h3 class="sub-heading">Test a card or a package</h3>
             <p class="muted deck-lede">Add one card, or several that go together, to compare the decks that play all of
               them with the decks that play none, over the period above.</p>
             <div class="package-pick">
               <input type="search" id="package-input" class="filter-box" list="package-cards" autocomplete="off"
-                     placeholder="Add a card, e.g. Sleep-Cursed Faerie" aria-label="Add a card to test">
+                     placeholder="Add a card" aria-label="Add a card to test">
               <datalist id="package-cards"></datalist>
               <div class="term-items" id="package-chips"></div>
             </div>
@@ -986,6 +1024,16 @@
       <section class="deck-view" id="tournaments-view" hidden>
         <p class="message" id="tournaments-message" hidden></p>
         <div id="tournaments-page" hidden>
+          <div class="pilot-search">
+            <input type="search" id="pilot-input" class="filter-box" autocomplete="off"
+                   placeholder="Search pilots: every deck, favorite card and finish of theirs" aria-label="Search pilots">
+            <p class="muted deck-lede" id="pilot-note"></p>
+            <div class="search-results" id="pilot-results" hidden></div>
+          </div>
+          <section id="highlights-section" class="highlights" hidden>
+            <h2 class="sub-heading" id="highlights-heading"></h2>
+            <div class="result-stats" id="highlights"></div>
+          </section>
           <div class="chips type-filter trend-windows" id="tour-windows" role="group" aria-label="Period"></div>
           <div class="result-stats" id="tour-stats"></div>
           <details class="panel" open>
@@ -998,11 +1046,12 @@
                 <input type="number" id="tour-min" min="1" inputmode="numeric" class="short"></label>
             </div>
             <div class="table-wrap">
-              <table class="leaderboard">
+              <table class="leaderboard" id="tour-table">
                 <thead><tr>
                   <th scope="col" class="rank">#</th>
                   <th scope="col">Commander</th>
                   <th scope="col" class="num"><button type="button" data-sort="decks">Decks</button></th>
+                  <th scope="col" class="num"><button type="button" data-sort="ppg">Points/game</button></th>
                   <th scope="col" class="num"><button type="button" data-sort="wins">Games won</button></th>
                   <th scope="col" class="num"><button type="button" data-sort="cut">Top cut</button></th>
                 </tr></thead>
@@ -1010,6 +1059,29 @@
               </table>
             </div>
             <div class="more-wrap"><button id="more-tour" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Pilots</h2></summary>
+            <div id="ranking" hidden>
+              <p class="muted deck-lede" id="ranking-lede"></p>
+              <label class="field inline-field tour-controls"><span class="label">Min. decks</span>
+                <input type="number" id="ranking-min" min="1" value="5" inputmode="numeric" class="short"></label>
+              <div class="table-wrap">
+                <table class="leaderboard" id="ranking-table">
+                  <thead><tr>
+                    <th scope="col" class="rank">#</th>
+                    <th scope="col">Pilot</th>
+                    <th scope="col" class="num"><button type="button" data-sort="decks">Decks</button></th>
+                    <th scope="col" class="num"><button type="button" data-sort="points">Points</button></th>
+                    <th scope="col" class="num"><button type="button" data-sort="ppg">Points/game</button></th>
+                    <th scope="col" class="num"><button type="button" data-sort="wins">Games won</button></th>
+                    <th scope="col" class="num"><button type="button" data-sort="cut">Top cut</button></th>
+                  </tr></thead>
+                  <tbody id="ranking-rows"></tbody>
+                </table>
+              </div>
+              <div class="more-wrap"><button id="more-ranking" class="btn-quiet" type="button" hidden>Show more</button></div>
+            </div>
           </details>
           <details class="panel" open>
             <summary><h2 class="deck-heading">Cards that win more</h2></summary>
@@ -1035,6 +1107,49 @@
           <p class="muted source-note">Tournament results from <a href="https://edhtop16.com" target="_blank" rel="noopener">edhtop16</a>,
             whose decklists and standings come from <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a>:
             cEDH tournaments of 16 players or more.</p>
+        </div>
+        <div id="pilot-page" hidden>
+          <div class="commander-head">
+            <div class="commander-art" id="pilot-art"></div>
+            <div>
+              <a href="?tournaments">← All tournaments</a>
+              <p class="label pilot-kicker">cEDH pilot</p>
+              <h2 id="pilot-name"></h2>
+              <p class="muted" id="pilot-meta"></p>
+              <p class="theme-line" id="pilot-best" hidden></p>
+              <p class="theme-line" id="pilot-commanders"></p>
+              <a class="btn-quiet" id="pilot-profile" target="_blank" rel="noopener" hidden>TopDeck profile: all their events ↗</a>
+            </div>
+          </div>
+          <div class="result-stats" id="pilot-stats"></div>
+          <details class="panel" open id="pilot-cards-panel">
+            <summary><h2 class="deck-heading">Favorite cards</h2></summary>
+            <p class="muted deck-lede" id="pilot-cards-lede"></p>
+            <div class="chips type-filter" id="pilot-cards-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="pilot-cards"></div>
+            <div class="more-wrap"><button id="more-pilot-cards" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open id="pilot-lists-panel" hidden>
+            <summary><h2 class="deck-heading">List over time</h2></summary>
+            <p class="muted deck-lede" id="pilot-lists-lede"></p>
+            <div class="chips type-filter" id="pilot-lists-commanders" role="group" aria-label="Commander"></div>
+            <h3 class="sub-heading">Cards they changed</h3>
+            <p class="muted deck-lede" id="pilot-changed-lede"></p>
+            <div class="term-items" id="pilot-changed"></div>
+            <h3 class="sub-heading">Event by event</h3>
+            <p class="muted deck-lede">Newest first: games won at each event, and what changed from the list before. Open one for the cards.</p>
+            <ol class="deck-list" id="pilot-versions"></ol>
+            <div class="more-wrap"><button id="more-pilot-versions" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Tournaments</h2></summary>
+            <p class="muted deck-lede">Newest first, each with its decklist. Records are won–lost–drawn.</p>
+            <ol class="deck-list finish-list" id="pilot-events"></ol>
+            <div class="more-wrap"><button id="more-pilot-events" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <p class="muted source-note">Tournament results from <a href="https://edhtop16.com" target="_blank" rel="noopener">edhtop16</a>,
+            whose decklists and standings come from <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a>:
+            cEDH tournaments of 16 players or more. A pilot is who edhtop16 says played the deck.</p>
         </div>
       </section>
     </main>

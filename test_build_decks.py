@@ -112,26 +112,70 @@ with tempfile.TemporaryDirectory() as tmp:
              {"name": "Bolt"}, {"name": "Front // Back"}]
     tournament = lambda i, day, cut, entries: {"id": i, "name": f"Event {i}", "date": day, "size": 40,
                                                 "top_cut": cut, "entries": entries}
-    stats = build_decks.tournament_stats({
-        1: tournament(1, "2026-09-30", 4, [["Lead", 1, 4, 1, 1, "link1", ["Bolt", "Front", "Island", "Lead"]],
-                                           ["Lead", 9, 1, 5, 0, "link2", ["Bolt"]],
-                                           ["Partner / Lead", 2, 3, 2, 1, "link3", ["Bolt"]],
-                                           ["Unknown", 3, 3, 3, 0, "", ["Bolt"]]]),
-        2: tournament(2, "2026-01-01", 0, [["Lead", 1, 5, 0, 0, "link4", ["Front // Back", "Nope"]]])},
-        named, date(2026, 10, 4))
+    # Pilots: Ann (7) played Lead twice and an unknown commander; event 2 was fetched before pilots were
+    events = {
+        1: tournament(1, "2026-09-30", 4, [["Lead", 1, 4, 1, 1, "link1", ["Bolt", "Front", "Island", "Lead"], 7, "Ann"],
+                                           ["Lead", 9, 1, 5, 0, "link2", ["Bolt"], 8, "Bo"],
+                                           ["Partner / Lead", 2, 3, 2, 1, "link3", ["Bolt"], 0, ""],
+                                           ["Unknown", 3, 3, 3, 0, "", ["Bolt"], 7, "Ann", "tdA"]]),
+        2: tournament(2, "2026-01-01", 0, [["Lead", 1, 5, 0, 0, "link4", ["Front // Back", "Nope"]]])}
+    stats = build_decks.tournament_stats(events, named, date(2026, 10, 4))
     assert sorted(stats) == ["0", "0-1"], stats.keys()
     lead = stats["0"]
-    # [decks, games, wins, decks in events with a top cut, top cuts]: in 90 and 180 days event 1's
-    # two decks (one made the cut), in one and two years event 2's too (which had no cut)
-    assert lead["totals"] == [[2, 12, 5, 2, 1], [2, 12, 5, 2, 1], [3, 17, 10, 2, 1], [3, 17, 10, 2, 1]], lead["totals"]
+    # [decks, games, wins, decks in events with a top cut, top cuts, draws]: in 90 and 180 days event
+    # 1's two decks (one made the cut), in one and two years event 2's too (which had no cut)
+    assert lead["totals"] == [[2, 12, 5, 2, 1, 1], [2, 12, 5, 2, 1, 1], [3, 17, 10, 2, 1, 1], [3, 17, 10, 2, 1, 1]], lead["totals"]
     assert lead["cards"] == [3, 4]  # Bolt and Front, each in 2 decks; not the commander or a basic land
     assert lead["stats"] == [[2, 12, 5, 2, 1] * 4, [1, 6, 4, 1, 1] * 2 + [2, 11, 9, 1, 1] * 2], lead["stats"]
-    assert lead["top"] == [["2026-09-30", "Event 1", 40, 1, 4, 1, 1, "link1"], ["2026-01-01", "Event 2", 40, 1, 5, 0, 0, "link4"]]
+    # each with its number among the decks in lists (below)
+    assert lead["top"] == [["2026-09-30", "Event 1", 40, 1, 4, 1, 1, "link1", 7, "Ann", 0],
+                           ["2026-01-01", "Event 2", 40, 1, 5, 0, 0, "link4", 0, "", 2]], lead["top"]
+    assert lead["pilots"] == [[7, "Ann", *[1, 6, 4, 1, 1, 1] * 4], [8, "Bo", *[1, 6, 1, 1, 0, 0] * 4]], lead["pilots"]
+    histories = build_decks.pilot_histories(events, named, stats)
+    assert sorted(histories) == [7, 8] and histories[7][0] == "Ann" and histories[7][2] == "tdA"  # her TopDeck profile
+    # Finding pilots by name or commander: Ann's 2 decks, 1 of them Lead's (the other's commander is unknown)
+    assert build_decks.pilot_index(histories) == [[7, "Ann", 2, "0", 1], [8, "Bo", 1, "0", 1]]
+    # Each deck with its number in its commander's lists (-1: a commander without results)
+    assert histories[7][1] == [["2026-09-30", "Event 1", 40, 4, 1, 4, 1, 1, "0", "Lead", "link1", 0],
+                               ["2026-09-30", "Event 1", 40, 4, 3, 3, 3, 0, "", "Unknown", "", -1]], histories[7]
     assert stats["0-1"]["cards"] == []  # in 1 deck: too few to say anything
     # Each deck, for testing packages: narrowest window (event 2 is in the year's, 2), games, wins,
     # top cut (2: made it, 1: missed it, 0: none) and its cards as gaps between positions in cards
     assert lead["lists"] == {"cards": [3, 4], "decks": [[0, 6, 4, 2, 0, 1], [0, 6, 1, 1, 0], [2, 5, 5, 0, 1]]}, lead["lists"]
-    assert lead["field"][-1] == [5, 29, 16, 4, 3]  # every deck, the unknown commander's too
+    assert lead["field"][-1] == [5, 29, 16, 4, 3, 2]  # every deck, the unknown commander's too
+    # The cards a pilot likes: all 5 Lead decks play Bolt, but only Ann's two play Front (2 of 5 Lead
+    # decks: 0.8 of her 2 expected); Bo plays nothing more than expected, nobody else has 2 decks
+    played = {1: tournament(1, "2026-09-30", 4, [["Lead", 1, 3, 1, 0, "", ["Bolt", "Front"], 7, "Ann"],
+                                                 ["Lead", 2, 2, 2, 0, "", ["Bolt"], 8, "Bo"],
+                                                 ["Lead", 3, 1, 3, 0, "", ["Bolt"], 0, ""]]),
+              2: tournament(2, "2026-09-29", 4, [["Lead", 1, 4, 0, 0, "", ["Bolt", "Front"], 7, "Ann"],
+                                                 ["Lead", 2, 1, 3, 0, "", ["Bolt"], 8, "Bo"]])}
+    liked = build_decks.pilot_cards(played, named, build_decks.tournament_stats(played, named, date(2026, 10, 4)))
+    assert liked == {7: [[4, 2, 8, 7, 0.8]], 8: []}, liked
+
+    # Ranking: Ann's two decks, both in every window (both made the top 4), counted with RANKED_DECKS at 2
+    real_ranked, build_decks.RANKED_DECKS = build_decks.RANKED_DECKS, 2
+    try:
+        assert build_decks.ranking(histories, date(2026, 10, 4)) == [[7, "Ann", *[2, 12, 7, 2, 2, 1] * 4]]
+    finally:
+        build_decks.RANKED_DECKS = real_ranked
+
+    # Highlights, needing 1 deck each: this month Lead's 2 decks scored 25 points in 8 games (two
+    # pilots), its partners' deck none; before, Lead 5 in 4 games and the partners 6 (a draw)
+    finish = lambda lead, wins, losses, draws, who=0: [lead, 1, wins, losses, draws, "", [], who, ""]
+    monthly = {1: tournament(1, "2026-09-30", 0, [finish("Lead", 3, 1, 0, 1), finish("Lead", 2, 2, 0, 2), finish("Partner / Lead", 0, 4, 0)]),
+               2: tournament(2, "2026-08-01", 0, [finish("Lead", 1, 3, 0), finish("Partner / Lead", 1, 2, 1)]),
+               3: tournament(3, "2026-01-01", 0, [finish("Partner / Lead", 9, 0, 0)])}  # too long ago
+    saved = build_decks.BEST_DECKS, build_decks.BREAKOUT_DECKS, build_decks.RISING_DECKS
+    build_decks.BEST_DECKS = build_decks.BREAKOUT_DECKS = build_decks.RISING_DECKS = 1
+    try:
+        got = build_decks.highlights(monthly, named, date(2026, 10, 4))
+    finally:
+        build_decks.BEST_DECKS, build_decks.BREAKOUT_DECKS, build_decks.RISING_DECKS = saved
+    assert got["decks"] == 3 and got["field"] == round(25 / 12, 3) and got["best"] == ["0", 2, 3.125, 2, None], got
+    # Each a different commander: Lead is best, so the partners are the breakout (1 of 3 decks, against
+    # 1 of 2 before), and the only one left to rise is none
+    assert got["breakout"] == ["0-1", 1, 0.0, 0, 0.5] and got["rising"] is None, got
 
     # A card across commanders: in A's decks and B's it wins 10 points more than their decks without it,
     # A's counting three times as much (300 games each side, against 100); card 8 is in too few of B's
@@ -151,20 +195,24 @@ with tempfile.TemporaryDirectory() as tmp:
     listed = [{"TID": "new", "tournamentDate": "2026-09-20T00:00:00Z", "breakdown": [{"entries": 2}]},
               {"TID": "none", "tournamentDate": "2026-09-01T00:00:00Z", "breakdown": []},
               {"TID": "same", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 1}]},
-              {"TID": "more", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 3}]}]
+              {"TID": "more", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 3}]},
+              {"TID": "unpiloted", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 1}]}]
     asked = []
 
     def fake_edhtop16(query, **variables):
         if "tid" not in variables:
             return {"tournaments": {"edges": [{"node": t} for t in listed], "pageInfo": {"hasNextPage": False}}}
         asked.append(variables["tid"])
+        if "maindeck" not in query:  # just the pilots
+            return {"tournament": {"entries": [{"standing": 1, "player": {"id": "UGxheWVyOjk=", "name": "Cy", "topdeckProfile": "tdC"}}]}}
         played = {"commander": {"name": "Lead"}, "standing": 1, "wins": 3, "losses": 1, "draws": 0, "decklist": "x",
-                  "maindeck": [{"name": "Bolt"}]}
+                  "maindeck": [{"name": "Bolt"}], "player": {"id": "UGxheWVyOjQyNzI=", "name": " Ann ", "topdeckProfile": "td1"}}
         unlisted = {"commander": None, "standing": 2, "wins": 2, "losses": 2, "draws": 0, "decklist": None, "maindeck": []}
         return {"tournament": {"name": "Event", "tournamentDate": "2026-09-20T00:00:00Z", "size": 20, "topCut": 4,
                                "entries": [played, unlisted]}}
     path = os.path.join(tmp, "results.jsonl.gz")
-    save_corpus({"same": {"id": "same", "date": "2026-08-01", "decklists": 1, "entries": []},
+    save_corpus({"same": {"id": "same", "date": "2026-08-01", "decklists": 1, "entries": [["Lead", 1, 3, 1, 0, "x", [], 1, "A", ""]]},
+                 "unpiloted": {"id": "unpiloted", "name": "Old", "date": "2026-08-01", "size": 20, "decklists": 1, "entries": [["Lead", 1, 3, 1, 0, "x", []]]},
                  "more": {"id": "more", "date": "2026-08-01", "decklists": 1, "entries": []},
                  "old": {"id": "old", "date": "2024-01-01", "entries": []}}, path)
     real_edhtop16, build_decks.edhtop16 = build_decks.edhtop16, fake_edhtop16
@@ -172,10 +220,11 @@ with tempfile.TemporaryDirectory() as tmp:
         build_decks.fetch_results(path=path, today=date(2026, 10, 4))
     finally:
         build_decks.edhtop16 = real_edhtop16
-    assert sorted(asked) == ["more", "new"], asked
+    assert sorted(asked) == ["more", "new", "unpiloted"], asked
     got = load_corpus(path)
-    assert sorted(got) == ["more", "new", "same"], got.keys()  # over two years old: dropped
-    assert got["new"]["entries"] == [["Lead", 1, 3, 1, 0, "x", ["Bolt"]]] and got["new"]["decklists"] == 2
+    assert sorted(got) == ["more", "new", "same", "unpiloted"], got.keys()  # over two years old: dropped
+    assert got["new"]["entries"] == [["Lead", 1, 3, 1, 0, "x", ["Bolt"], 4272, "Ann", "td1"]] and got["new"]["decklists"] == 2
+    assert got["unpiloted"]["entries"] == [["Lead", 1, 3, 1, 0, "x", [], 9, "Cy", "tdC"]]  # just its pilots fetched
     with open(os.path.join(out, "trends.json"), encoding="utf-8") as f:
         trends = json.load(f)
     key, made, price, bracket, _ = trends["commanders"][0]
@@ -340,8 +389,10 @@ with tempfile.TemporaryDirectory() as tmp:
     assert state == {"A": "2027-01-01", "B // B2": "2026-10-01", "Z": "2026-01-01"}
     assert mine[1]["created"] == "2025-12-01"  # an older copy can still tell when the deck was made
     # Tournaments: the ones only the other copy has, and ones it has more decklists of
-    mine = {"a": {"entries": [1, 2]}, "b": {"entries": [1]}}
-    assert build_decks.merge_results(mine, {"a": {"entries": [1]}, "b": {"entries": [1, 2]}, "c": {"entries": []}}) == 2
-    assert mine == {"a": {"entries": [1, 2]}, "b": {"entries": [1, 2]}, "c": {"entries": []}}
+    old, new = [0] * 9, [0] * 10  # an entry fetched before pilots' profiles were, and one after
+    mine = {"a": {"entries": [new, new]}, "b": {"entries": [new]}, "d": {"entries": [old]}}
+    assert build_decks.merge_results(mine, {"a": {"entries": [new]}, "b": {"entries": [new, new]}, "c": {"entries": []},
+                                            "d": {"entries": [new]}}) == 3
+    assert mine == {"a": {"entries": [new, new]}, "b": {"entries": [new, new]}, "c": {"entries": []}, "d": {"entries": [new]}}
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 print("ok")

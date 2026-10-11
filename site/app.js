@@ -418,7 +418,7 @@ async function showCardResults(card) {
     const w = Math.max(0, all.windows.indexOf(365)); // the last year's: recent enough to go on
     const [decks, commanders, lift, evidence] = all.stats[i].slice(4 * w, 4 * w + 4);
     const fieldDecks = all.field[w][0];
-    lines.push(el("p", {}, `In the last ${periodName(all.windows[w])}, ${percent1(decks / fieldDecks)} of ${fieldDecks.toLocaleString()} tournament decks play it. `
+    lines.push(el("p", {}, `In the last ${periodName(all.windows[w])}, ${percent1(decks / fieldDecks)} of ${fieldDecks.toLocaleString()} tournament decks play it (${decks.toLocaleString()} ${decks === 1 ? "deck" : "decks"}). `
       + (!commanders ? "Too few of any one commander's decks play it to compare."
         : Math.abs(evidence) < SIGNAL * 100 ? `No clear difference yet between decks with it and without it, within ${theCommanders(commanders)}.`
           : `Within ${theCommanders(commanders)}, decks with it won ${Math.abs(lift / 100).toFixed(1)} points ${lift > 0 ? "more" : "less"} of their games than decks without it.`),
@@ -556,12 +556,65 @@ async function readDeck(input) {
   }
 }
 
+// The tournament list to compare your deck with (?deck&from=<commander file name>.<its number in
+// results/lists/>&pilot=<who played it>): the cards build_decks.py kept for it (basic lands aren't),
+// and where it was played, from the pilot's history. {ref, key, pilot, lead, cards: Set, text, label}
+let fromDeck = null;
+let borrowed = null; // a tournament list being looked at as if it were yours: not saved as your deck
+async function tournamentDeck(ref, pilot) {
+  const [key, i] = ref.split(".");
+  const [{ names }, lists, block] = await Promise.all([loadDeckData(), getJson(`decks/results/lists/${key}.json`),
+    pilot ? getJson(`decks/results/pilots/${Math.floor(pilot / PILOT_BLOCK)}.json`).catch(() => ({})) : {}]);
+  const deck = lists.decks[Number(i)];
+  if (!deck) throw new Error(`No tournament deck ${ref}`);
+  let p = 0;
+  const cards = deck.slice(4).map(gap => lists.cards[p += gap]);
+  const [name, rows = []] = block[pilot] ?? [];
+  const row = rows.find(r => r[8] === key && r[11] === Number(i));
+  const lead = commanderNames(key, names);
+  return {
+    ref, key, pilot, lead, cards: new Set(cards),
+    text: [...key.split("-").map(c => `1 ${names[c]} *CMDR*`), ...cards.map(c => `1 ${names[c]}`)].join("\n"),
+    label: row ? `${name || "A pilot"}'s ${lead} list from ${row[1]}: ${ordinal(row[4])} of ${row[2]} on ${dateName(row[0])}, ${row[5]}–${row[6]}–${row[7]}`
+      : `A ${lead} tournament list that won ${deck[2]} of its ${deck[1]} games`,
+  };
+}
+
+// Your deck against the tournament list: the cards in one and not the other, each ranked by how the
+// commander's tournament decks with it did against those without (cardResults, over the period its
+// page shows first): theirs that win most first, as cards to add; yours that win least, to cut
+const showAgainstAdds = typedGallery($("against-adds-types"), $("against-adds"), $("more-against-adds"));
+const showAgainstCuts = typedGallery($("against-cuts-types"), $("against-cuts"), $("more-against-cuts"));
+async function showAgainst(target, mine, ownKey) {
+  const results = await getJson(`decks/results/${target.key}.json`).catch(() => null);
+  const w = results && firstPeriod(results);
+  const tested = new Map(results ? cardResults(results, w).map(x => [x.card, x]) : []);
+  const lift = card => tested.get(card)?.lift;
+  // cards with a result first, best (sign 1) or worst (-1) first; the rest after
+  const order = sign => (a, b) => (lift(a) === undefined) - (lift(b) === undefined) || sign * ((lift(b) ?? 0) - (lift(a) ?? 0));
+  const tile = card => (tested.has(card) ? resultTile(tested.get(card), results.totals[w][0])
+    : { card, type: typeOf(card), bar: null, detail: "Few decks", faint: true, note: "Too few tournament decks with it, or without it, to compare" });
+  const yours = new Set(mine);
+  const adds = [...target.cards].filter(c => !yours.has(c)).sort(order(1));
+  const cuts = mine.filter(c => !target.cards.has(c)).sort(order(-1));
+  $("against-lede").textContent = `${target.label}. ${mine.length - cuts.length} of your cards are in it; it has ${adds.length} yours doesn't, and yours has ${cuts.length} it doesn't. `
+    + (results ? `▲ and ▼ are how many points more or less of their games ${target.lead} tournament decks with the card won than those without it, `
+      + `in the last ${periodName(results.windows[w])}. A card can stand for a style of build, so weigh them together.` : "There are no tournament results to rank them by.")
+    + (ownKey !== target.key ? " Your deck's commander isn't theirs, so expect many differences." : "");
+  $("against-adds-lede").textContent = adds.length ? "In their list, not yours: the cards whose decks won most first. Faded: too few decks to be sure yet."
+    : "Your deck has every card in their list.";
+  $("against-cuts-lede").textContent = cuts.length ? "In your deck, not theirs: the cards whose decks won least first."
+    : "Every card in your deck is in their list.";
+  await Promise.all([showAgainstAdds(adds.map(tile)), showAgainstCuts(cuts.map(tile))]);
+}
+
 // key: compare with this commander's decks instead of the deck's own commander
 async function findSimilar(key) {
   const input = $("decklist").value;
-  try { localStorage.setItem("decklist", input); } catch {}
+  if (input !== borrowed) try { localStorage.setItem("decklist", input); } catch {}
   // A link goes in the address bar, so the page can be shared or bookmarked
-  history.replaceState(null, "", "?" + new URLSearchParams({ deck: LINK.test(input.trim()) ? input.trim() : "" }));
+  history.replaceState(null, "", "?" + new URLSearchParams({ deck: LINK.test(input.trim()) ? input.trim() : "",
+    ...(fromDeck && { from: fromDeck.ref, ...(fromDeck.pilot && { pilot: fromDeck.pilot }) }) }));
   $("deck-results").hidden = true;
   const deck = await readDeck(input);
   if (deck.error) return deckMessage(deck.error);
@@ -677,6 +730,10 @@ async function findSimilar(key) {
   $("others").replaceChildren(...others.slice(0, 8).map(c => el("button", {
     type: "button", className: "term", onclick: () => findSimilar(c.key).then(() => $("deck-results").scrollIntoView()),
   }, commanderNames(c.key, names), el("small", { textContent: c.decks.toLocaleString() }))));
+
+  // Against a tournament list, when there's one to compare with
+  $("against-panel").hidden = !fromDeck;
+  if (fromDeck) await showAgainst(fromDeck, mine, ownKey);
 
   deckMessage("");
   $("deck-results").hidden = false;
@@ -927,7 +984,7 @@ async function showCommander(key) {
     const all = g.all;
     const counts = playCounts(shard, g.members);
     const share = p => counts[p] / g.members.length;
-    const detail = p => `in ${Math.round(share(p) * 100)}% of decks`;
+    const detail = p => played(counts[p], share(p));
 
     const tile = p => ({ card: shard.cards[p], type: typeOf(shard.cards[p]), detail: detail(p), bar: share(p), ...cedh(shard.cards[p]) });
 
@@ -1025,10 +1082,10 @@ async function showCommander(key) {
       : `${recent.length.toLocaleString()} of ${whose} ${g.members.length.toLocaleString()} decks were made in the last ${w.days} days.`;
     const pick = (p, detail, bar) => ({ card: shard.cards[p], type: typeOf(shard.cards[p]), detail, bar, ...cedh(shard.cards[p]) });
     showRising(recent.length ? risingCards(shard, g.members, recent)
-      .map(x => pick(x.p, `${percent(x.was)} → ${percent(x.share)} of decks`, x.share)) : []);
+      .map(x => pick(x.p, `${percent(x.was)} → ${played(x.decks, x.share)}`, x.share)) : []);
     showNewCards([...counts.keys()].filter(p => counts[p] && isNew(released, shard.cards[p]))
       .sort((a, b) => counts[b] - counts[a] || a - b)
-      .map(p => pick(p, `in ${percent(counts[p] / g.members.length)} of decks`, counts[p] / g.members.length)));
+      .map(p => pick(p, played(counts[p], counts[p] / g.members.length), counts[p] / g.members.length)));
   }
 
   // Tournament results; picking bracket 5 also notes each card's on its tile
@@ -1071,7 +1128,7 @@ function resultTile(x, decks) {
   return {
     card: x.card, type: typeOf(x.card), bar: null, detail: points(x.lift), tone: x.lift > 0 ? "up" : "down",
     faint: Math.abs(x.evidence) < SIGNAL,
-    note: `${percent(x.winRate)} vs ${percent(x.winRateWithout)} won · ${percent(x.share)} play it`,
+    note: `${percent(x.winRate)} vs ${percent(x.winRateWithout)} won · ${played(x.decks, x.share)}`,
     story: `Decks with it won ${percent1(x.winRate)} of ${x.games.toLocaleString()} games; decks without it, ${percent1(x.winRateWithout)}.`
       + (x.conversion === null || x.conversionWithout === null ? ""
         : ` ${percent1(x.conversion)} of decks with it made the top cut, ${percent1(x.conversionWithout)} without.`)
@@ -1079,9 +1136,17 @@ function resultTile(x, decks) {
       + (Math.abs(x.evidence) < SIGNAL ? " Too few decks to be sure yet." : ""),
   };
 }
+// Match points a game: 5 for a win, 1 for a draw. With draws, the average deck scores a little
+// over 1.2, not 1.25. Two shown this close are about the same
+const perGame = (games, wins, draws) => (games ? (5 * wins + draws) / games : 0);
+const SAME_POINTS = 0.05;
+const vsPoints = (x, field) => (Math.abs(x - field) < SAME_POINTS ? "About the same as"
+  : `${x > field ? "▲" : "▼"} ${Math.abs(x - field).toFixed(2)} vs`) + ` ${field.toFixed(2)} for all decks`;
+const pointsTone = (x, field) => (Math.abs(x - field) < SAME_POINTS ? "" : x > field ? "up" : "down");
+// value: text, or a node such as a link
 function statTile(label, value, note, tone) {
   return el("div", { className: "stat" }, el("span", { className: "label", textContent: label }),
-    el("span", { className: "stat-value", textContent: value }),
+    el("span", { className: "stat-value" }, value),
     el("span", { className: `stat-note ${tone ?? ""}`, textContent: note }));
 }
 
@@ -1144,6 +1209,11 @@ function showResults(key, results, names, released, onPeriod) {
       + `In the last ${period()}. As for single cards, both sides are pulled toward ${lead}'s win rate, so a few decks need a big difference to show one; `
       + "and a card can stand for a style of build rather than win on its own.";
   }
+  // The example to test: a niche card, one that some but not most of its decks play (over two years)
+  const last = results.windows.length - 1;
+  const niche = results.cards.filter((_, i) => Math.abs(results.stats[i][5 * last] / results.totals[last][0] - 0.15) <= 0.1);
+  const example = pick(niche.length ? niche : results.cards);
+  $("package-input").placeholder = example === undefined ? "Add a card" : `Add a card, e.g. ${names[example]}`;
   $("package-input").onfocus = () => getLists();
   $("package-input").onchange = async () => {
     const typed = $("package-input").value.trim();
@@ -1166,20 +1236,43 @@ function showResults(key, results, names, released, onPeriod) {
     }, `Last ${periodName(days)}`, el("small", { textContent: results.totals[i][0].toLocaleString() }))));
 
     // The headline: how its decks do against every deck in these tournaments
-    const [decks, games, wins, cutDecks, cuts] = results.totals[w];
-    const [, fieldGames, fieldWins, fieldCutDecks, fieldCuts] = results.field[w];
+    const [decks, games, wins, cutDecks, cuts, draws = 0] = results.totals[w];
+    const [, fieldGames, fieldWins, fieldCutDecks, fieldCuts, fieldDraws = 0] = results.field[w];
     const rate = wins / games, fieldRate = fieldWins / fieldGames;
+    const ppg = perGame(games, wins, draws), fieldPpg = perGame(fieldGames, fieldWins, fieldDraws);
     const vs = (x, field) => (Math.abs(x - field) < SAME ? "About the same as" : points(x - field) + " vs")
       + ` ${percent1(field)} for all decks`;
     const tone = d => (Math.abs(d) < SAME ? "" : d > 0 ? "up" : "down");
-    $("results-lede").textContent = `How ${lead} decks did in cEDH tournaments of 16 players or more. `
+    $("results-lede").textContent = `How ${lead} decks did in cEDH tournaments of 16 players or more. Points are 5 for a win and 1 for a draw. `
       + "Each card's decks are measured against the commander's other decks, so the commander's own strength doesn't count.";
     $("results-stats").replaceChildren(
       statTile("Tournament decks", decks.toLocaleString(), `in the last ${period()}, ${games.toLocaleString()} games`),
+      statTile("Points per game", ppg.toFixed(2), vsPoints(ppg, fieldPpg), pointsTone(ppg, fieldPpg)),
       statTile("Games won", percent1(rate), vs(rate, fieldRate), tone(rate - fieldRate)),
       cutDecks && fieldCutDecks
         ? statTile("Made the top cut", percent1(cuts / cutDecks), vs(cuts / cutDecks, fieldCuts / fieldCutDecks), tone(cuts / cutDecks - fieldCuts / fieldCutDecks))
         : statTile("Made the top cut", "–", "No events with a top cut"));
+
+    // Pilots: who played its decks, and how it does without the ones who won the most
+    const pilots = (results.pilots ?? []).map(([id, name, ...flat]) => {
+      const [decks, games, wins] = flat.slice(6 * w, 6 * w + 3);
+      return { id, name, decks, games, wins };
+    }).filter(p => p.decks).sort((a, b) => b.decks - a.decks || b.wins - a.wins);
+    $("pilots-section").hidden = !pilots.length;
+    const best = [...pilots].sort((a, b) => b.wins - a.wins).slice(0, TOP_PILOTS);
+    const bestGames = best.reduce((k, p) => k + p.games, 0), bestWins = best.reduce((k, p) => k + p.wins, 0);
+    $("pilots-lede").textContent = `${pilots.length.toLocaleString()} ${pilots.length === 1 ? "pilot" : "pilots"} in the last ${period()}, most decks first.`
+      + (pilots.length > TOP_PILOTS && games > bestGames
+        ? ` Its ${TOP_PILOTS} pilots with the most wins (${best.map(p => p.name).join(" and ")}) won ${bestWins.toLocaleString()} of its ${wins.toLocaleString()} games won.`
+          + ` Without them, its decks won ${percent1((wins - bestWins) / (games - bestGames))} of their games, against ${percent1(rate)} with them`
+          + ` and ${percent1(fieldRate)} for all decks.`
+        : "");
+    const pilotChip = p => el("a", {
+      className: "term", href: pilotLink(p.id), title: `${p.decks} ${p.decks === 1 ? "deck" : "decks"}, won ${p.wins} of ${p.games} games`,
+    }, p.name || "Unknown", el("small", { textContent: `${p.decks} · ${p.games ? percent(p.wins / p.games) : "–"} won` }));
+    const showAll = el("button", { type: "button", className: "term", textContent: `All ${pilots.length.toLocaleString()} →`,
+      onclick: () => $("pilots").replaceChildren(...pilots.map(pilotChip)) });
+    $("pilots").replaceChildren(...pilots.slice(0, SHOWN_PILOTS).map(pilotChip), pilots.length > SHOWN_PILOTS ? showAll : "");
 
     // Cards: how much more (or less) often the decks playing each one win
     const cards = cardResults(results, w);
@@ -1212,14 +1305,9 @@ function showResults(key, results, names, released, onPeriod) {
     let shown = 0;
     $("finishes").replaceChildren();
     $("more-finishes").onclick = () => {
-      $("finishes").append(...finishes.slice(shown, shown + PAGE_FINISHES).map(([date, event, size, standing, won, lost, drew, link]) =>
-        el("li", { className: "finish" },
-          el("span", { className: "place", textContent: ordinal(standing) }),
-          el("span", { className: "deck-name", textContent: event }),
-          listLink(link) ?? "",
-          el("span", { className: "deck-meta", textContent: [`of ${size} players`,
-            new Date(date).toLocaleDateString(undefined, { dateStyle: "medium", timeZone: "UTC" }),
-            `${won}–${lost}–${drew}`].join(" · ") }))));
+      $("finishes").append(...finishes.slice(shown, shown + PAGE_FINISHES).map(([date, event, size, standing, won, lost, drew, link, pilot, pilotName, deck = -1]) =>
+        finishItem(standing, event, link, pilot ? [el("a", { href: pilotLink(pilot), textContent: pilotName || "Unknown pilot" })] : [],
+          [`of ${size} players`, dateName(date), `${won}–${lost}–${drew}`], key, deck, pilot)));
       shown += PAGE_FINISHES;
       $("more-finishes").hidden = shown >= finishes.length;
     };
@@ -1229,6 +1317,24 @@ function showResults(key, results, names, released, onPeriod) {
   showPackage();
 }
 const TOP_FINISH = 4; // TOP_FINISH in build_decks.py
+const TOP_PILOTS = 2; // the pilots a commander's results are shown without
+const SHOWN_PILOTS = 24;
+const pilotLink = id => `?tournaments&pilot=${id}`;
+const dateName = date => new Date(date).toLocaleDateString(undefined, { dateStyle: "medium", timeZone: "UTC" });
+// A tournament deck in a list: its place, event and decklist, and a line of what else is known
+// (`lead`: nodes before it, such as links). key and deck: the deck in results/lists/<key>.json, for a
+// link that compares your deck with it in Deck recommendations (-1: not there); pilot: who played it
+const compareLink = (key, deck, pilot) => el("a", {
+  className: "open", href: "?" + new URLSearchParams({ deck: "", from: `${key}.${deck}`, ...(pilot && { pilot }) }), textContent: "Compare",
+  title: "Compare your deck with this list: what each plays that the other doesn't, ranked by how tournament decks with those cards won",
+});
+function finishItem(standing, event, link, lead, facts, key = "", deck = -1, pilot = 0) {
+  return el("li", { className: "finish" },
+    el("span", { className: "place", textContent: ordinal(standing) }),
+    el("span", { className: "deck-name", textContent: event }),
+    el("span", { className: "finish-links" }, listLink(link) ?? "", key && deck >= 0 ? compareLink(key, deck, pilot) : ""),
+    el("span", { className: "deck-meta" }, ...lead.flatMap(node => [node, " · "]), facts.join(" · ")));
+}
 
 // === Tournaments: every commander's results, and the cards that win across commanders ===
 const PAGE_ROWS = 25;
@@ -1241,7 +1347,35 @@ const showTourMore = typedGallery($("tour-more-types"), $("tour-more"), $("more-
 const showTourNew = typedGallery($("tour-new-types"), $("tour-new"), $("more-tour-new"));
 const showTourLess = typedGallery($("tour-less-types"), $("tour-less"), $("more-tour-less"));
 const artCrop = id => `https://cards.scryfall.io/art_crop/front/${id[0]}/${id[1]}/${id}.jpg`;
-const SORTS_BY = { decks: r => r.decks, wins: r => r.rate, cut: r => r.cut ?? -1 };
+const SORTS_BY = { decks: r => r.decks, ppg: r => r.ppg, wins: r => r.rate, cut: r => r.cut ?? -1 };
+const PILOT_SORTS = { points: r => r.points, ...SORTS_BY };
+const FOUND_PILOTS = 12; // in a search's results
+// Rows of a leaderboard from totals one window after another: those of window w
+function totalsRow(flat, w) {
+  const [decks, games, wins, cutDecks, cuts, draws] = flat.slice(6 * w, 6 * w + 6);
+  return { decks, games, rate: games ? wins / games : 0, points: 5 * wins + draws, ppg: perGame(games, wins, draws),
+    cut: cutDecks ? cuts / cutDecks : null };
+}
+// A leaderboard's numbers: decks (and their share of all fieldDecks, if given), then each of `columns`, compared with
+// every deck's (field) where it has one
+function rankCells(r, fieldDecks, field, columns) {
+  const vs = (x, f) => (f === null || Math.abs(x - f) < SAME ? "" : points(x - f));
+  const cells = {
+    points: () => el("td", { className: "num" }, r.points.toLocaleString()),
+    ppg: () => el("td", { className: "num" }, r.ppg.toFixed(2), el("small", {
+      className: pointsTone(r.ppg, field.ppg), textContent: Math.abs(r.ppg - field.ppg) < SAME_POINTS ? ""
+        : `${r.ppg > field.ppg ? "▲" : "▼"} ${Math.abs(r.ppg - field.ppg).toFixed(2)}` })),
+    wins: () => el("td", { className: "num" }, percent1(r.rate), el("small", { className: r.rate > field.rate ? "up" : "down", textContent: vs(r.rate, field.rate) })),
+    cut: () => el("td", { className: "num" }, r.cut === null ? "–" : percent1(r.cut),
+      el("small", { className: r.cut > field.cut ? "up" : "down", textContent: r.cut === null ? "" : vs(r.cut, field.cut) })),
+  };
+  return [el("td", { className: "num" }, r.decks.toLocaleString(),
+    fieldDecks ? el("small", { className: "share", textContent: percent1(r.decks / fieldDecks) + " of decks" }) : ""),
+    ...columns.map(c => cells[c]())];
+}
+// Points a sort is by, in words
+const SORT_NAMES = { decks: "tournament decks", points: "match points", ppg: "match points per game", wins: "share of games won",
+  cut: "share of decks making the top cut" };
 
 async function showTournaments() {
   const [all, { names, files }, released] = await Promise.all([getResultsIndex(), loadDeckData(), getReleased()]);
@@ -1272,17 +1406,16 @@ async function showTournaments() {
     $("tour-windows").replaceChildren(...all.windows.map((d, i) => el("button", {
       type: "button", ariaPressed: String(i === w), onclick: () => { w = i; show(); },
     }, `Last ${periodName(d)}`, el("small", { textContent: all.field[i][0].toLocaleString() }))));
-    const [fieldDecks, fieldGames, fieldWins, fieldCutDecks, fieldCuts] = all.field[w];
-    const fieldRate = fieldWins / fieldGames, fieldCut = fieldCutDecks ? fieldCuts / fieldCutDecks : null;
-    const rows = commanders.map(c => {
-      const [decks, games, wins, cutDecks, cuts] = c.flat.slice(5 * w, 5 * w + 5);
-      return { ...c, decks, games, rate: games ? wins / games : 0, cut: cutDecks ? cuts / cutDecks : null };
-    }).filter(r => r.decks);
+    const fieldDecks = all.field[w][0];
+    const field = totalsRow(all.field[w], 0);
+    const rows = commanders.map(c => ({ ...c, ...totalsRow(c.flat, w) })).filter(r => r.decks);
     $("tour-stats").replaceChildren(
       statTile("Tournament decks", fieldDecks.toLocaleString(), `with decklists, in the last ${periodName(days)}`),
       statTile("Commanders", rows.length.toLocaleString(), `${rows.filter(r => r.decks >= DEFAULT_MIN_DECKS).length.toLocaleString()} with ${DEFAULT_MIN_DECKS} decks or more`),
-      statTile("Games won", percent1(fieldRate), "by the average deck: with draws, about a fifth, not a quarter"));
-    showLeaderboard(rows, fieldRate, fieldCut);
+      statTile("Games won", percent1(field.rate), "by the average deck: with draws, about a fifth, not a quarter"),
+      statTile("Points per game", field.ppg.toFixed(2), "by the average deck: 5 for a win, 1 for a draw"));
+    showLeaderboard(rows, field);
+    drawRanking();
 
     // Cards, across commanders: each compared only within the commanders that play it
     const cards = all.cards.flatMap((card, i) => {
@@ -1292,7 +1425,7 @@ async function showTournaments() {
     const tile = x => ({
       card: x.card, type: typeOf(x.card), bar: null, detail: points(x.lift), tone: x.lift > 0 ? "up" : "down",
       faint: Math.abs(x.evidence) < SIGNAL,
-      note: `${percent(x.decks / fieldDecks)} of decks · ${x.n} ${x.n === 1 ? "commander" : "commanders"}`,
+      note: `${played(x.decks, x.decks / fieldDecks)} · ${x.n} ${x.n === 1 ? "commander" : "commanders"}`,
     });
     const more = cards.filter(x => x.lift > 0 && x.evidence >= SIGNAL).sort((a, b) => b.lift - a.lift);
     const less = cards.filter(x => x.lift < 0 && x.evidence <= -SIGNAL).sort((a, b) => a.lift - b.lift);
@@ -1313,14 +1446,14 @@ async function showTournaments() {
 
   // The commanders, sorted and filtered, PAGE_ROWS at a time
   let shownRows = PAGE_ROWS;
-  let current = { rows: [], fieldRate: 0, fieldCut: null };
-  function showLeaderboard(rows, fieldRate, fieldCut) {
-    current = { rows, fieldRate, fieldCut };
+  let current = { rows: [], field: null };
+  function showLeaderboard(rows, field) {
+    current = { rows, field };
     shownRows = PAGE_ROWS;
     drawRows();
   }
   async function drawRows() {
-    const { rows, fieldRate, fieldCut } = current;
+    const { rows, field } = current;
     const min = Number($("tour-min").value) || 1;
     const q = $("tour-filter").value.trim().toLowerCase();
     // The filters, which also put the period, sort and min decks in the URL
@@ -1333,19 +1466,17 @@ async function showTournaments() {
     })), { ...f, window: 0, min: 0, maxPrice: null, brackets: [] }).map(c => c.key));
     const list = rows.filter(r => r.decks >= min && r.name.toLowerCase().includes(q) && (!kept || kept.has(r.key)))
       .sort((a, b) => SORTS_BY[by](b) - SORTS_BY[by](a) || b.decks - a.decks);
-    for (const th of document.querySelectorAll(".leaderboard th")) {
+    for (const th of document.querySelectorAll("#tour-table th")) {
       const sort = th.querySelector("button")?.dataset.sort;
       if (sort === by) th.setAttribute("aria-sort", "descending");
       else th.removeAttribute("aria-sort");
     }
     $("tour-commanders-lede").textContent = `${list.length.toLocaleString()} commanders with ${min} decks or more`
       + (f.active ? " that match the filters" : "")
-      + `, by ${{ decks: "tournament decks", wins: "share of games won", cut: "share of decks making the top cut" }[by]}. `
-      + "Games won and top cut are compared with every deck's.";
+      + `, by ${SORT_NAMES[by]}. Points are 5 for a win and 1 for a draw. Points per game, games won and top cut are compared with every deck's.`;
     const page = list.slice(0, shownRows);
     const infos = await Promise.all(page.map(r => Promise.all(r.key.split("-").map(c => cardInfo(+c)))));
     if (current.rows !== rows) return;
-    const vs = (x, field) => (field === null || Math.abs(x - field) < SAME ? "" : points(x - field));
     $("tour-rows").replaceChildren(...page.map((r, i) => {
       const href = files.has(r.key) ? commanderLink(r.key) : "https://edhtop16.com/commander/"
         + encodeURIComponent(r.key.split("-").map(c => names[c]).sort().join(" / "));
@@ -1354,10 +1485,7 @@ async function showTournaments() {
         el("td", {}, el("a", { className: "who", href, ...(files.has(r.key) ? {} : { target: "_blank", rel: "noopener" }) },
           el("span", { className: "thumbs" }, ...infos[i].map(info => el("img", { src: artCrop(info.id), alt: "", loading: "lazy" }))),
           el("span", { textContent: r.name }))),
-        el("td", { className: "num" }, r.decks.toLocaleString(), el("small", { className: "share", textContent: percent1(r.decks / all.field[w][0]) + " of decks" })),
-        el("td", { className: "num" }, percent1(r.rate), el("small", { className: r.rate > fieldRate ? "up" : "down", textContent: vs(r.rate, fieldRate) })),
-        el("td", { className: "num" }, r.cut === null ? "–" : percent1(r.cut),
-          el("small", { className: r.cut > fieldCut ? "up" : "down", textContent: r.cut === null ? "" : vs(r.cut, fieldCut) })));
+        ...rankCells(r, all.field[w][0], field, ["ppg", "wins", "cut"]));
     }));
     $("more-tour").hidden = shownRows >= list.length;
   }
@@ -1365,16 +1493,298 @@ async function showTournaments() {
   $("tour-filter").oninput = () => { shownRows = PAGE_ROWS; drawRows(); };
   $("tour-min").oninput = $("tour-filter").oninput;
   tform.addEventListener("input", () => { shownRows = PAGE_ROWS; drawRows(); });
-  for (const button of document.querySelectorAll(".leaderboard th button")) {
+  for (const button of document.querySelectorAll("#tour-table th button")) {
     button.onclick = () => { by = button.dataset.sort; shownRows = PAGE_ROWS; show(); };
   }
+
+  // Pilot rankings (decks/results/ranking.json): the pilots with a few decks or more, for the period
+  // shown, PAGE_ROWS at a time
+  const ranking = getJson("decks/results/ranking.json").catch(() => null);
+  let rankBy = "points", shownRanked = PAGE_ROWS;
+  async function drawRanking() {
+    const data = await ranking;
+    $("ranking").hidden = !data;
+    if (!data) return;
+    const v = data.windows.indexOf(all.windows[w]);
+    const min = Number($("ranking-min").value) || 1;
+    const field = totalsRow(all.field[w], 0);
+    const list = data.pilots.map(([id, name, ...flat]) => ({ id, name, ...totalsRow(flat, v) }))
+      .filter(r => r.decks >= min).sort((a, b) => PILOT_SORTS[rankBy](b) - PILOT_SORTS[rankBy](a) || b.decks - a.decks);
+    for (const th of document.querySelectorAll("#ranking-table th")) {
+      if (th.querySelector("button")?.dataset.sort === rankBy) th.setAttribute("aria-sort", "descending");
+      else th.removeAttribute("aria-sort");
+    }
+    $("ranking-lede").textContent = `${list.length.toLocaleString()} pilots with ${min} decks or more in the last ${periodName(all.windows[w])}, `
+      + `by ${SORT_NAMES[rankBy]}.`;
+    $("ranking-rows").replaceChildren(...list.slice(0, shownRanked).map((r, i) => el("tr", {},
+      el("td", { className: "rank", textContent: i + 1 }),
+      el("td", {}, el("a", { className: "who", href: pilotLink(r.id), textContent: r.name || "Unknown pilot" })),
+      ...rankCells(r, null, field, ["points", "ppg", "wins", "cut"]))));
+    $("more-ranking").hidden = shownRanked >= list.length;
+  }
+  $("more-ranking").onclick = () => { shownRanked += PAGE_ROWS; drawRanking(); };
+  $("ranking-min").oninput = () => { shownRanked = PAGE_ROWS; drawRanking(); };
+  for (const button of document.querySelectorAll("#ranking-table th button")) {
+    button.onclick = () => { rankBy = button.dataset.sort; shownRanked = PAGE_ROWS; drawRanking(); };
+  }
+
+  // Highlights: the last month's standout commanders (see highlights() in build_decks.py)
+  const h = all.highlights;
+  const leadOf = key => (files.has(key) ? el("a", { href: commanderLink(key), textContent: commanderNames(key, names) }) : commanderNames(key, names));
+  const whoPlayed = ([, decks, , pilots]) => `${decks} decks by ${pilots} ${pilots === 1 ? "pilot" : "pilots"}`;
+  const tiles = h ? [
+    h.best && statTile("Best results", leadOf(h.best[0]), `${h.best[2].toFixed(2)} points a game (all decks: ${h.field.toFixed(2)}), ${whoPlayed(h.best)}`),
+    h.breakout && statTile("Breakout", leadOf(h.breakout[0]),
+      `${whoPlayed(h.breakout)}: ${percent1(h.breakout[1] / h.decks)} of all decks, `
+        + (h.breakout[4] ? `up from ${percent1(h.breakout[4])} the ${h.before} days before` : `with none the ${h.before} days before`)),
+    h.rising && statTile("Rising", leadOf(h.rising[0]), `${h.rising[4].toFixed(2)} → ${h.rising[2].toFixed(2)} points a game, ${whoPlayed(h.rising)}`),
+  ].filter(Boolean) : [];
+  $("highlights-section").hidden = !tiles.length;
+  $("highlights-heading").textContent = h ? `The last ${h.days} days` : "";
+  $("highlights").replaceChildren(...tiles);
   show();
   whenFiltering(trends, () => {
     themesOf = new Map(trends.commanders.map(c => [c.key, c.themes]));
     drawRows();
   });
+
+  // Search: pilots by name, with what they play (decks/results/pilots.json, fetched once the search is used)
+  let pilotIndex, found = [];
+  const getPilots = () => (pilotIndex ??= getJson("decks/results/pilots.json").then(list => list.map(([id, name, decks, ...flat]) => {
+    const played = [];
+    for (let i = 0; i < flat.length; i += 2) played.push([flat[i], flat[i + 1]]);
+    return { id, name, decks, played, lower: name.toLowerCase() };
+  })).catch(err => { pilotIndex = null; throw err; }));
+  const decksOf = n => `${n.toLocaleString()} ${n === 1 ? "deck" : "decks"}`;
+  const leadLink = key => (files.has(key) ? el("a", { href: commanderLink(key), textContent: commanderNames(key, names) }) : commanderNames(key, names));
+  async function searchPilots() {
+    const typed = $("pilot-input").value.trim(), q = typed.toLowerCase();
+    $("pilot-note").textContent = "";
+    $("pilot-results").hidden = q.length < 2;
+    found = [];
+    if (q.length < 2) return;
+    let pilots;
+    try { pilots = await getPilots(); } catch { $("pilot-note").textContent = "Couldn't load the pilots. Please try again."; return; }
+    if ($("pilot-input").value.trim().toLowerCase() !== q) return; // typed on meanwhile
+    found = pilots.filter(p => p.lower.includes(q));
+    $("pilot-results").hidden = !found.length;
+    if (!found.length) {
+      $("pilot-note").textContent = `No pilot in these tournaments is named like “${typed}”.`;
+      return;
+    }
+    $("pilot-results").replaceChildren(el("h3", { className: "sub-heading" }, `Pilots: ${found.length.toLocaleString()}`),
+      el("ul", { className: "found-list" }, ...found.slice(0, FOUND_PILOTS).map(p => el("li", {},
+        el("a", { href: pilotLink(p.id), textContent: p.name || "Unknown pilot" }), " ",
+        el("small", {}, decksOf(p.decks), p.played.length ? ": " : "", ...p.played.slice(0, 3).flatMap(([key, n], i) =>
+          [i ? ", " : "", leadLink(key), ` ${n}`]), p.played.length > 3 ? `, and ${p.played.length - 3} more` : "")))),
+      found.length > FOUND_PILOTS ? el("p", { className: "muted", textContent: `And ${(found.length - FOUND_PILOTS).toLocaleString()} more: type more of the name.` }) : "");
+  }
+  $("pilot-input").onfocus = () => getPilots().catch(() => {});
+  $("pilot-input").oninput = searchPilots;
+  // Enter: the pilot of exactly that name (the one with most decks), or the only one found
+  $("pilot-input").onkeydown = e => {
+    if (e.key !== "Enter") return;
+    const q = $("pilot-input").value.trim().toLowerCase();
+    const pick = found.find(p => p.lower === q) ?? (found.length === 1 ? found[0] : null);
+    if (pick) location.search = pilotLink(pick.id);
+  };
   tournamentsMessage("");
   $("tournaments-page").hidden = false;
+}
+
+// === A pilot's page: every tournament deck they played (decks/results/pilots/<block>.json) ===
+const PILOT_BLOCK = 64; // PILOT_BLOCK in build_decks.py
+const showPilotCards = typedGallery($("pilot-cards-types"), $("pilot-cards"), $("more-pilot-cards"));
+async function showPilot(id) {
+  const [all, { names, files }, block, ranked] = await Promise.all([getResultsIndex(), loadDeckData(),
+    Number.isInteger(id) && id > 0 ? getJson(`decks/results/pilots/${Math.floor(id / PILOT_BLOCK)}.json`).catch(() => ({})) : {},
+    getJson("decks/results/ranking.json").catch(() => null)]);
+  if (!block[id]) return tournamentsMessage("There's no such pilot in these tournament results.");
+  const [name, rows, liked = [], profile = ""] = block[id];
+  $("pilot-profile").hidden = !profile;
+  $("pilot-profile").href = `https://topdeck.gg/profile/${encodeURIComponent(profile)}`;
+  document.title = `${name || "Unknown pilot"} · MTG Vec2Search`;
+  $("pilot-name").textContent = name || "Unknown pilot";
+
+  // Their record, against every deck's over the same two years
+  let games = 0, wins = 0, draws = 0, cutEvents = 0, cuts = 0;
+  for (const [, , , cut, standing, won, lost, drew] of rows) {
+    games += won + lost + drew;
+    wins += won;
+    draws += drew;
+    cutEvents += cut > 0;
+    cuts += cut > 0 && standing <= cut;
+  }
+  const [, fieldGames, fieldWins, fieldCutDecks, fieldCuts, fieldDraws = 0] = all?.field.at(-1) ?? [];
+  const ppg = perGame(games, wins, draws), fieldPpg = perGame(fieldGames, fieldWins, fieldDraws);
+  const vs = (x, field) => (!field ? "" : (Math.abs(x - field) < SAME ? "About the same as" : points(x - field) + " vs")
+    + ` ${percent1(field)} for all decks`);
+  const tone = (x, field) => (!field || Math.abs(x - field) < SAME ? "" : x > field ? "up" : "down");
+  const rate = games ? wins / games : 0, fieldRate = fieldGames && fieldWins / fieldGames;
+  const cutRate = cutEvents ? cuts / cutEvents : 0, fieldCut = fieldCutDecks && fieldCuts / fieldCutDecks;
+  $("pilot-stats").replaceChildren(
+    statTile("Tournament decks", rows.length.toLocaleString(), `in the last ${periodName(all?.windows.at(-1) ?? 730)}, ${games.toLocaleString()} games`),
+    statTile("Points per game", games ? ppg.toFixed(2) : "–", fieldGames ? vsPoints(ppg, fieldPpg) : "", fieldGames ? pointsTone(ppg, fieldPpg) : ""),
+    statTile("Games won", games ? percent1(rate) : "–", vs(rate, fieldRate), tone(rate, fieldRate)),
+    cutEvents ? statTile("Made the top cut", `${cuts} of ${cutEvents}`, vs(cutRate, fieldCut), tone(cutRate, fieldCut))
+      : statTile("Made the top cut", "–", "No events with a top cut"));
+
+  // Commanders: what they played, most decks first, each with how they did on it
+  const leadName = (key, lead) => (key ? commanderNames(key, names) : lead) || "Unknown commander";
+  const leadLink = (key, lead) => (files.has(key) ? el("a", { href: commanderLink(key), textContent: leadName(key, lead) }) : leadName(key, lead));
+  const byCommander = new Map();
+  for (const [, , , , , won, lost, drew, key, lead] of rows) {
+    const c = byCommander.get(key || lead) ?? { key, lead, decks: 0, games: 0, wins: 0 };
+    byCommander.set(key || lead, { ...c, decks: c.decks + 1, games: c.games + won + lost + drew, wins: c.wins + won });
+  }
+  const theirs = [...byCommander.values()].sort((a, b) => b.decks - a.decks || b.wins - a.wins);
+  $("pilot-commanders").replaceChildren(el("span", { className: "label", textContent: "Plays" }), ...theirs.map(c =>
+    el(files.has(c.key) ? "a" : "span", { className: "term", ...(files.has(c.key) ? { href: commanderLink(c.key) } : {}),
+      title: `${c.decks} ${c.decks === 1 ? "deck" : "decks"}, won ${c.wins} of ${c.games} games` },
+    leadName(c.key, c.lead), el("small", { textContent: `${c.decks} · ${c.games ? percent(c.wins / c.games) : "–"} won` }))));
+
+  // The header: their main commander's art, how long and how much they've played, their rank and best finish
+  const main = theirs.find(c => c.key);
+  if (main) {
+    const leaders = main.key.split("-").map(Number);
+    const infos = await Promise.all(leaders.map(cardInfo));
+    const art = infos.map(({ name: card, id: image }, i) =>
+      el("button", { type: "button", className: "card", onclick: () => openCard(image, leaders[i]) }, el("img", { src: imageUrl(image), alt: card })));
+    $("pilot-art").replaceChildren(art.length > 1 ? overlap(art) : withFlip(art[0], art[0].querySelector("img"), infos[0]));
+  }
+  const since = new Date(rows.at(-1)[0]).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+  let rank = "";
+  if (ranked) {
+    const last = ranked.windows.length - 1;
+    const order = ranked.pilots.map(([pilot, , ...flat]) => [pilot, totalsRow(flat, last).points]).sort((a, b) => b[1] - a[1]);
+    const i = order.findIndex(([pilot]) => pilot === id);
+    if (i >= 0) rank = ` · #${(i + 1).toLocaleString()} of ${order.length.toLocaleString()} ranked pilots by match points`;
+  }
+  $("pilot-meta").textContent = `${rows.length.toLocaleString()} tournament ${rows.length === 1 ? "deck" : "decks"} since ${since}${rank}`;
+  const best = [...rows].sort((a, b) => a[4] / a[2] - b[4] / b[2] || b[2] - a[2])[0]; // the highest place for the field's size
+  $("pilot-best").hidden = !best;
+  $("pilot-best").replaceChildren(el("span", { className: "label", textContent: "Best finish" }),
+    `${ordinal(best[4])} of ${best[2]} at ${best[1]}, ${dateName(best[0])}, with `, leadLink(best[8], best[9]));
+
+  // Favorite cards: what they play more than other pilots of the same commanders (pilot_cards in build_decks.py)
+  const known = rows.filter(r => r[8]);
+  const knownGames = known.reduce((k, r) => k + r[5] + r[6] + r[7], 0), knownWins = known.reduce((k, r) => k + r[5], 0);
+  $("pilot-cards-lede").textContent = liked.length
+    ? `Cards they play in more of their ${known.length} decks than other pilots of the same commanders do, the most more first. `
+      + "Others: how many of those commanders' tournament decks play it. Won: their share of games won in their decks with it, and without."
+    : "Favorite cards need 2 or more of their decks to play a card more than other pilots' decks do.";
+  await showPilotCards(liked.map(([card, decks, g, k, expected]) => ({
+    card, type: typeOf(card), detail: `in ${decks} of ${known.length} decks`, bar: decks / known.length,
+    note: `Others: ${percent(Math.min(1, expected / known.length))} · won ${g ? percent(k / g) : "–"} with it`
+      + (knownGames > g ? `, ${percent((knownWins - k) / (knownGames - g))} without` : ""),
+  })));
+
+  showListsOverTime(id, rows, theirs, names, leadName);
+
+  // Their tournaments, newest first
+  let shown = 0;
+  $("pilot-events").replaceChildren();
+  $("more-pilot-events").onclick = () => {
+    $("pilot-events").append(...rows.slice(shown, shown + PAGE_FINISHES).map(([date, event, size, , standing, won, lost, drew, key, lead, link, deck = -1]) =>
+      finishItem(standing, event, link, [leadLink(key, lead)], [`of ${size} players`, dateName(date), `${won}–${lost}–${drew}`], key, deck, id)));
+    shown += PAGE_FINISHES;
+    $("more-pilot-events").hidden = shown >= rows.length;
+  };
+  $("more-pilot-events").onclick();
+  tournamentsMessage("");
+  $("pilot-page").hidden = false;
+}
+
+// A pilot's lists over time, for each commander they played 2 or more kept decks of: the cards in
+// some of those lists but not all, with their games won with each and without; their earlier events
+// against their later; and event by event, what changed from the list before (results/lists/<key>.json)
+const PAGE_VERSIONS = 10;
+const CHANGED_SHOWN = 40;
+function showListsOverTime(pilot, rows, theirs, names, leadName) {
+  const kept = key => rows.filter(r => r[8] === key && r[11] >= 0).reverse(); // oldest first
+  const listed = theirs.filter(c => c.key && kept(c.key).length >= 2);
+  $("pilot-lists-panel").hidden = !listed.length;
+  if (!listed.length) return;
+  let chosen = listed[0].key;
+  // [games, wins] of some of these decks
+  const record = decks => decks.reduce(([g, k], { row }) => [g + row[5] + row[6] + row[7], k + row[5]], [0, 0]);
+  const rateOf = ([g, k]) => (g ? percent(k / g) : "–");
+  async function draw() {
+    const key = chosen;
+    $("pilot-lists-commanders").replaceChildren(...listed.map(c => el("button", {
+      type: "button", ariaPressed: String(c.key === key), onclick: () => { chosen = c.key; draw(); },
+    }, leadName(c.key), el("small", { textContent: kept(c.key).length }))));
+    const lists = await getJson(`decks/results/lists/${key}.json`);
+    if (key !== chosen) return; // another commander was picked meanwhile
+    const decks = kept(key).map(row => {
+      let p = 0;
+      return { row, cards: new Set(lists.decks[row[11]].slice(4).map(gap => lists.cards[p += gap])) };
+    });
+    const n = decks.length;
+    const half = Math.floor(n / 2);
+    $("pilot-lists-lede").textContent = `Their ${n} ${leadName(key)} lists from tournaments, from ${dateName(decks[0].row[0])} to ${dateName(decks.at(-1).row[0])}. `
+      + (n >= 4 ? `They won ${rateOf(record(decks.slice(0, half)))} of their games in the first ${half} events and ${rateOf(record(decks.slice(half)))} in the last ${n - half}. ` : "")
+      + "A few events are few games, so read the differences loosely.";
+
+    // Cards in some lists but not all, the clearest difference in games won first: a difference
+    // counts for more with more games on both sides (weighted as in pooled() in build_decks.py)
+    const all = record(decks);
+    const changed = [...new Set(decks.flatMap(d => [...d.cards]))].flatMap(card => {
+      const having = decks.filter(d => d.cards.has(card));
+      if (having.length === n) return [];
+      const [g, k] = record(having);
+      const [gw, kw] = [all[0] - g, all[1] - k];
+      return g && gw ? [{ card, decks: having.length, g, k, gw, kw, rate: k / g, without: kw / gw }] : [];
+    }).map(x => ({ ...x, clear: Math.abs(x.rate - x.without) * Math.sqrt(1 / (1 / x.g + 1 / x.gw)) }))
+      .sort((a, b) => b.clear - a.clear || b.decks - a.decks).slice(0, CHANGED_SHOWN);
+    $("pilot-changed-lede").textContent = changed.length
+      ? "In some of these lists but not all: in how many, and their games won with it against without it. The clearest differences first, counting more games for more."
+      : "They played the same cards every time.";
+    $("pilot-changed").replaceChildren(...changed.map(x => {
+      const button = cardButton(x.card, names);
+      button.title = `In ${x.decks} of ${n} lists. Won ${x.k} of ${x.g} games with it, ${x.kw} of ${x.gw} without.`;
+      button.append(el("small", { className: x.rate > x.without ? "up" : x.rate < x.without ? "down" : "",
+        textContent: `${x.decks}/${n} · ${percent(x.rate)} vs ${percent(x.without)}` }));
+      return button;
+    }));
+
+    // Event by event, newest first, each against the list before it
+    const byName = (a, b) => names[a].localeCompare(names[b]);
+    const items = decks.map((d, i) => {
+      const before = decks[i - 1];
+      const added = before ? [...d.cards].filter(c => !before.cards.has(c)).sort(byName) : [];
+      const cut = before ? [...before.cards].filter(c => !d.cards.has(c)).sort(byName) : [];
+      const [date, event, size, , standing, won, lost, drew, , , link, deck] = d.row;
+      const games = won + lost + drew;
+      const change = !before ? "their first list here" : added.length || cut.length ? `+${added.length} −${cut.length} since the last` : "no changes since the last";
+      const details = el("details", {},
+        el("summary", {},
+          el("span", { className: "sim", textContent: games ? percent(won / games) : "–", title: "Games won" }),
+          el("span", { className: "deck-name", textContent: event }),
+          el("span", { className: "finish-links" }, listLink(link) ?? "", compareLink(key, deck, pilot)),
+          el("span", { className: "deck-meta", textContent: [dateName(date), `${ordinal(standing)} of ${size}`, `${won}–${lost}–${drew}`, change].join(" · ") })));
+      details.addEventListener("toggle", () => details.append(el("div", { className: "deck-body" },
+        ...(before ? [
+          el("p", { className: "added", textContent: added.length ? `Added (${added.length}):` : "Nothing added." }),
+          el("div", { className: "term-items" }, ...added.map(c => cardButton(c, names))),
+          el("p", { className: "cut", textContent: cut.length ? `Cut (${cut.length}):` : "Nothing cut." }),
+          el("div", { className: "term-items" }, ...cut.map(c => cardButton(c, names))),
+        ] : [el("p", { textContent: `${d.cards.size} cards besides basic lands:` }), ...typeGroups([...d.cards], names)]))), { once: true });
+      return el("li", {}, details);
+    }).reverse();
+    let shown = 0;
+    $("pilot-versions").replaceChildren();
+    $("more-pilot-versions").onclick = () => {
+      $("pilot-versions").append(...items.slice(shown, shown + PAGE_VERSIONS));
+      shown += PAGE_VERSIONS;
+      $("more-pilot-versions").hidden = shown >= items.length;
+    };
+    $("more-pilot-versions").onclick();
+  }
+  draw().catch(err => {
+    console.error(err);
+    $("pilot-lists-lede").textContent = "Couldn't load their lists. Please try again.";
+  });
 }
 
 // === Trends ===
@@ -1382,6 +1792,8 @@ const DEFAULT_DAYS = 30;
 const NEW_DAYS = 120; // a card first printed this recently is new
 const MAX_TRENDING = 300;
 const percent = x => `${Math.round(x * 100)}%`;
+// "15% play it (13 decks)": the share of decks that play a card, and how many that is
+const played = (decks, share) => `${percent(share)} play it (${decks.toLocaleString()} ${decks === 1 ? "deck" : "decks"})`;
 let releasedPromise; // index/released.json: first release, in days since 1993-01-01
 const getReleased = () => (releasedPromise ??= getJson("index/released.json"));
 const today = Math.floor((Date.now() - Date.UTC(1993, 0, 1)) / 864e5);
@@ -1513,12 +1925,12 @@ async function showTrends() {
     }
     const cards = trendingCards(active ? scope : [trends.everything], w);
     const pick = (x, detail) => ({ card: x.card, type: typeOf(x.card), detail, bar: x.share });
-    showTrendRising(cards.rising.slice(0, MAX_TRENDING).map(x => pick(x, `${percent(x.was)} → ${percent(x.share)} of decks`)));
+    showTrendRising(cards.rising.slice(0, MAX_TRENDING).map(x => pick(x, `${percent(x.was)} → ${played(x.decks, x.share)}`)));
     $("trend-played-lede").textContent = days ? `The share of the decks made in the last ${days} days that play each card.`
       : "The share of all these decks that play each card.";
-    showTrendPlayed(cards.popular.slice(0, MAX_TRENDING).map(x => pick(x, `in ${percent(x.share)} of decks`)));
+    showTrendPlayed(cards.popular.slice(0, MAX_TRENDING).map(x => pick(x, played(x.decks, x.share))));
     showTrendNew(cards.popular.filter(x => isNew(released, x.card)).slice(0, MAX_TRENDING)
-      .map(x => pick(x, `in ${percent(x.share)} of decks`)));
+      .map(x => pick(x, played(x.decks, x.share))));
   }
   $("trend-form").addEventListener("input", update);
   await update();
@@ -1554,7 +1966,7 @@ async function showCardPage(card) {
   const strategies = [null, ...[...weight].sort((a, b) => b[1] - a[1]).slice(0, MAX_STRATEGIES).map(([t]) => t)];
   const show = strategy => {
     showCardCommanders(playing.filter(c => strategy === null || c.themes.includes(strategy)).map(c => ({ key: c.key, name: c.name,
-      detail: `in ${percent(c.share)} of ${c.made[0].toLocaleString()} decks` })));
+      detail: `${c.decks.toLocaleString()} of ${c.made[0].toLocaleString()} decks (${percent(c.share)})` })));
   };
   $("card-themes").replaceChildren(...strategies.map(t => el("button", {
     type: "button", ariaPressed: String(t === null),
@@ -1580,7 +1992,7 @@ if (commandersMode) {
 
 if (tournamentsMode) {
   tournamentsMessage("Loading tournament results…");
-  showTournaments().catch(err => {
+  (params.has("pilot") ? showPilot(Number(params.get("pilot"))) : showTournaments()).catch(err => {
     console.error(err);
     tournamentsMessage("Couldn't load the tournament results. Please try again.");
   });
@@ -1605,7 +2017,25 @@ if (deckMode) {
     e.preventDefault();
     run();
   });
-  if (link) run(); // a shared ?deck=<link>
+  if (params.get("from")) { // a tournament list to compare your deck with
+    deckMessage("Loading the tournament list…");
+    tournamentDeck(params.get("from"), Number(params.get("pilot")) || 0).then(deck => {
+      fromDeck = deck;
+      $("compare-target-text").textContent = deck.label;
+      $("compare-target").hidden = false;
+      $("compare-instead").onclick = () => {
+        fromDeck = null;
+        $("compare-target").hidden = true;
+        $("decklist").value = borrowed = deck.text;
+        run();
+      };
+      if ($("decklist").value.trim()) return run();
+      deckMessage("Paste your deck, or a Moxfield or Archidekt link, to compare it with this list.");
+    }).catch(err => {
+      console.error(err);
+      deckMessage("Couldn't load that tournament list. Please try again.");
+    });
+  } else if (link) run(); // a shared ?deck=<link>
 }
 
 // === Start: everything above is set up, so run the search in the URL ===

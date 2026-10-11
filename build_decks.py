@@ -11,6 +11,7 @@ the data behind "Find similar decks" and the commander pages.
     python build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
+import base64
 import bisect
 import gzip
 import json
@@ -210,7 +211,9 @@ def save_corpus(corpus, path=CORPUS):
 #   {id: TopDeck's tournament id, name, date, size: players, top_cut: players in the top cut (0: none),
 #    decklists: how many edhtop16 had when it was fetched (absent in the first ones fetched),
 #    entries: [[commander(s) ("A / B" for partners), standing, wins, losses, draws, decklist link,
-#               [card names]]]}, only the entries edhtop16 has a decklist for
+#               [card names], pilot (edhtop16's player number, 0: unknown), pilot's name, their TopDeck
+#               profile id ("": none)]]}, only the
+#               entries edhtop16 has a decklist for
 RESULTS = "results.jsonl.gz"
 RESULT_DAYS = 730
 MIN_EVENT = 16  # players: smaller events are few games against few decks
@@ -220,7 +223,22 @@ TOURNAMENTS = """query($since: String, $after: String) {
   tournaments(first: 1000, sortBy: DATE, after: $after, filters: {minDate: $since, minSize: %d}) {
     edges { node { TID tournamentDate breakdown { entries } } } pageInfo { hasNextPage endCursor } } }""" % MIN_EVENT
 TOURNAMENT = """query($tid: String!) { tournament(TID: $tid) { name size topCut tournamentDate
-  entries { standing wins losses draws decklist commander { name } maindeck { name } } } }"""
+  entries { standing wins losses draws decklist commander { name } maindeck { name } player { id name topdeckProfile } } } }"""
+PILOTS = """query($tid: String!) { tournament(TID: $tid) { entries { standing player { id name topdeckProfile } } } }"""
+
+
+def piloted(tournament):
+    """Whether its entries say who played them, with their TopDeck profiles (the first ones fetched don't)"""
+    return all(len(e) > 9 for e in tournament["entries"])
+
+
+def pilot(player):
+    """[edhtop16's number for a player, their name, their TopDeck profile ("": none)]: its ids are
+    base64 for "Player:<number>"."""
+    if not player:
+        return [0, "", ""]
+    return [int(base64.b64decode(player["id"]).decode().rpartition(":")[2]), (player["name"] or "").strip(),
+            player.get("topdeckProfile") or ""]
 
 
 def edhtop16(query, **variables):
@@ -234,8 +252,9 @@ def fetch_results(hours=None, path=RESULTS, today=None):
     """Bring results.jsonl.gz up to date with edhtop16: the tournaments of the last RESULT_DAYS days
     with MIN_EVENT players or more and some decklists (by its commander breakdown, which the list
     gives: about 40% have none) that it lacks or that have more or fewer decklists since, newest
-    first, and the last REFETCH_DAYS days' again. FETCHERS at a time; each is saved as it arrives,
-    so it can stop (`hours`, Ctrl+C) and go on later."""
+    first, and the last REFETCH_DAYS days' again; then just the pilots of those fetched without them
+    (a far quicker question for edhtop16). FETCHERS at a time; each is saved as it arrives, so it
+    can stop (`hours`, Ctrl+C) and go on later."""
     today = today or date.today()
     since = (today - timedelta(RESULT_DAYS)).isoformat()
     results = {i: t for i, t in load_corpus(path).items() if t["date"] >= since}
@@ -253,8 +272,12 @@ def fetch_results(hours=None, path=RESULTS, today=None):
         t["TID"] not in results or t["tournamentDate"][:10] >= recent
         or results[t["TID"]].get("decklists", decklists[t["TID"]]) != decklists[t["TID"]])),
         key=lambda t: t["tournamentDate"], reverse=True)
+    whole = {t["TID"] for t in todo}
+    pilots_only = {i for i, t in results.items() if i not in whole and not piloted(t)}
+    todo += sorted((t for t in listed if t["TID"] in pilots_only), key=lambda t: t["tournamentDate"], reverse=True)
     print(f"{len(results):,} tournaments in {path}; edhtop16 has {len(listed):,} since {since} "
-          f"({sum(not n for n in decklists.values()):,} without decklists), fetching {len(todo):,}", flush=True)
+          f"({sum(not n for n in decklists.values()):,} without decklists), fetching {len(whole):,} "
+          f"and the pilots of {len(todo) - len(whole):,}", flush=True)
     deadline = time.time() + hours * 3600 if hours else float("inf")
     start, fetched = time.time(), [0]
     lock, stop = threading.Lock(), threading.Event()  # Ctrl+C: requests out finish, but nothing more is saved
@@ -264,15 +287,20 @@ def fetch_results(hours=None, path=RESULTS, today=None):
             for t in jobs:
                 if time.time() > deadline or stop.is_set():
                     return
-                got = edhtop16(TOURNAMENT, tid=t["TID"])["tournament"]
+                got = edhtop16(PILOTS if t["TID"] in pilots_only else TOURNAMENT, tid=t["TID"])["tournament"]
                 if not got:
                     continue
-                record = {
-                    "id": t["TID"], "name": got["name"], "date": got["tournamentDate"][:10], "size": got["size"],
-                    "top_cut": got["topCut"] or 0, "decklists": decklists[t["TID"]],
-                    "entries": [[(e["commander"] or {}).get("name") or "", e["standing"], e["wins"], e["losses"], e["draws"],
-                                 e["decklist"] or "", [c["name"] for c in e["maindeck"]]]
-                                for e in got["entries"] if e["maindeck"]]}
+                if t["TID"] in pilots_only:  # each pilot to their entry, by standing
+                    who = {e["standing"]: pilot(e.get("player")) for e in got["entries"]}
+                    record = results[t["TID"]]
+                    record = {**record, "entries": [e[:7] + who.get(e[1], [0, "", ""]) for e in record["entries"]]}
+                else:
+                    record = {
+                        "id": t["TID"], "name": got["name"], "date": got["tournamentDate"][:10], "size": got["size"],
+                        "top_cut": got["topCut"] or 0, "decklists": decklists[t["TID"]],
+                        "entries": [[(e["commander"] or {}).get("name") or "", e["standing"], e["wins"], e["losses"], e["draws"],
+                                     e["decklist"] or "", [c["name"] for c in e["maindeck"]], *pilot(e.get("player"))]
+                                    for e in got["entries"] if e["maindeck"]]}
                 with lock:
                     if stop.is_set():
                         return
@@ -280,7 +308,7 @@ def fetch_results(hours=None, path=RESULTS, today=None):
                     out.write(gzip.compress((json.dumps(record, separators=(",", ":")) + "\n").encode()))
                     out.flush()
                     fetched[0] += 1
-                    print(f"  {record['date']}  {got['name'][:50]:<50}  {got['size']:>4} players, "
+                    print(f"  {record['date']}  {record['name'][:50]:<50}  {record['size']:>4} players, "
                           f"{len(record['entries']):>4} decklists  [{fetched[0]:,}/{len(todo):,}]", flush=True)
         threads = [threading.Thread(target=work, daemon=True) for _ in range(FETCHERS)]
         for thread in threads:
@@ -355,8 +383,9 @@ def merge(corpus, state, other_dir, path=CORPUS, state_path=STATE):
 
 def merge_results(mine, theirs):
     """Add the tournaments another copy of results.jsonl.gz has that this one doesn't, or has more
-    decklists of. Returns how many it took."""
-    taken = [i for i, t in theirs.items() if i not in mine or len(t["entries"]) > len(mine[i]["entries"])]
+    decklists of, or pilots for. Returns how many it took."""
+    taken = [i for i, t in theirs.items() if i not in mine or len(t["entries"]) > len(mine[i]["entries"])
+             or piloted(t) and not piloted(mine[i])]
     mine.update((i, theirs[i]) for i in taken)
     return len(taken)
 
@@ -567,17 +596,27 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #       results  how many of its decks are in the last two years' cEDH tournament results (absent: none)
 #   results/<card>.json  a commander's cEDH tournament results (from results.jsonl.gz), for each
 #              of RESULT_WINDOWS (days back): totals: [decks, games, wins, decks in events with a
-#              top cut, top cuts] per window; cards: what the decks play (card numbers, most
+#              top cut, top cuts, draws] per window; cards: what the decks play (card numbers, most
 #              played first; in at least MIN_RESULT_DECKS decks); stats: for each card, the totals
-#              of the decks that play it, one window after another; top: the newest finishes in the
-#              top TOP_FINISH, [date, event, players, standing, wins, losses, draws, decklist link];
+#              of the decks that play it (less draws), one window after another; top: the newest finishes in the
+#              top TOP_FINISH, [date, event, players, standing, wins, losses, draws, decklist link,
+#              pilot, pilot's name, the deck's number in results/lists/]; pilots: every pilot of its decks, [pilot, name, totals one window
+#              after another], most decks first (pilot: edhtop16's player number);
 #              field: the totals of every tournament deck (with draws, a deck wins less than a
 #              quarter of its games, so this is what a commander's decks are measured against)
 #   results/lists/<card>.json  a commander's tournament decks one by one, fetched to test a package
 #              of cards: cards (every card they play, most played first) and decks: [narrowest
 #              window, games, wins, top cut (0: none in the event, 1: missed, 2: made), gaps
 #              between the positions in cards of the cards it plays]
-#   results/index.json  the Tournaments tab: windows and field as above; commanders: every commander
+#   results/pilots.json  every pilot, for finding one by name or commander: see pilot_index()
+#   results/pilots/<block>.json  for the pilots numbered in a block of PILOT_BLOCK: {pilot: [name,
+#              [[date, event, players, top cut (players; 0: none), standing, wins, losses, draws, commander file name ("": not
+#              known), commander as edhtop16 writes it, decklist link, its number in results/lists/
+#              (-1: none)]], newest first, the cards they like (see pilot_cards), TopDeck profile id]}
+#   results/ranking.json  the pilots with RANKED_DECKS tournament decks or more: windows as above, and
+#              pilots: [pilot, name, totals one window after another], most decks first
+#   results/index.json  the Tournaments tab: windows and field as above; highlights: see highlights();
+#              commanders: every commander
 #              with tournament decks, [file name, totals one window after another], most decks first;
 #              cards: the cards at least MIN_POOLED_DECKS decks play; stats: for each card, per window,
 #              [decks, commanders counted, lift (in hundredths of a point), evidence (hundredths)],
@@ -601,6 +640,11 @@ MIN_RESULT_DECKS = 2  # a card fewer of a commander's tournament decks play says
 MIN_POOLED_DECKS = 10  # tournament decks playing a card for the Tournaments tab to list it
 POOL_DECKS = 3  # a commander's decks with a card, and without it, for it to count toward the card's overall result
 PRIOR_GAMES, DESIGN_EFFECT = 100, 2  # as in cardResults (site/deck.js)
+PILOT_BLOCK = 64  # pilots per results/pilots/ file, by player number
+RANKED_DECKS = 5  # tournament decks in two years for a pilot to be ranked
+PILOT_CARDS = 48  # the cards a pilot likes, on their page
+MONTH, BEFORE = 30, 90  # days: highlights compare the last month with the BEFORE days before it
+BEST_DECKS, BREAKOUT_DECKS, RISING_DECKS = 20, 10, 15  # decks a commander needs for each highlight
 TOP_FINISH, MAX_FINISHES = 4, 200  # best finishes on a commander page: the newest MAX_FINISHES in the top 4
 MIN_DECKS = 5  # fewer decks than this don't make useful recommendations
 MAX_DECKS = 3000  # per commander, newest first: keeps a file around 300 KB to download
@@ -684,26 +728,38 @@ def median(values, missing):
     return values[len(values) // 2] if values else missing
 
 
-def tournament_stats(results, cards, today):
-    """{commander file name: its results/ file} from the tournaments in results.jsonl.gz ({id:
-    tournament}). Cards are matched by name: whole, or a double-faced card's front face."""
+def card_numbers(cards):
+    """{lowercase name: card number}: whole names, and double-faced cards' front faces"""
     number = {}
     for i, c in enumerate(cards):  # most played printing first, as in the card index
         if c.get("name"):
             number.setdefault(c["name"].lower(), i)
             number.setdefault(c["name"].split(" // ")[0].lower(), i)
+    return number
+
+
+def commander_key(lead, number):
+    """A commander file name from edhtop16's "A / B", or None for a commander not in the card index"""
+    leads = [number.get(n.lower()) for n in lead.split(" / ")] if lead else [None]
+    return None if None in leads else "-".join(str(n) for n in sorted(leads))
+
+
+def tournament_stats(results, cards, today):
+    """{commander file name: its results/ file} from the tournaments in results.jsonl.gz ({id:
+    tournament}). Cards are matched by name: whole, or a double-faced card's front face."""
+    number = card_numbers(cards)
     basic = {i for i, c in enumerate(cards) if "Basic" in c.get("type_line", "")}
     since = [(today - timedelta(days)).isoformat() for days in RESULT_WINDOWS]
 
     # The windows nest, so a deck is added once, to the narrowest it's in, and each window then takes
     # in the narrower ones' (cumulative)
-    def add(counts, w, row):  # row: [decks, games, wins, decks in events with a top cut, top cuts]
+    def add(counts, w, row):  # row: [decks, games, wins, decks in events with a top cut, top cuts, draws]
         for i, x in enumerate(row):
             counts[w][i] += x
 
     def cumulative(counts):
         for w in range(1, len(counts)):
-            for i in range(5):
+            for i in range(len(counts[w])):
                 counts[w][i] += counts[w - 1][i]
         return counts
 
@@ -711,29 +767,33 @@ def tournament_stats(results, cards, today):
     written = {n for t in results.values() for e in t["entries"] for n in e[6]}
     card_of = {n: number.get(n.lower()) for n in written}
     by_key = defaultdict(list)
-    field = [[0] * 5 for _ in since]
+    field = [[0] * 6 for _ in since]
     for t in results.values():
         w = next((w for w, day in enumerate(since) if t["date"] >= day), None)
         if w is None:
             continue
-        for lead, standing, wins, losses, draws, link, names in t["entries"]:
+        for n, (lead, standing, wins, losses, draws, link, names, *who) in enumerate(t["entries"]):
             cut = t["top_cut"]
-            row = [1, wins + losses + draws, wins, int(cut > 0), int(0 < standing <= cut)]
+            row = [1, wins + losses + draws, wins, int(cut > 0), int(0 < standing <= cut), draws]
             add(field, w, row)
-            leads = [number.get(n.lower()) for n in lead.split(" / ")] if lead else [None]
-            if None in leads:
+            key = commander_key(lead, number)
+            if key is None:
                 continue
-            played = {card_of[n] for n in names} - {None} - basic - set(leads)
-            by_key["-".join(str(n) for n in sorted(leads))].append((t, w, standing, [wins, losses, draws], link, played, row))
+            played = {card_of[n] for n in names} - {None} - basic - {int(n) for n in key.split("-")}
+            by_key[key].append((t, w, standing, [wins, losses, draws], link, played, row, (who or [0, ""])[:2], n))
     cumulative(field)
     out = {}
     for key, entries in by_key.items():
-        totals = [[0] * 5 for _ in since]
-        stats = defaultdict(lambda: [[0] * 5 for _ in since])
+        totals = [[0] * 6 for _ in since]
+        stats = defaultdict(lambda: [[0] * 5 for _ in since])  # the same, less draws
+        pilots, pilot_names = defaultdict(lambda: [[0] * 6 for _ in since]), {}
         top = []
-        for t, w, standing, record, link, played, row in entries:
+        for i, (t, w, standing, record, link, played, row, who, _) in enumerate(entries):
             add(totals, w, row)
-            decks, games, wins, cut_decks, cuts = row
+            if who[0]:
+                add(pilots[who[0]], w, row)
+                pilot_names[who[0]] = who[1]
+            decks, games, wins, cut_decks, cuts, _ = row
             for c in played:  # add(), unrolled: this runs once per card of every deck
                 s = stats[c][w]
                 s[0] += decks
@@ -742,9 +802,9 @@ def tournament_stats(results, cards, today):
                 s[3] += cut_decks
                 s[4] += cuts
             if standing <= TOP_FINISH:
-                top.append([t["date"], t["name"], t["size"], standing, *record, link])
+                top.append([t["date"], t["name"], t["size"], standing, *record, link, *who, i])
         cumulative(totals)
-        for counts in stats.values():
+        for counts in [*stats.values(), *pilots.values()]:
             cumulative(counts)
         kept = sorted((c for c in stats if stats[c][-1][0] >= MIN_RESULT_DECKS), key=lambda c: (-stats[c][-1][0], c))
         # Every deck, for testing a package of cards: its narrowest window, games, wins, top cut
@@ -754,9 +814,142 @@ def tournament_stats(results, cards, today):
         out[key] = {"windows": RESULT_WINDOWS, "totals": totals, "cards": kept,
                     "stats": [sum(stats[c], []) for c in kept],
                     "top": sorted(top, key=lambda f: (f[0], -f[2]), reverse=True)[:MAX_FINISHES], "field": field,
+                    "pilots": [[p, pilot_names[p], *sum(counts, [])]
+                               for p, counts in sorted(pilots.items(), key=lambda x: (-x[1][-1][0], x[0]))],
                     "lists": {"cards": everything, "decks": [[w, row[1], row[2], row[3] + row[4], *gaps(sorted(position[c] for c in played))]
-                                                             for t, w, standing, record, link, played, row in entries]}}
+                                                             for t, w, standing, record, link, played, row, who, _ in entries]},
+                    "refs": [(t["id"], n) for t, *_, n in entries]}
     return out
+
+
+def pilot_histories(results, cards, standings=None):
+    """{pilot: [name, their tournament decks, newest first, TopDeck profile]} (see results/pilots/
+    above), from the tournaments in results.jsonl.gz; the name and profile are the newest known.
+    standings: tournament_stats', to find each deck in its commander's results/lists/ file."""
+    number = card_numbers(cards)
+    where = {ref: i for s in (standings or {}).values() for i, ref in enumerate(s["refs"])}
+    out = {}
+    for t in sorted(results.values(), key=lambda t: t["date"], reverse=True):
+        for n, (lead, standing, wins, losses, draws, link, _, *who) in enumerate(t["entries"]):
+            if who and who[0]:
+                pilot = out.setdefault(who[0], [who[1], [], ""])
+                pilot[1].append([t["date"], t["name"], t["size"], t["top_cut"], standing, wins, losses, draws,
+                                 commander_key(lead, number) or "", lead, link, where.get((t["id"], n), -1)])
+                pilot[2] = pilot[2] or (who[2:] or [""])[0]
+    return out
+
+
+def pilot_index(histories):
+    """results/pilots.json: every pilot in pilot_histories(), [pilot, name, tournament decks, then each
+    commander file name they played and how many decks of it, most first], the most decks first"""
+    out = []
+    for p, (name, rows, _) in histories.items():
+        played = Counter(r[8] for r in rows if r[8])
+        out.append([p, name, len(rows), *[x for key, n in played.most_common() for x in (key, n)]])
+    return sorted(out, key=lambda x: (-x[2], x[1].lower()))
+
+
+def pilot_cards(results, cards, standings):
+    """The cards each pilot likes: for pilots with 2 or more decks of commanders in standings, the
+    PILOT_CARDS cards in the most more of their decks than expected, from 2 of their decks or more.
+    Expected: how many would play it if their decks were like the same commanders' tournament decks
+    over two years (each commander's share of decks playing it, times the pilot's decks of it).
+    {pilot: [[card, decks, games, wins, expected decks (to a tenth)]]}, the most more first"""
+    number = card_numbers(cards)
+    basic = {i for i, c in enumerate(cards) if "Basic" in c.get("type_line", "")}
+    share = {key: {c: row[-5] / s["totals"][-1][0] for c, row in zip(s["cards"], s["stats"])} for key, s in standings.items()}
+    card_of = {}  # each name as written, looked up once
+    played = defaultdict(lambda: defaultdict(lambda: [0, 0, 0]))  # pilot: card: [decks, games, wins]
+    leads = defaultdict(Counter)  # pilot: their decks of each commander
+    for t in results.values():
+        for lead, _, wins, losses, draws, _, names, *who in t["entries"]:
+            key = commander_key(lead, number)
+            if not who or not who[0] or key not in share:
+                continue
+            leads[who[0]][key] += 1
+            for n in names:
+                if n not in card_of:
+                    card_of[n] = number.get(n.lower())
+            for c in {card_of[n] for n in names} - {None} - basic - {int(n) for n in key.split("-")}:
+                s = played[who[0]][c]
+                s[0] += 1
+                s[1] += wins + losses + draws
+                s[2] += wins
+    out = {}
+    for p, counts in played.items():
+        if sum(leads[p].values()) < 2:
+            continue
+        liked = [(c, s, sum(k * share[key].get(c, 0) for key, k in leads[p].items())) for c, s in counts.items() if s[0] >= 2]
+        out[p] = [[c, *s, round(e, 1)] for c, s, e in sorted(liked, key=lambda x: (x[2] - x[1][0], x[0])) if s[0] > e][:PILOT_CARDS]
+    return out
+
+
+def ranking(histories, today):
+    """results/ranking.json's pilots: those with RANKED_DECKS decks or more in pilot_histories(), with
+    their totals per window as in tournament_stats"""
+    since = [(today - timedelta(days)).isoformat() for days in RESULT_WINDOWS]
+    out = []
+    for p, (name, rows, _) in histories.items():
+        if len(rows) < RANKED_DECKS:
+            continue
+        totals = [[0] * 6 for _ in since]
+        for day, _, _, cut, standing, wins, losses, draws, *_ in rows:
+            for w, start in enumerate(since):
+                if day >= start:
+                    for i, x in enumerate([1, wins + losses + draws, wins, int(cut > 0), int(0 < standing <= cut), draws]):
+                        totals[w][i] += x
+        out.append([p, name, *sum(totals, [])])
+    return sorted(out, key=lambda r: (-r[-6], r[1].lower()))
+
+
+def points(games, wins, draws):
+    """Match points per game: 5 for a win, 1 for a draw"""
+    return (5 * wins + draws) / games if games else 0
+
+
+def highlights(results, cards, today):
+    """The last MONTH's standout commanders, against the BEFORE days before it, three different ones
+    if they can be: best, the most match
+    points a game (from BEST_DECKS decks or more); breakout, the most decks for its share of the
+    decks before (from BREAKOUT_DECKS); rising, the biggest gain in points a game (RISING_DECKS on each
+    side). Each [file name, decks, points a game, pilots, then] (then: the breakout's share of decks
+    before (unsmoothed), or the rising one's points a game; else null), or null for none. field: points a game,
+    every deck's in the last month; decks: how many decks that is."""
+    number = card_numbers(cards)
+    month = (today - timedelta(MONTH)).isoformat()
+    before = (today - timedelta(MONTH + BEFORE)).isoformat()
+    now, then = defaultdict(lambda: [0, 0, 0, 0]), defaultdict(lambda: [0, 0, 0, 0])  # decks, games, wins, draws
+    pilots = defaultdict(set)
+    for t in results.values():
+        side = now if t["date"] >= month else then if t["date"] >= before else None
+        for lead, _, wins, losses, draws, _, _, *who in t["entries"] if side is not None else []:
+            key = commander_key(lead, number)
+            if key is None:
+                continue
+            for i, x in enumerate([1, wins + losses + draws, wins, draws]):
+                side[key][i] += x
+            if side is now and who and who[0]:
+                pilots[key].add(who[0])
+    ppg = lambda s: points(*s[1:])
+    decks_now, decks_then = sum(s[0] for s in now.values()), sum(s[0] for s in then.values())
+
+    taken = set()  # each a different commander
+
+    def pick(least, score, was=lambda k: None):
+        found = max((k for k in now if now[k][0] >= least and k not in taken and score(k) is not None),
+                    key=lambda k: (score(k), k), default=None)
+        taken.add(found)
+        return found and [found, now[found][0], round(ppg(now[found]), 3), len(pilots[found]),
+                          None if was(found) is None else round(was(found), 4)]
+    share_then = lambda k: (then[k][0] + 1) / (decks_then + 1)  # one deck's worth: a commander new this month
+    return {
+        "days": MONTH, "before": BEFORE, "decks": decks_now,
+        "field": round(points(sum(s[1] for s in now.values()), sum(s[2] for s in now.values()), sum(s[3] for s in now.values())), 3),
+        "best": pick(BEST_DECKS, lambda k: ppg(now[k])),
+        "breakout": pick(BREAKOUT_DECKS, lambda k: now[k][0] / decks_now / share_then(k), lambda k: then[k][0] / max(decks_then, 1)),
+        "rising": pick(RISING_DECKS, lambda k: ppg(now[k]) - ppg(then[k]) if then[k][0] >= RISING_DECKS else None,
+                       lambda k: ppg(then[k])),
+    }
 
 
 def pooled(standings, field):
@@ -842,10 +1035,23 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
         kept = sorted((c for c in overall if overall[c][-1][0] >= MIN_POOLED_DECKS), key=lambda c: (-overall[c][-1][0], c))
         write_json(os.path.join(out_dir, "results", "index.json"), {
             "windows": RESULT_WINDOWS, "field": field,
-            "commanders": sorted(([key, sum(s["totals"], [])] for key, s in standings.items()), key=lambda c: (-c[1][-5], c[0])),
+            "highlights": highlights(results, cards, today),
+            "commanders": sorted(([key, sum(s["totals"], [])] for key, s in standings.items()),
+                                 key=lambda c: (-standings[c[0]]["totals"][-1][0], c[0])),
             "cards": kept,
             "stats": [[x for d, n, lift, evidence in overall[c] for x in (d, n, round(lift * 10000), round(evidence * 100))]
                       for c in kept]})
+    histories = pilot_histories(results or {}, cards, standings)
+    if histories:
+        write_json(os.path.join(out_dir, "results", "pilots.json"), pilot_index(histories))
+        liked = pilot_cards(results, cards, standings)
+        blocks = defaultdict(dict)
+        for p, history in histories.items():
+            name, rows, profile = history
+            blocks[p // PILOT_BLOCK][p] = [name, rows, liked.get(p, []), profile]
+        for b, block in blocks.items():
+            write_json(os.path.join(out_dir, "results", "pilots", f"{b}.json"), block)
+        write_json(os.path.join(out_dir, "results", "ranking.json"), {"windows": RESULT_WINDOWS, "pilots": ranking(histories, today)})
     commanders, trends = [], []
     for key, decks in groups.items():
         if len(decks) < MIN_DECKS:
@@ -884,7 +1090,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             **({"results": standings[key]["totals"][-1][0]} if key in standings else {}),
         })
         if key in standings:
-            write_json(os.path.join(out_dir, "results", f"{key}.json"), {k: v for k, v in standings[key].items() if k != "lists"})
+            write_json(os.path.join(out_dir, "results", f"{key}.json"), {k: v for k, v in standings[key].items() if k not in ("lists", "refs")})
             write_json(os.path.join(out_dir, "results", "lists", f"{key}.json"), standings[key]["lists"])
         commanders.append([key, counts[0], signature[:SIGNATURE]])
     commanders.sort(key=lambda c: -c[1])
