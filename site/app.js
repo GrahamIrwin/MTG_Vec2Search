@@ -1531,7 +1531,7 @@ async function showTournaments() {
   // Highlights: the last month's standout commanders (see highlights() in build_decks.py)
   const h = all.highlights;
   const leadOf = key => (files.has(key) ? el("a", { href: commanderLink(key), textContent: commanderNames(key, names) }) : commanderNames(key, names));
-  const whoPlayed = ([, decks, , pilots]) => `${decks} decks by ${pilots} ${pilots === 1 ? "pilot" : "pilots"}`;
+  const whoPlayed = ([, decks, , pilots]) => `${decks} decks` + (pilots ? ` by ${pilots} ${pilots === 1 ? "pilot" : "pilots"}` : "");
   const tiles = h ? [
     h.best && statTile("Best results", leadOf(h.best[0]), `${h.best[2].toFixed(2)} points a game (all decks: ${h.field.toFixed(2)}), ${whoPlayed(h.best)}`),
     h.breakout && statTile("Breakout", leadOf(h.breakout[0]),
