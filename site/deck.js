@@ -76,7 +76,7 @@ export function decodeShard(shard) {
     return { name, positions: gaps.map(gap => (p += gap)) };
   });
   return { cards: shard.cards, decks, plays, weight, position, tags, signature: shard.signature,
-    price: shard.price ?? -1, bracket: shard.bracket ?? 0, themes: shard.themes ?? [] };
+    price: shard.price ?? -1, bracket: shard.bracket ?? 0, themes: shard.themes ?? [], results: shard.results ?? 0 };
 }
 
 // Cosine similarity between the pasted deck and every deck in the file, over the cards they
@@ -408,4 +408,36 @@ export function risingCards(shard, members, recent) {
     .map(p => ({ p, decks: now[p], share: now[p] / recent.length, was: ever[p] / members.length }))
     .filter(x => x.share > x.was && x.decks >= Math.max(MIN_RISING, 0.01 * recent.length))
     .sort((a, b) => rise(b) - rise(a));
+}
+
+// === Tournament results (decks/results/<commander>.json: cEDH tournaments, from edhtop16) ===
+// How the tournament decks that play each card did against the commander's other tournament
+// decks, over window w (an index into results.windows), for the cards at least MIN_RESULT_DECKS
+// decks play and at least as many don't. lift: how much more of their games those decks win (0.03
+// is 3 points), after pulling both sides toward the commander's win rate by PRIOR_GAMES games'
+// worth, so a card few decks play needs a big difference to show one. evidence: how many standard
+// errors the difference is, counting a deck's games as half as many independent ones (a deck's
+// games share a pilot and a list). conversion: the share of decks in events with a top cut that
+// made it (null: none). [{card, decks, share, games, winRate, winRateWithout, lift, evidence,
+// conversion, conversionWithout}]
+export const PRIOR_GAMES = 100;
+export const MIN_RESULT_DECKS = 10;
+const DESIGN_EFFECT = 2;
+export function cardResults(results, w) {
+  const [decks, games, wins, cutDecks, cuts] = results.totals[w];
+  if (decks < 2 * MIN_RESULT_DECKS) return [];
+  const rate = wins / games;
+  const toward = (k, n) => (k + PRIOR_GAMES * rate) / (n + PRIOR_GAMES);
+  const share = (k, n) => (n ? k / n : null);
+  return results.cards.flatMap((card, i) => {
+    const [d, g, k, cd, c] = results.stats[i].slice(5 * w, 5 * w + 5);
+    if (d < MIN_RESULT_DECKS || decks - d < MIN_RESULT_DECKS) return [];
+    const winRate = k / g, winRateWithout = (wins - k) / (games - g);
+    return [{
+      card, decks: d, share: d / decks, games: g, winRate, winRateWithout,
+      lift: toward(k, g) - toward(wins - k, games - g),
+      evidence: (winRate - winRateWithout) / Math.sqrt(DESIGN_EFFECT * rate * (1 - rate) * (1 / g + 1 / (games - g))),
+      conversion: share(c, cd), conversionWithout: share(cuts - c, cutDecks - cd),
+    }];
+  });
 }

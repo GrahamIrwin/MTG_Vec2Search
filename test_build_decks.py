@@ -70,7 +70,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert sorted(load_corpus(path)) == [7, 8, 10]
 
     # Cards in index order: 0 = the commander, 1 = a basic land, then c0..c96
-    cards = [{"oracle_id": "cmdr", "type_line": "Legendary Creature"}, {"oracle_id": "island", "type_line": "Basic Land — Island"}]
+    cards = [{"oracle_id": "cmdr", "name": "Cmdr", "type_line": "Legendary Creature"},
+             {"oracle_id": "island", "type_line": "Basic Land — Island"}]
     cards += [{"oracle_id": f"c{i}", "type_line": "Creature"} for i in range(97)]
     corpus = {i: {**deck, "id": i, "updated": f"2026-09-0{i}"} for i in range(1, 6)}
     build_decks.BUILD_DECKS = 5  # so these few decks get tags
@@ -83,7 +84,10 @@ with tempfile.TemporaryDirectory() as tmp:
     # but Archidekt numbers decks as they're made, so 2 and 3 are older than 4
     corpus[1]["created"], corpus[4]["created"], corpus[5]["created"] = "2025-01-01", "2026-09-13", "2026-10-01"
     corpus[5]["bracket"], corpus[4]["bracket"] = 4, None
-    build(corpus, cards, tags, out, prices={"cmdr": 2.0, "c0": 1.0, "island": 0.5}, today=date(2026, 10, 4))
+    event = {"id": "e", "name": "Event", "date": "2026-09-30", "size": 40, "top_cut": 4,
+             "entries": [["Cmdr", 3, 2, 2, 1, "deck link", []], ["Nobody", 1, 5, 0, 0, "", []]]}
+    build(corpus, cards, tags, out, prices={"cmdr": 2.0, "c0": 1.0, "island": 0.5}, today=date(2026, 10, 4),
+          results={"e": event})
     with open(os.path.join(out, "0.json"), encoding="utf-8") as f:
         shard = json.load(f)
     assert shard["cards"][:2] == [2, 98] and len(shard["cards"]) == 97  # c0 and c96 are in every deck
@@ -99,6 +103,74 @@ with tempfile.TemporaryDirectory() as tmp:
     assert index["decks"] == 5 and index["commanders"][0][:2] == ["0", 5]
     assert index["since"] == ["2026-07-06", "2026-09-04", "2026-09-27"], index["since"]  # the 90, 30 and 7 day windows
     assert shard["price"] == 300 and shard["bracket"] == 3  # basic lands are left out of the price
+    assert shard["results"] == 1 and os.path.exists(os.path.join(out, "results", "0.json"))  # 1 tournament deck
+
+    # Tournament results: each commander's decks and the decks playing each card, per window, and
+    # its best finishes. Cards by name (a double-faced one by its front face), partners either way.
+    named = [{"name": "Lead"}, {"name": "Partner"}, {"name": "Island", "type_line": "Basic Land — Island"},
+             {"name": "Bolt"}, {"name": "Front // Back"}]
+    tournament = lambda i, day, cut, entries: {"id": i, "name": f"Event {i}", "date": day, "size": 40,
+                                                "top_cut": cut, "entries": entries}
+    stats = build_decks.tournament_stats({
+        1: tournament(1, "2026-09-30", 4, [["Lead", 1, 4, 1, 1, "link1", ["Bolt", "Front", "Island", "Lead"]],
+                                           ["Lead", 9, 1, 5, 0, "link2", ["Bolt"]],
+                                           ["Partner / Lead", 2, 3, 2, 1, "link3", ["Bolt"]],
+                                           ["Unknown", 3, 3, 3, 0, "", ["Bolt"]]]),
+        2: tournament(2, "2026-01-01", 0, [["Lead", 1, 5, 0, 0, "link4", ["Front // Back", "Nope"]]])},
+        named, date(2026, 10, 4))
+    assert sorted(stats) == ["0", "0-1"], stats.keys()
+    lead = stats["0"]
+    # [decks, games, wins, decks in events with a top cut, top cuts]: in 90 and 180 days event 1's
+    # two decks (one made the cut), in a year event 2's too (which had no cut)
+    assert lead["totals"] == [[2, 12, 5, 2, 1], [2, 12, 5, 2, 1], [3, 17, 10, 2, 1]], lead["totals"]
+    assert lead["cards"] == [3, 4]  # Bolt and Front, each in 2 decks; not the commander or a basic land
+    assert lead["stats"] == [[2, 12, 5, 2, 1] * 3, [1, 6, 4, 1, 1] * 2 + [2, 11, 9, 1, 1]], lead["stats"]
+    assert lead["top"] == [["2026-09-30", "Event 1", 40, 1, 4, 1, 1, "link1"], ["2026-01-01", "Event 2", 40, 1, 5, 0, 0, "link4"]]
+    assert stats["0-1"]["cards"] == []  # in 1 deck: too few to say anything
+    assert lead["field"][-1] == [5, 29, 16, 4, 3]  # every deck, the unknown commander's too
+
+    # A card across commanders: in A's decks and B's it wins 10 points more than their decks without it,
+    # A's counting three times as much (300 games each side, against 100); card 8 is in too few of B's
+    window = lambda *row: [list(row)] * 3
+    overall = build_decks.pooled({
+        "A": {"totals": window(60, 600, 150, 0, 0), "cards": [7], "stats": [[30, 300, 90, 0, 0] * 3]},
+        "B": {"totals": window(20, 200, 40, 0, 0), "cards": [7, 8], "stats": [[10, 100, 25, 0, 0] * 3, [2, 20, 10, 0, 0] * 3]},
+    }, window(80, 800, 190, 0, 0))
+    decks, commanders, lift, evidence = overall[7][0]
+    assert (decks, commanders) == (40, 2) and abs(lift - 0.1 * 200 / 300) < 1e-9, overall[7]
+    assert abs(evidence - 0.1 / (2 * 0.2375 * 0.7625 / 200) ** 0.5) < 1e-9
+    assert overall[8][0] == [2, 0, 0.0, 0.0]
+
+    # Results from a fake edhtop16: events without decklists aren't fetched, nor ones fetched before
+    # unless their decklists changed in number (or they're recent), and a year back is the limit
+    listed = [{"TID": "new", "tournamentDate": "2026-09-20T00:00:00Z", "breakdown": [{"entries": 2}]},
+              {"TID": "none", "tournamentDate": "2026-09-01T00:00:00Z", "breakdown": []},
+              {"TID": "same", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 1}]},
+              {"TID": "more", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 3}]}]
+    asked = []
+
+    def fake_edhtop16(query, **variables):
+        if "tid" not in variables:
+            return {"tournaments": {"edges": [{"node": t} for t in listed], "pageInfo": {"hasNextPage": False}}}
+        asked.append(variables["tid"])
+        played = {"commander": {"name": "Lead"}, "standing": 1, "wins": 3, "losses": 1, "draws": 0, "decklist": "x",
+                  "maindeck": [{"name": "Bolt"}]}
+        unlisted = {"commander": None, "standing": 2, "wins": 2, "losses": 2, "draws": 0, "decklist": None, "maindeck": []}
+        return {"tournament": {"name": "Event", "tournamentDate": "2026-09-20T00:00:00Z", "size": 20, "topCut": 4,
+                               "entries": [played, unlisted]}}
+    path = os.path.join(tmp, "results.jsonl.gz")
+    save_corpus({"same": {"id": "same", "date": "2026-08-01", "decklists": 1, "entries": []},
+                 "more": {"id": "more", "date": "2026-08-01", "decklists": 1, "entries": []},
+                 "old": {"id": "old", "date": "2025-01-01", "entries": []}}, path)
+    real_edhtop16, build_decks.edhtop16 = build_decks.edhtop16, fake_edhtop16
+    try:
+        build_decks.fetch_results(path=path, today=date(2026, 10, 4))
+    finally:
+        build_decks.edhtop16 = real_edhtop16
+    assert sorted(asked) == ["more", "new"], asked
+    got = load_corpus(path)
+    assert sorted(got) == ["more", "new", "same"], got.keys()  # over a year old: dropped
+    assert got["new"]["entries"] == [["Lead", 1, 3, 1, 0, "x", ["Bolt"]]] and got["new"]["decklists"] == 2
     with open(os.path.join(out, "trends.json"), encoding="utf-8") as f:
         trends = json.load(f)
     key, made, price, bracket, _ = trends["commanders"][0]

@@ -1,10 +1,12 @@
 """Crawl public Commander decks from Archidekt and Moxfield into decks.jsonl.gz, the deck corpus,
-and turn it into site/decks/, the data behind "Find similar decks".
+and cEDH tournament results from edhtop16 into results.jsonl.gz, and turn them into site/decks/,
+the data behind "Find similar decks" and the commander pages.
 
     python build_decks.py crawl --hours 5     # resumable: stop and restart any time
     python build_decks.py crawl --site moxfield --hours 5
     python build_decks.py crawl --top 3500 --per-commander 20 --rate 3   # fill in popular commanders
     python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000
+    python build_decks.py results --hours 1   # resumable: the last year's tournaments, newest first
     python build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
@@ -29,6 +31,7 @@ from build_index import by_popularity, load_cards, load_oracle_tags, load_printi
 
 ARCHIDEKT = "https://archidekt.com/api"
 MOXFIELD = "https://api2.moxfield.com"
+EDHTOP16 = "https://edhtop16.com/api"
 CORPUS = "decks.jsonl.gz"
 HEADERS = {"User-Agent": "MTG_Vec2Search/1.0 (+https://github.com/grahamirwin/MTG_Vec2Search)",
            "Accept": "application/json", "Accept-Encoding": "gzip"}
@@ -47,10 +50,12 @@ _last = {}  # per site: when its next request may go out
 _lock = threading.Lock()
 
 
-def get_json(path, base=ARCHIDEKT):
-    """GET an Archidekt (or Moxfield) API path, at most one request per DELAY seconds to each site
-    (across threads), retrying on errors."""
-    site = "Moxfield" if base == MOXFIELD else "Archidekt"
+def get_json(path, base=ARCHIDEKT, post=None):
+    """GET an Archidekt (or Moxfield) API path, or POST `post` (as JSON) to one, at most one request
+    per DELAY seconds to each site (across threads), retrying on errors."""
+    site = {MOXFIELD: "Moxfield", EDHTOP16: "edhtop16"}.get(base, "Archidekt")
+    sent = post and json.dumps(post).encode()
+    headers = {**HEADERS, "Content-Type": "application/json"} if post else HEADERS
     for attempt in range(5):
         with _lock:
             now = time.time()  # one reading: a second, later one could make the wait negative
@@ -58,7 +63,7 @@ def get_json(path, base=ARCHIDEKT):
             wait = _last[base] - now
         time.sleep(wait)
         try:
-            with urllib.request.urlopen(urllib.request.Request(base + path, headers=HEADERS), timeout=60) as r:
+            with urllib.request.urlopen(urllib.request.Request(base + path, sent, headers), timeout=120) as r:
                 body = r.read()
                 if r.headers.get("Content-Encoding") == "gzip":
                     body = gzip.decompress(body)
@@ -197,6 +202,99 @@ def save_corpus(corpus, path=CORPUS):
     with gzip.open(path + ".tmp", "wt", encoding="utf-8") as f:
         f.writelines(json.dumps(d, separators=(",", ":")) + "\n" for d in corpus.values())
     os.replace(path + ".tmp", path)
+
+
+# === Tournament results, from edhtop16 (whose decklists and results come from TopDeck.gg) ===
+# results.jsonl.gz: one cEDH tournament per line, like the deck corpus (the last copy wins):
+#   {id: TopDeck's tournament id, name, date, size: players, top_cut: players in the top cut (0: none),
+#    decklists: how many edhtop16 had when it was fetched (absent in the first ones fetched),
+#    entries: [[commander(s) ("A / B" for partners), standing, wins, losses, draws, decklist link,
+#               [card names]]]}, only the entries edhtop16 has a decklist for
+RESULTS = "results.jsonl.gz"
+RESULT_DAYS = 365
+MIN_EVENT = 16  # players: smaller events are few games against few decks
+REFETCH_DAYS = 3  # recent events are fetched again: results and decklists come in after they start
+FETCHERS = 4  # tournaments fetched at once: each takes edhtop16 a few seconds, and DELAY still spaces the requests
+TOURNAMENTS = """query($since: String, $after: String) {
+  tournaments(first: 1000, sortBy: DATE, after: $after, filters: {minDate: $since, minSize: %d}) {
+    edges { node { TID tournamentDate breakdown { entries } } } pageInfo { hasNextPage endCursor } } }""" % MIN_EVENT
+TOURNAMENT = """query($tid: String!) { tournament(TID: $tid) { name size topCut tournamentDate
+  entries { standing wins losses draws decklist commander { name } maindeck { name } } } }"""
+
+
+def edhtop16(query, **variables):
+    data = get_json("/graphql", EDHTOP16, {"query": query, "variables": variables}) or {}
+    if data.get("errors") or not data.get("data"):
+        raise RuntimeError(f"edhtop16 says: {data.get('errors')}")
+    return data["data"]
+
+
+def fetch_results(hours=None, path=RESULTS, today=None):
+    """Bring results.jsonl.gz up to date with edhtop16: the tournaments of the last RESULT_DAYS days
+    with MIN_EVENT players or more and some decklists (by its commander breakdown, which the list
+    gives: about 40% have none) that it lacks or that have more or fewer decklists since, newest
+    first, and the last REFETCH_DAYS days' again. FETCHERS at a time; each is saved as it arrives,
+    so it can stop (`hours`, Ctrl+C) and go on later."""
+    today = today or date.today()
+    since = (today - timedelta(RESULT_DAYS)).isoformat()
+    results = {i: t for i, t in load_corpus(path).items() if t["date"] >= since}
+    save_corpus(results, path)  # without tournaments now too old
+    listed, after = [], None
+    while True:
+        page = edhtop16(TOURNAMENTS, since=since, after=after)["tournaments"]
+        listed += [e["node"] for e in page["edges"]]
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        after = page["pageInfo"]["endCursor"]
+    recent = (today - timedelta(REFETCH_DAYS)).isoformat()
+    decklists = {t["TID"]: sum(b["entries"] for b in t.get("breakdown") or []) for t in listed}
+    todo = sorted((t for t in listed if decklists[t["TID"]] and (
+        t["TID"] not in results or t["tournamentDate"][:10] >= recent
+        or results[t["TID"]].get("decklists", decklists[t["TID"]]) != decklists[t["TID"]])),
+        key=lambda t: t["tournamentDate"], reverse=True)
+    print(f"{len(results):,} tournaments in {path}; edhtop16 has {len(listed):,} since {since} "
+          f"({sum(not n for n in decklists.values()):,} without decklists), fetching {len(todo):,}", flush=True)
+    deadline = time.time() + hours * 3600 if hours else float("inf")
+    start, fetched = time.time(), [0]
+    lock, stop = threading.Lock(), threading.Event()  # Ctrl+C: requests out finish, but nothing more is saved
+    jobs = iter(todo)
+    with open(path, "ab") as out:
+        def work():
+            for t in jobs:
+                if time.time() > deadline or stop.is_set():
+                    return
+                got = edhtop16(TOURNAMENT, tid=t["TID"])["tournament"]
+                if not got:
+                    continue
+                record = {
+                    "id": t["TID"], "name": got["name"], "date": got["tournamentDate"][:10], "size": got["size"],
+                    "top_cut": got["topCut"] or 0, "decklists": decklists[t["TID"]],
+                    "entries": [[(e["commander"] or {}).get("name") or "", e["standing"], e["wins"], e["losses"], e["draws"],
+                                 e["decklist"] or "", [c["name"] for c in e["maindeck"]]]
+                                for e in got["entries"] if e["maindeck"]]}
+                with lock:
+                    if stop.is_set():
+                        return
+                    results[t["TID"]] = record
+                    out.write(gzip.compress((json.dumps(record, separators=(",", ":")) + "\n").encode()))
+                    out.flush()
+                    fetched[0] += 1
+                    print(f"  {record['date']}  {got['name'][:50]:<50}  {got['size']:>4} players, "
+                          f"{len(record['entries']):>4} decklists  [{fetched[0]:,}/{len(todo):,}]", flush=True)
+        threads = [threading.Thread(target=work, daemon=True) for _ in range(FETCHERS)]
+        for thread in threads:
+            thread.start()
+        try:
+            for thread in threads:
+                while thread.is_alive():
+                    thread.join(1)  # with a timeout, so Ctrl+C gets through on Windows
+        except KeyboardInterrupt:
+            with lock:  # waits out a tournament being written, and no thread writes another
+                stop.set()
+            print("\nStopped. Everything fetched so far is saved.", flush=True)
+    save_corpus(results, path)
+    print(f"Done in {duration(time.time() - start)}: fetched {fetched[0]:,} tournaments; {len(results):,} in {path}, "
+          f"{sum(len(t['entries']) for t in results.values()):,} decklists.", flush=True)
 
 
 def full_names(wanted, names):
@@ -434,6 +532,20 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #       price  what a typical (median) deck costs, in US cents (-1: unknown)
 #       bracket  the typical bracket of the decks that give one (0: none do)
 #       themes  the Tagger tags these decks play far more of than other decks do
+#       results  how many of its decks are in the last year's cEDH tournament results (absent: none)
+#   results/<card>.json  a commander's cEDH tournament results (from results.jsonl.gz), for each
+#              of RESULT_WINDOWS (days back): totals: [decks, games, wins, decks in events with a
+#              top cut, top cuts] per window; cards: what the decks play (card numbers, most
+#              played first; in at least MIN_RESULT_DECKS decks); stats: for each card, the totals
+#              of the decks that play it, one window after another; top: the newest finishes in the
+#              top TOP_FINISH, [date, event, players, standing, wins, losses, draws, decklist link];
+#              field: the totals of every tournament deck (with draws, a deck wins less than a
+#              quarter of its games, so this is what a commander's decks are measured against)
+#   results/index.json  the Tournaments tab: windows and field as above; commanders: every commander
+#              with tournament decks, [file name, totals one window after another], most decks first;
+#              cards: the cards at least MIN_POOLED_DECKS decks play; stats: for each card, per window,
+#              [decks, commanders counted, lift (in hundredths of a point), evidence (hundredths)],
+#              from pooled()
 #   index.json  every commander with a file: [file name, deck count, signature cards], where the
 #              signature cards are what its decks play far more often than other decks do. Used to
 #              find decks with other commanders, and for commanders without enough decks.
@@ -444,6 +556,12 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #              over all their decks
 #   trend-cards.json  the same as everything, for each commander in trends.json (most of its cards)
 OUT_DIR = os.path.join("site", "decks")
+RESULT_WINDOWS = [90, 180, 365]  # days back: the periods commander pages show tournament results for
+MIN_RESULT_DECKS = 2  # a card fewer of a commander's tournament decks play says nothing yet
+MIN_POOLED_DECKS = 10  # tournament decks playing a card for the Tournaments tab to list it
+POOL_DECKS = 3  # a commander's decks with a card, and without it, for it to count toward the card's overall result
+PRIOR_GAMES, DESIGN_EFFECT = 100, 2  # as in cardResults (site/deck.js)
+TOP_FINISH, MAX_FINISHES = 4, 200  # best finishes on a commander page: the newest MAX_FINISHES in the top 4
 MIN_DECKS = 5  # fewer decks than this don't make useful recommendations
 MAX_DECKS = 3000  # per commander, newest first: keeps a file around 300 KB to download
 SIGNATURE = 24
@@ -525,7 +643,88 @@ def median(values, missing):
     return values[len(values) // 2] if values else missing
 
 
-def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
+def tournament_stats(results, cards, today):
+    """{commander file name: its results/ file} from the tournaments in results.jsonl.gz ({id:
+    tournament}). Cards are matched by name: whole, or a double-faced card's front face."""
+    number = {}
+    for i, c in enumerate(cards):  # most played printing first, as in the card index
+        if c.get("name"):
+            number.setdefault(c["name"].lower(), i)
+            number.setdefault(c["name"].split(" // ")[0].lower(), i)
+    basic = {i for i, c in enumerate(cards) if "Basic" in c.get("type_line", "")}
+    since = [(today - timedelta(days)).isoformat() for days in RESULT_WINDOWS]
+
+    def add(counts, t, row):  # row: [decks, games, wins, decks in events with a top cut, top cuts]
+        for w, day in enumerate(since):
+            if t["date"] >= day:
+                for i, x in enumerate(row):
+                    counts[w][i] += x
+
+    by_key = defaultdict(list)
+    field = [[0] * 5 for _ in since]
+    for t in results.values():
+        for lead, standing, wins, losses, draws, link, names in t["entries"]:
+            cut = t["top_cut"]
+            row = [1, wins + losses + draws, wins, int(cut > 0), int(0 < standing <= cut)]
+            add(field, t, row)
+            leads = [number.get(n.lower()) for n in lead.split(" / ")] if lead else [None]
+            if None in leads:
+                continue
+            played = {number[n.lower()] for n in names if n.lower() in number} - basic - set(leads)
+            by_key["-".join(str(n) for n in sorted(leads))].append((t, standing, [wins, losses, draws], link, played, row))
+    out = {}
+    for key, entries in by_key.items():
+        totals = [[0] * 5 for _ in since]
+        stats = defaultdict(lambda: [[0] * 5 for _ in since])
+        top = []
+        for t, standing, record, link, played, row in entries:
+            for counts in [totals] + [stats[c] for c in played]:
+                add(counts, t, row)
+            if standing <= TOP_FINISH:
+                top.append([t["date"], t["name"], t["size"], standing, *record, link])
+        kept = sorted((c for c in stats if stats[c][-1][0] >= MIN_RESULT_DECKS), key=lambda c: (-stats[c][-1][0], c))
+        out[key] = {"windows": RESULT_WINDOWS, "totals": totals, "cards": kept,
+                    "stats": [sum(stats[c], []) for c in kept],
+                    "top": sorted(top, key=lambda f: (f[0], -f[2]), reverse=True)[:MAX_FINISHES], "field": field}
+    return out
+
+
+def pooled(standings, field):
+    """Each card's result across commanders, from tournament_stats' standings: the difference in
+    games won between a commander's decks with the card and its decks without, averaged over the
+    commanders whose decks are POOL_DECKS or more on each side, each weighted by how much its
+    difference can be trusted (1 / (1/games with + 1/games without)). So a card is only ever
+    compared within a commander, and a strong commander playing it doesn't make it look good.
+    lift: that average, pulled toward no difference by PRIOR_GAMES games' worth; evidence: how many
+    standard errors it is (a deck's games counted as 1/DESIGN_EFFECT as many independent ones), as
+    in cardResults (site/deck.js). {card: [[decks, commanders, lift, evidence] per window]}"""
+    sums = defaultdict(lambda: [[0.0, 0.0, 0, 0] for _ in RESULT_WINDOWS])  # weighted sum, weights, decks, commanders
+    for data in standings.values():
+        for card, row in zip(data["cards"], data["stats"]):
+            for w, (decks, games, wins, *_) in enumerate(data["totals"]):
+                d, g, k = row[5 * w:5 * w + 3]
+                s = sums[card][w]
+                s[2] += d
+                if d >= POOL_DECKS and decks - d >= POOL_DECKS and 0 < g < games:
+                    weight = 1 / (1 / g + 1 / (games - g))
+                    s[0] += weight * (k / g - (wins - k) / (games - g))
+                    s[1] += weight
+                    s[3] += 1
+    out = {}
+    for card, windows in sums.items():
+        out[card] = []
+        for (total, weights, decks, commanders), (_, games, wins, *_) in zip(windows, field):
+            rate = wins / games if games else 0
+            if not weights or not 0 < rate < 1:
+                out[card].append([decks, 0, 0.0, 0.0])
+                continue
+            difference = total / weights
+            evidence = difference / (DESIGN_EFFECT * rate * (1 - rate) / weights) ** 0.5
+            out[card].append([decks, commanders, difference * weights / (weights + PRIOR_GAMES), evidence])
+    return out
+
+
+def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, results=None):
     """corpus: {id: deck} (see slim_deck); cards: Scryfall cards in card-index order;
     tags: Scryfall Tagger tags, {slug: (oracle ids, names)} (see load_oracle_tags);
     prices: {oracle id: cheapest USD price} (see load_printings)."""
@@ -565,6 +764,18 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
             usual[t] += k / total
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
+    standings = tournament_stats(results or {}, cards, today)
+    os.makedirs(os.path.join(out_dir, "results"))
+    if standings:
+        field = next(iter(standings.values()))["field"]
+        overall = pooled(standings, field)
+        kept = sorted((c for c in overall if overall[c][-1][0] >= MIN_POOLED_DECKS), key=lambda c: (-overall[c][-1][0], c))
+        write_json(os.path.join(out_dir, "results", "index.json"), {
+            "windows": RESULT_WINDOWS, "field": field,
+            "commanders": sorted(([key, sum(s["totals"], [])] for key, s in standings.items()), key=lambda c: (-c[1][-5], c[0])),
+            "cards": kept,
+            "stats": [[x for d, n, lift, evidence in overall[c] for x in (d, n, round(lift * 10000), round(evidence * 100))]
+                      for c in kept]})
     commanders, trends = [], []
     for key, decks in groups.items():
         if len(decks) < MIN_DECKS:
@@ -600,7 +811,10 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
             "signature": signature[:SHOWN_SIGNATURE],
             "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
             "price": price, "bracket": bracket, "themes": known_themes,
+            **({"results": standings[key]["totals"][-1][0]} if key in standings else {}),
         })
+        if key in standings:
+            write_json(os.path.join(out_dir, "results", f"{key}.json"), standings[key])
         commanders.append([key, counts[0], signature[:SIGNATURE]])
     commanders.sort(key=lambda c: -c[1])
     write_json(os.path.join(out_dir, "index.json"),
@@ -635,6 +849,8 @@ if __name__ == "__main__":
     c.add_argument("--rate", type=float, default=1 / DELAY, help="requests a second (default: %(default)g)")
     c.add_argument("--no-upload", action="store_true",
                    help="don't merge with and upload to the deck-corpus release when the crawl stops")
+    r = sub.add_parser("results", help="download the last year's cEDH tournament results from edhtop16")
+    r.add_argument("--hours", type=float, help="stop after this long")
     sub.add_parser("build", help="write site/decks/ from the corpus")
     args = p.parse_args()
     sys.stdout.reconfigure(errors="replace")  # deck names with emoji can't crash a non-UTF-8 console
@@ -642,5 +858,8 @@ if __name__ == "__main__":
         DELAY = 1 / args.rate
         crawl(args.per_commander, args.only, args.hours, args.top, upload=not args.no_upload, site=args.site,
               bracket=args.bracket)
+    elif args.cmd == "results":
+        fetch_results(args.hours)
     else:
-        build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=load_printings()[0])
+        build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=load_printings()[0],
+              results=load_corpus(RESULTS))

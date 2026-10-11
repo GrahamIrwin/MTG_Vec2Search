@@ -1,7 +1,8 @@
 name: Crawl decks
 
-# Adds public Commander decks from Archidekt and Moxfield to the deck corpus, which lives on the
-# "deck-corpus" release (too big for git), then redeploys the site with them (Trends needs fresh decks).
+# Adds public Commander decks from Archidekt and Moxfield to the deck corpus, and the latest cEDH
+# tournament results from edhtop16, which live on the "deck-corpus" release (too big for git), then
+# redeploys the site with them (Trends needs fresh decks).
 on:
   schedule:
     - cron: "0 2 * * *" # daily
@@ -24,12 +25,15 @@ jobs:
       - uses: actions/checkout@v7
       - run: gh release download deck-corpus
       - run: python3 -c "import build_index; build_index.download_bulk_data()" # card names for commanders, printings for Moxfield
+      # A day's tournaments take a few minutes; a failure here still lets the decks crawl
+      - run: python3 build_decks.py results --hours 0.25
+        continue-on-error: true
       # Half the time on each site. The upload step runs even after a failed crawl: a failed crawl
       # keeps what it fetched (each deck is saved as it arrives)
-      - run: python3 build_decks.py crawl --hours 2.5 --no-upload
+      - run: python3 build_decks.py crawl --hours 2.4 --no-upload
       - if: ${{ !cancelled() }}
-        run: python3 build_decks.py crawl --site moxfield --hours 2.5 --no-upload
+        run: python3 build_decks.py crawl --site moxfield --hours 2.4 --no-upload
       - if: ${{ !cancelled() }}
-        run: gh release upload deck-corpus decks.jsonl.gz crawl_state.json --clobber
+        run: gh release upload deck-corpus decks.jsonl.gz crawl_state.json results.jsonl.gz --clobber
       - if: ${{ !cancelled() }}
         run: gh workflow run deploy.yml

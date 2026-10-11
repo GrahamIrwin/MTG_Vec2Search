@@ -26,6 +26,7 @@
       --rule: #d5c19b; --brass: #a8834a;
       --accent: #3f6b4c; --accent-hover: #345a40; --on-accent: #f7f1e3; --accent-soft: #dfe7d6;
       --link: #3a6447; --focus: #a8642a;
+      --up: #3a6447; --down: #a3402a;
       --shadow-sm: 0 1px 2px rgb(60 40 20 / .12);
       --shadow-md: 0 2px 4px rgb(60 40 20 / .10), 0 10px 24px -8px rgb(60 40 20 / .28);
       --grain: .07;
@@ -39,6 +40,7 @@
       --rule: #4a3929; --brass: #c29a5c;
       --accent: #4c8459; --accent-hover: #589767; --on-accent: #f6f0e2; --accent-soft: #2c3a2b;
       --link: #8cc39b; --focus: #d9a35b;
+      --up: #8cc39b; --down: #e5937c;
       --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
       --shadow-md: 0 2px 4px rgb(0 0 0 / .35), 0 14px 30px -10px rgb(0 0 0 / .7);
       --grain: .05;
@@ -453,6 +455,54 @@
     .commander-art .pair img { width: 100%; }
     .theme-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 2px; }
     .sub-heading { font-size: 19px; margin: 26px 0 4px; }
+    /* Tournament results */
+    .result-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; margin: 16px 0 4px; }
+    .stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; }
+    .stat-value { font: 30px/1.15 'Beleren Bold', Georgia, serif; color: var(--ink); }
+    .stat-note { font-size: 14px; color: var(--ink-soft); }
+    .up { color: var(--up); }
+    .down { color: var(--down); }
+    .card-meta .up, .card-meta .down { font-weight: bold; }
+    .card-meta .faint { opacity: .6; font-weight: normal; }
+    .card-note { font-size: 13px; line-height: 1.35; color: var(--ink-soft); margin-top: -3px; }
+    .finish-list .finish {
+      display: grid; grid-template-columns: 3.4em 1fr auto; gap: 2px 12px; align-items: baseline;
+      padding: 10px 14px; background: var(--paper); border: 1px solid var(--rule); border-radius: 10px;
+    }
+    .finish .place { grid-row: span 2; font: 20px/1 'Beleren Bold', Georgia, serif; color: var(--accent); }
+    .finish .deck-meta { grid-column: 2 / -1; }
+    .source-note { font-size: 14px; margin: 26px 0 0; }
+    .card-results { margin: 14px 0 4px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper-2); }
+    .card-results p { margin: 6px 0 0; font-size: 15px; line-height: 1.45; }
+    .tour-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 20px; margin: 14px 0 6px; }
+    .inline-field { grid-auto-flow: column; align-items: center; gap: 10px; }
+    .table-wrap { overflow-x: auto; margin-top: 10px; }
+    .leaderboard { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    .leaderboard th {
+      text-align: left; font-weight: normal; padding: 8px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap;
+      font-variant-caps: all-small-caps; letter-spacing: .08em; font-size: 17px; color: var(--ink-soft);
+    }
+    .leaderboard td { padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+    .leaderboard .num { text-align: right; }
+    .leaderboard .rank { width: 2.5em; color: var(--ink-faint); }
+    .leaderboard th button {
+      background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink-soft);
+      font-variant-caps: all-small-caps; letter-spacing: .08em; font-size: 17px;
+    }
+    .leaderboard th[aria-sort] button { color: var(--ink); }
+    .leaderboard th[aria-sort="descending"] button::after { content: " \25BE"; }
+    .leaderboard td small { display: block; font-size: 13px; color: var(--ink-soft); }
+    .leaderboard .who { display: flex; align-items: center; gap: 12px; min-width: 200px; }
+    .leaderboard .thumbs { display: flex; flex: none; }
+    .leaderboard .thumbs img { width: 46px; height: 34px; object-fit: cover; border-radius: 5px; box-shadow: var(--shadow-sm); }
+    .leaderboard .thumbs img + img { margin-left: -18px; }
+    .leaderboard tbody tr:hover { background: var(--paper-2); }
+    @media (max-width: 600px) {
+      .leaderboard .thumbs, .leaderboard .rank, .leaderboard .share { display: none; }
+      .leaderboard th, .leaderboard td { padding: 8px 5px; }
+      .leaderboard th, .leaderboard th button { font-size: 15px; white-space: normal; }
+      .leaderboard .who { min-width: 0; }
+    }
     .type-filter button:disabled { opacity: .45; cursor: default; }
     .trend-windows { justify-content: center; margin-bottom: 14px; }
     .trend-summary { text-align: center; margin: 14px 0 0; }
@@ -518,6 +568,7 @@
         <a href="?deck" id="mode-deck">Deck recommendations</a>
         <a href="?commanders" id="mode-commanders">Commanders</a>
         <a href="?trends" id="mode-trends">Trends</a>
+        <a href="?tournaments" id="mode-tournaments">Tournaments</a>
       </nav>
     </header>
 
@@ -656,6 +707,20 @@
               <p class="muted deck-lede">Your cards that the most similar decks rarely play.</p>
               <div class="term-items" id="cuts"></div>
           </details>
+          <details class="panel" open id="deck-tournament" hidden>
+            <summary><h2 class="deck-heading">Tournament check</h2></summary>
+            <p class="muted deck-lede" id="deck-tournament-lede"></p>
+            <h3 class="sub-heading">Your cards that win less</h3>
+            <p class="muted deck-lede" id="mine-less-lede"></p>
+            <div class="chips type-filter" id="mine-less-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="mine-less"></div>
+            <div class="more-wrap"><button id="more-mine-less" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">Cards that win more that you don't play</h3>
+            <p class="muted deck-lede" id="missing-more-lede"></p>
+            <div class="chips type-filter" id="missing-more-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="missing-more"></div>
+            <div class="more-wrap"><button id="more-missing-more" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
           <details class="panel" open>
             <summary><h2 class="deck-heading">The decks behind these picks</h2></summary>
             <p class="muted deck-lede">The decks most like yours. Open one to see what it plays that yours doesn't.</p>
@@ -711,6 +776,34 @@
               <a href="?deck" class="btn-quiet">Compare your deck with these</a>
             </div>
           </div>
+          <details class="panel" open id="results-panel" hidden>
+            <summary><h2 class="deck-heading">Tournament results</h2></summary>
+            <p class="muted deck-lede" id="results-lede"></p>
+            <div class="chips type-filter" id="results-windows" role="group" aria-label="Period"></div>
+            <div class="result-stats" id="results-stats"></div>
+            <h3 class="sub-heading">Cards that win more</h3>
+            <p class="muted deck-lede" id="wins-more-lede"></p>
+            <div class="chips type-filter" id="wins-more-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="wins-more"></div>
+            <div class="more-wrap"><button id="more-wins-more" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">New cards in tournaments</h3>
+            <p class="muted deck-lede" id="results-new-lede"></p>
+            <div class="chips type-filter" id="results-new-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="results-new"></div>
+            <div class="more-wrap"><button id="more-results-new" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">Cards that win less</h3>
+            <p class="muted deck-lede" id="wins-less-lede"></p>
+            <div class="chips type-filter" id="wins-less-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="wins-less"></div>
+            <div class="more-wrap"><button id="more-wins-less" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">Best recent finishes</h3>
+            <p class="muted deck-lede" id="finishes-lede"></p>
+            <ol class="deck-list finish-list" id="finishes"></ol>
+            <div class="more-wrap"><button id="more-finishes" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <p class="muted source-note">Tournament results from <a href="https://edhtop16.com" target="_blank" rel="noopener">edhtop16</a>,
+              whose decklists and standings come from <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a>.
+              <a id="results-source" target="_blank" rel="noopener">See this commander on edhtop16 ↗</a></p>
+          </details>
           <details class="panel" open>
             <summary><h2 class="deck-heading">Builds</h2></summary>
             <p class="muted deck-lede" id="builds-lede"></p>
@@ -859,6 +952,59 @@
           </details>
         </div>
       </section>
+      <section class="deck-view" id="tournaments-view" hidden>
+        <p class="message" id="tournaments-message" hidden></p>
+        <div id="tournaments-page" hidden>
+          <div class="chips type-filter trend-windows" id="tour-windows" role="group" aria-label="Period"></div>
+          <div class="result-stats" id="tour-stats"></div>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Commanders</h2></summary>
+            <p class="muted deck-lede" id="tour-commanders-lede"></p>
+            <div class="tour-controls">
+              <input type="search" id="tour-filter" class="filter-box" placeholder="Search commanders" aria-label="Search commanders">
+              <label class="field inline-field"><span class="label">Min. decks</span>
+                <input type="number" id="tour-min" min="1" inputmode="numeric" class="short"></label>
+            </div>
+            <div class="table-wrap">
+              <table class="leaderboard">
+                <thead><tr>
+                  <th scope="col" class="rank">#</th>
+                  <th scope="col">Commander</th>
+                  <th scope="col" class="num"><button type="button" data-sort="decks">Decks</button></th>
+                  <th scope="col" class="num"><button type="button" data-sort="wins">Games won</button></th>
+                  <th scope="col" class="num"><button type="button" data-sort="cut">Top cut</button></th>
+                </tr></thead>
+                <tbody id="tour-rows"></tbody>
+              </table>
+            </div>
+            <div class="more-wrap"><button id="more-tour" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Cards that win more</h2></summary>
+            <p class="muted deck-lede" id="tour-more-lede"></p>
+            <div class="chips type-filter" id="tour-more-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="tour-more"></div>
+            <div class="more-wrap"><button id="more-tour-more" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">New cards</h2></summary>
+            <p class="muted deck-lede" id="tour-new-lede"></p>
+            <div class="chips type-filter" id="tour-new-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="tour-new"></div>
+            <div class="more-wrap"><button id="more-tour-new" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Cards that win less</h2></summary>
+            <p class="muted deck-lede" id="tour-less-lede"></p>
+            <div class="chips type-filter" id="tour-less-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="tour-less"></div>
+            <div class="more-wrap"><button id="more-tour-less" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <p class="muted source-note">Tournament results from <a href="https://edhtop16.com" target="_blank" rel="noopener">edhtop16</a>,
+            whose decklists and standings come from <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a>:
+            cEDH tournaments of 16 players or more.</p>
+        </div>
+      </section>
     </main>
 
     <footer class="colophon">
@@ -873,7 +1019,8 @@
           <h2 class="label">What cards do</h2>
           <p>Function tags from the community <a href="https://tagger.scryfall.com">Scryfall Tagger</a> project.
             Deck recommendations from public decklists on <a href="https://moxfield.com">Moxfield</a> and <a href="https://archidekt.com">Archidekt</a>,
-            and deck links from both.</p>
+            and deck links from both. Tournament results from <a href="https://edhtop16.com">edhtop16</a>
+            and <a href="https://topdeck.gg">TopDeck.gg</a>.</p>
         </section>
         <section>
           <h2 class="label">Prices</h2>
@@ -908,6 +1055,7 @@
       </div>
       <span class="label">Printings</span>
       <ul class="printings" id="printings"></ul>
+      <div class="card-results" id="card-results" hidden></div>
       <div class="card-actions" id="card-actions" hidden>
         <a id="as-commander" class="btn-quiet" hidden>View as commander</a>
         <a id="in-decks" class="btn-quiet">View in commander decks</a>

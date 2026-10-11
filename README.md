@@ -124,6 +124,52 @@ time, a few KB after that).
    A card's details link to its commander page, if it has one, and to its
    page in commander decks (`?card=<number>`): the commanders whose decks
    play it most often, grouped by what those decks are known for.
+
+   **Tournament results**, for commanders with cEDH decklists on
+   [edhtop16](https://edhtop16.com) (whose results come from
+   [TopDeck.gg](https://topdeck.gg)), over the last 3, 6 or 12 months:
+   - `build_decks.py results` keeps `results.jsonl.gz`: every tournament of 16
+     players or more from the last year, each entry's commander, record,
+     standing, decklist link and cards. It fetches only the tournaments it
+     lacks, newest first (and the last 3 days' again, as results come in),
+     so it can stop and go on; the first run takes about 4 hours.
+   - `build_decks.py build` writes `results/<file name>.json` per commander:
+     how many decks, games, wins and top cuts its decks had in each period,
+     the same for the decks that play each card, and its newest top 4
+     finishes. Cards are matched by name.
+   - Each card's decks are measured against the commander's other decks, not
+     against every deck, so a card in strong commanders' decks doesn't look
+     good for it. The measure is games won rather than top cuts (a deck plays
+     5 to 8 games, but makes a cut once). To keep small samples from shouting,
+     both win rates are pulled toward the commander's by 100 games' worth
+     before they're compared, and a card's difference only counts as **wins
+     more** or **wins less** when it's two standard errors or more, counting
+     a deck's games as half as many independent ones (they share a pilot and
+     a list). New cards are listed either way, faded when there's too little
+     to go on. Decks with a card winning more doesn't prove the card wins
+     more: good players pick up new cards first.
+   - The headline numbers compare the commander's decks with every deck in
+     the period: with draws, an average deck wins about a fifth of its games,
+     not a quarter.
+   - Picking **bracket 5** notes each card's tournament result on the page's
+     card tiles. **Deck recommendations** gets a **tournament check** when the
+     deck's commander has results (your cards whose decks win less, and cards
+     whose decks win more that you don't play), and notes on cards to add and
+     cut. A card's details say how its decks did, with that commander and
+     across commanders.
+6. **Tournaments** (`?tournaments`) ranks every commander with tournament
+   decks by decks, share of games won or share of decks making the top cut,
+   each against every deck's, over the last 3, 6 or 12 months. Its cards are
+   compared across commanders without letting commanders count: `pooled()` in
+   `build_decks.py` takes, for each commander with 3 or more decks with a card
+   and without it, the difference in games won between them, and averages
+   those differences weighted by how much each can be trusted, then pulls the
+   result toward none by 100 games' worth (`results/index.json`).
+
+   A card can stand for a style of deck: within Kinnan, the creature-heavy
+   lists win more than the ones with Force of Will and Mana Vault. So these
+   say what winning decks play, not that a card wins on its own, and the page
+   says so.
 5. **Trends** (`?trends`) shows rising and most popular commanders and cards,
    and new cards, over decks made in the last 7, 30 or 90 days or all time.
    Filters (color identity, typical deck price and bracket, a strategy, single
@@ -148,12 +194,12 @@ GitHub Actions rebuilds the index and redeploys every Monday. To update right
 away (e.g. on a set's release day), open **Actions → Build and deploy → Run workflow**.
 
 The deck corpus is too big for git, so it lives on the `deck-corpus` release.
-**Actions → Crawl decks** adds to it every day (two and a half hours on each
-site), then redeploys the site so Trends stays current. To grow it
-faster, crawl locally:
+**Actions → Crawl decks** adds to it every day (the day's tournament results,
+then about two and a half hours on each site), then redeploys the site so Trends
+stays current. To grow it faster, crawl locally:
 
 ```
-gh release download deck-corpus             # decks.jsonl.gz, crawl_state.json
+gh release download deck-corpus             # decks.jsonl.gz, crawl_state.json, results.jsonl.gz
 python build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any time
 python build_index.py                       # Moxfield needs default_cards.jsonl.gz first
 python build_decks.py crawl --site moxfield --hours 24
@@ -206,17 +252,18 @@ Tests: `python test_build_index.py`, `python test_build_decks.py` and `node --te
 ## Files
 
 - `build_index.py`: downloads data from Scryfall, vectorizes the cards, writes the index
-- `build_decks.py`: crawls Archidekt and Moxfield decks, writes the per-commander deck files
+- `build_decks.py`: crawls Archidekt and Moxfield decks and edhtop16's tournament results, writes the per-commander deck files
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
 - `site/deck.js`: decklist parsing, similar decks, recommendations, builds and trends
 - `worker/deck-link.js`: Cloudflare Worker that turns a deck link into a decklist
 - `site/currency.js`: currency detection, exchange rate and price formatting
 - `.github/workflows/deploy.yml`: weekly rebuild and GitHub Pages deploy
-- `.github/workflows/crawl.yml`: daily deck crawl, then a deploy
+- `.github/workflows/crawl.yml`: daily deck crawl and tournament results, then a deploy
 
 Card data and images come from [Scryfall](https://scryfall.com), decklists from
-[Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com). MTG Vec2Search is
+[Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com), tournament results
+from [edhtop16](https://edhtop16.com) and [TopDeck.gg](https://topdeck.gg). MTG Vec2Search is
 unofficial Fan Content permitted under the Fan Content Policy. Not
 approved/endorsed by Wizards. Portions of the materials used are property of
 Wizards of the Coast. ©Wizards of the Coast LLC.

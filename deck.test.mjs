@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, distinctive, averageDeck, buildName, buildTags,
-  decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
+  decodeTrends, cardResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "./site/deck.js";
 
 const NAMES = ["Sol Ring", "Atraxa, Praetors' Voice", "Delver of Secrets // Insectile Aberration", "Island",
@@ -167,4 +167,35 @@ test("a commander's rising cards: what its recent decks play more than its decks
   const all = [0, 1, 2, 3, 4, 5];
   assert.deepEqual(risingCards(shard, all, [3, 4, 5]).map(x => [x.p, x.share, x.was]), [[1, 1, 0.5]]);
   assert.deepEqual(risingCards(shard, all, all), []); // the same decks: nothing rises
+});
+
+test("tournament results: a card's decks against the commander's other decks, small samples pulled in", () => {
+  // Window 0: 100 decks winning 150 of 600 games (25%); window 1 has too few decks to say anything
+  const results = {
+    windows: [365, 90],
+    totals: [[100, 600, 150, 60, 15], [12, 72, 18, 0, 0]],
+    cards: [1, 2, 3, 4, 5],
+    stats: [
+      [50, 300, 100, 30, 12, 0, 0, 0, 0, 0], // wins a third of its games, the rest a sixth
+      [5, 30, 20, 0, 0, 0, 0, 0, 0, 0], // in too few decks
+      [95, 570, 140, 60, 15, 0, 0, 0, 0, 0], // in too many: too few decks without it
+      [20, 120, 30, 12, 3, 0, 0, 0, 0, 0], // wins as often as the rest
+      [10, 60, 25, 0, 0, 0, 0, 0, 0, 0], // wins more, but in only 10 decks
+    ],
+  };
+  const byCard = Object.fromEntries(cardResults(results, 0).map(x => [x.card, x]));
+  assert.deepEqual(Object.keys(byCard), ["1", "4", "5"]);
+  const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
+  close(byCard[1].winRate, 1 / 3);
+  close(byCard[1].winRateWithout, 1 / 6);
+  close(byCard[1].lift, 0.125); // (100 + 25) / 400 - (50 + 25) / 400: 100 games at 25% pulled in on each side
+  close(byCard[1].evidence, (1 / 6) / 0.05); // 0.05: the standard error, with a deck's games counted as half
+  close(byCard[1].conversion, 0.4);
+  close(byCard[1].conversionWithout, 0.1);
+  close(byCard[4].lift, 0);
+  // A 19-point difference over 10 decks counts for less than a 17-point one over 50
+  assert.ok(byCard[5].winRate - byCard[5].winRateWithout > byCard[1].winRate - byCard[1].winRateWithout);
+  assert.ok(byCard[5].lift < byCard[1].lift && byCard[5].lift > 0);
+  assert.equal(byCard[5].conversion, null); // no events with a top cut
+  assert.deepEqual(cardResults(results, 1), []);
 });
