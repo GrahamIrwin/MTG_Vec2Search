@@ -145,7 +145,7 @@ time, a few KB after that).
    [TopDeck.gg](https://topdeck.gg)), over the last 3, 6, 12 or 24 months:
    - `build_decks.py results` keeps `results.jsonl.gz`: every tournament of 16
      players or more from the last two years, each entry's commander, record,
-     standing, decklist link, cards and pilot (with their TopDeck profile). It fetches only the tournaments it
+     standing, decklist link, cards and pilot. It fetches only the tournaments it
      lacks, newest first (and the last 3 days' again, as results come in),
      so it can stop and go on. Events without decklists (about 40%) are skipped,
      and a year takes about 2 hours at 4 events at a time. Events fetched before
@@ -228,7 +228,7 @@ time, a few KB after that).
      commander). A commander's page lists all its pilots in the period it shows. A pilot's page (`?tournaments&pilot=<number>`)
      is their profile: their main commander, rank by match points, best finish
      (the highest place for the field's size), record against every deck's,
-     what they play and how they do on it, a link to their TopDeck profile, and
+     what they play and how they do on it, and
      every deck they played, from `results/pilots/<block>.json` (64 players a
      file, by edhtop16's number for them).
    - **Favorite cards** (`pilot_cards()`): the cards in more of a pilot's decks

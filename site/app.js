@@ -1600,9 +1600,7 @@ async function showPilot(id) {
     Number.isInteger(id) && id > 0 ? getJson(`decks/results/pilots/${Math.floor(id / PILOT_BLOCK)}.json`).catch(() => ({})) : {},
     getJson("decks/results/ranking.json").catch(() => null)]);
   if (!block[id]) return tournamentsMessage("There's no such pilot in these tournament results.");
-  const [name, rows, liked = [], profile = ""] = block[id];
-  $("pilot-profile").hidden = !profile;
-  $("pilot-profile").href = `https://topdeck.gg/profile/${encodeURIComponent(profile)}`;
+  const [name, rows, liked = []] = block[id];
   document.title = `${name || "Unknown pilot"} · MTG Vec2Search`;
   $("pilot-name").textContent = name || "Unknown pilot";
 
@@ -1699,7 +1697,7 @@ async function showPilot(id) {
 // some of those lists but not all, with their games won with each and without; their earlier events
 // against their later; and event by event, what changed from the list before (results/lists/<key>.json)
 const PAGE_VERSIONS = 10;
-const CHANGED_SHOWN = 40;
+const showChanged = typedGallery($("pilot-changed-types"), $("pilot-changed"), $("more-pilot-changed"));
 function showListsOverTime(pilot, rows, theirs, names, leadName) {
   const kept = key => rows.filter(r => r[8] === key && r[11] >= 0).reverse(); // oldest first
   const listed = theirs.filter(c => c.key && kept(c.key).length >= 2);
@@ -1736,17 +1734,16 @@ function showListsOverTime(pilot, rows, theirs, names, leadName) {
       const [gw, kw] = [all[0] - g, all[1] - k];
       return g && gw ? [{ card, decks: having.length, g, k, gw, kw, rate: k / g, without: kw / gw }] : [];
     }).map(x => ({ ...x, clear: Math.abs(x.rate - x.without) * Math.sqrt(1 / (1 / x.g + 1 / x.gw)) }))
-      .sort((a, b) => b.clear - a.clear || b.decks - a.decks).slice(0, CHANGED_SHOWN);
+      .sort((a, b) => b.clear - a.clear || b.decks - a.decks);
     $("pilot-changed-lede").textContent = changed.length
-      ? "In some of these lists but not all: in how many, and their games won with it against without it. The clearest differences first, counting more games for more."
+      ? "In some of these lists but not all. ▲ and ▼: how many points more or less of their games they won with it than without it, "
+        + "the clearest differences first, counting more games for more."
       : "They played the same cards every time.";
-    $("pilot-changed").replaceChildren(...changed.map(x => {
-      const button = cardButton(x.card, names);
-      button.title = `In ${x.decks} of ${n} lists. Won ${x.k} of ${x.g} games with it, ${x.kw} of ${x.gw} without.`;
-      button.append(el("small", { className: x.rate > x.without ? "up" : x.rate < x.without ? "down" : "",
-        textContent: `${x.decks}/${n} · ${percent(x.rate)} vs ${percent(x.without)}` }));
-      return button;
-    }));
+    showChanged(changed.map(x => ({
+      card: x.card, type: typeOf(x.card), bar: x.decks / n, detail: points(x.rate - x.without),
+      tone: x.rate > x.without ? "up" : x.rate < x.without ? "down" : "",
+      note: `In ${x.decks} of ${n} lists · won ${percent(x.rate)} with it, ${percent(x.without)} without`,
+    })));
 
     // Event by event, newest first, each against the list before it
     const byName = (a, b) => names[a].localeCompare(names[b]);

@@ -488,8 +488,6 @@
     .finish-links { display: flex; gap: 12px; justify-self: end; }
     .deck-body .added { color: var(--up); }
     .deck-body .cut { color: var(--down); }
-    #pilot-changed .term small.up { color: var(--up); }
-    #pilot-changed .term small.down { color: var(--down); }
     .source-note { font-size: 14px; margin: 26px 0 0; }
     .highlights { margin-bottom: 22px; }
     .pilot-search { display: grid; justify-items: center; gap: 6px; margin: 0 0 22px; }
@@ -1118,7 +1116,6 @@
               <p class="muted" id="pilot-meta"></p>
               <p class="theme-line" id="pilot-best" hidden></p>
               <p class="theme-line" id="pilot-commanders"></p>
-              <a class="btn-quiet" id="pilot-profile" target="_blank" rel="noopener" hidden>TopDeck profile: all their events ↗</a>
             </div>
           </div>
           <div class="result-stats" id="pilot-stats"></div>
@@ -1135,7 +1132,9 @@
             <div class="chips type-filter" id="pilot-lists-commanders" role="group" aria-label="Commander"></div>
             <h3 class="sub-heading">Cards they changed</h3>
             <p class="muted deck-lede" id="pilot-changed-lede"></p>
-            <div class="term-items" id="pilot-changed"></div>
+            <div class="chips type-filter" id="pilot-changed-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="pilot-changed"></div>
+            <div class="more-wrap"><button id="more-pilot-changed" class="btn-quiet" type="button" hidden>Show more</button></div>
             <h3 class="sub-heading">Event by event</h3>
             <p class="muted deck-lede">Newest first: games won at each event, and what changed from the list before. Open one for the cards.</p>
             <ol class="deck-list" id="pilot-versions"></ol>
