@@ -33,7 +33,7 @@ jobs:
       - run: python3 build_decks.py crawl --hours 2.4 --no-upload
       - if: ${{ !cancelled() }}
         run: python3 build_decks.py crawl --site moxfield --hours 2.4 --no-upload
+      # Merged with the release first: a local crawl may have uploaded since this one downloaded it.
+      # Then a deploy
       - if: ${{ !cancelled() }}
-        run: gh release upload deck-corpus decks.jsonl.gz crawl_state.json results.jsonl.gz --clobber
-      - if: ${{ !cancelled() }}
-        run: gh workflow run deploy.yml
+        run: python3 build_decks.py share

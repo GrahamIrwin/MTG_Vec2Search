@@ -312,6 +312,16 @@ with tempfile.TemporaryDirectory() as tmp:
     assert query("/v2/decks/search") and all(q["minBracket"] == q["maxBracket"] == ["5"] for q in query("/v2/decks/search"))
     with open("crawl_state.json", encoding="utf-8") as f:
         assert {"A (bracket 5)", "moxfield:A (bracket 5)"} <= set(json.load(f))
+    # A site error on one commander's search skips it, unmarked so it's first in line next time,
+    # rather than stopping the crawl
+    def failing(path, base=build_decks.ARCHIDEKT):
+        if path.startswith("/v2/cards/search"):
+            raise urllib.error.HTTPError(path, 424, "Failed Dependency", {}, None)
+        return fake_get_json(path, base)
+    build_decks.get_json = failing
+    build_decks.crawl(1, only=["b"], site="moxfield", bracket=4)
+    with open("crawl_state.json", encoding="utf-8") as f:
+        assert "moxfield:B // B2 (bracket 4)" not in json.load(f)
 
     # Before uploading, the release's copy is merged in: decks only it has, and newer versions
     os.makedirs("release")
@@ -325,5 +335,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert {i: d["updated"] for i, d in mine.items()} == {1: "2026-06-01", 2: "2026-12-01", 99: "2026-09-30"}
     assert state == {"A": "2027-01-01", "B // B2": "2026-10-01", "Z": "2026-01-01"}
     assert mine[1]["created"] == "2025-12-01"  # an older copy can still tell when the deck was made
+    # Tournaments: the ones only the other copy has, and ones it has more decklists of
+    mine = {"a": {"entries": [1, 2]}, "b": {"entries": [1]}}
+    assert build_decks.merge_results(mine, {"a": {"entries": [1]}, "b": {"entries": [1, 2]}, "c": {"entries": []}}) == 2
+    assert mine == {"a": {"entries": [1, 2]}, "b": {"entries": [1, 2]}, "c": {"entries": []}}
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 print("ok")

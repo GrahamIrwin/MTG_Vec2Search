@@ -227,10 +227,13 @@ python build_index.py                       # Moxfield needs default_cards.jsonl
 python build_decks.py crawl --site moxfield --hours 24
 ```
 
-When a crawl stops (Ctrl+C, or its hours run out) it uploads the corpus to the
-release (and starts a deploy, so the site has them), after first merging in any
-decks the release has that it doesn't (the
-daily crawl's, say), so an upload never loses any. `--no-upload` skips that.
+When a crawl stops (Ctrl+C, or its hours run out) it uploads the corpus, crawl
+state and tournament results to the release (and starts a deploy, so the site
+has them), after first merging in any decks and tournaments the release has
+that it doesn't (the daily crawl's, say), so an upload never loses any.
+`--no-upload` skips that; `python build_decks.py share` does it on its own. The
+daily crawl uploads the same way, since a local crawl may have uploaded while it
+ran: replacing the release's files outright would lose what arrived meanwhile.
 
 To fill in commanders the corpus barely has, top up the most played ones (by
 EDHREC rank) to a number of decks each, several at a time. Run one crawl at a

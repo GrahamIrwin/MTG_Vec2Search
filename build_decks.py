@@ -7,6 +7,7 @@ the data behind "Find similar decks" and the commander pages.
     python build_decks.py crawl --top 3500 --per-commander 20 --rate 3   # fill in popular commanders
     python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000
     python build_decks.py results --hours 1   # resumable: the last two years' tournaments, newest first
+    python build_decks.py share               # merge with the release and upload (a crawl does this itself)
     python build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
@@ -71,7 +72,7 @@ def get_json(path, base=ARCHIDEKT, post=None):
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return None
-            if e.code not in (429, 500, 502, 503, 504):
+            if e.code not in (408, 424, 429, 500, 502, 503, 504):  # 424: Moxfield's search, now and then
                 raise
             problem, asked = f"answered {e.code}", e.headers.get("Retry-After", "")
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
@@ -352,31 +353,49 @@ def merge(corpus, state, other_dir, path=CORPUS, state_path=STATE):
     return taken
 
 
-def share(corpus, state, path=CORPUS, state_path=STATE):
-    """Upload the corpus to the release, after merging in what the release has that it doesn't
-    (another crawl's decks, e.g. the weekly one on GitHub Actions), so nothing there is lost."""
+def merge_results(mine, theirs):
+    """Add the tournaments another copy of results.jsonl.gz has that this one doesn't, or has more
+    decklists of. Returns how many it took."""
+    taken = [i for i, t in theirs.items() if i not in mine or len(t["entries"]) > len(mine[i]["entries"])]
+    mine.update((i, theirs[i]) for i in taken)
+    return len(taken)
+
+
+def share(corpus, state, path=CORPUS, state_path=STATE, results_path=RESULTS):
+    """Upload the corpus, crawl state and tournament results to the release, after merging in what
+    the release has that they don't (another crawl's, e.g. the daily one on GitHub Actions), so
+    nothing there is lost: uploading over it unmerged loses whatever arrived since it was downloaded.
+    Returns whether it uploaded."""
     print(f"\nSharing with the {RELEASE} release...", flush=True)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             got = subprocess.run(["gh", "release", "download", RELEASE, "--dir", tmp,
-                                  "--pattern", path, "--pattern", state_path])
+                                  "--pattern", path, "--pattern", state_path, "--pattern", results_path])
             if got.returncode:  # uploading anyway could replace decks we couldn't see
                 raise RuntimeError("couldn't download the release to merge with")
             taken = merge(corpus, state, tmp, path, state_path)
+            results = load_corpus(results_path)
+            took = merge_results(results, load_corpus(os.path.join(tmp, results_path)))
         save_corpus(corpus, path)
+        if results:
+            save_corpus(results, results_path)
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
-        print(f"Merged in {taken:,} decks from the release; {len(corpus):,} in all", flush=True)
-        if subprocess.run(["gh", "release", "upload", RELEASE, path, state_path, "--clobber"]).returncode:
+        print(f"Merged in {taken:,} decks and {took:,} tournaments from the release; {len(corpus):,} decks "
+              f"and {len(results):,} tournaments in all", flush=True)
+        files = [path, state_path] + ([results_path] if results else [])
+        if subprocess.run(["gh", "release", "upload", RELEASE, *files, "--clobber"]).returncode:
             raise RuntimeError("the upload failed")
         print("Uploaded.", flush=True)
         # The site only reads the corpus when it's built, so build it now rather than on Monday
         deployed = not subprocess.run(["gh", "workflow", "run", "deploy.yml"]).returncode
         print("Started a deploy; the site has the new decks in a few minutes." if deployed else
               "Couldn't start a deploy: Actions → Build and deploy → Run workflow", flush=True)
+        return True
     except (OSError, RuntimeError) as e:  # OSError: gh isn't installed
         print(f"Couldn't share it ({e}). Everything is saved here; to try again:\n"
-              f"  gh release upload {RELEASE} {path} {state_path} --clobber", flush=True)
+              "  python build_decks.py share", flush=True)
+        return False
 
 
 def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=CORPUS, state_path=STATE,
@@ -452,6 +471,15 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                           f"{lead[:40]:<40}  {link.format(deck_id)}", flush=True)
             return added
 
+        def crawl_one(commander, want):
+            """fetch() for one commander: None when the site keeps failing for it, so it's skipped (and,
+            not marked as crawled, first in line next time) rather than stopping the crawl"""
+            try:
+                return fetch(search(commander), want)
+            except (urllib.error.HTTPError, RuntimeError) as e:
+                print(f"  ! Skipping {commander}: {e}", flush=True)
+                return None
+
         def take_turns(queue):  # threads take commanders off the queue: [(name, decks wanted)]
             jobs = iter(enumerate(queue, 1))
 
@@ -459,7 +487,9 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                 for i, (commander, want) in jobs:
                     if time.time() > deadline or stop.is_set():
                         return
-                    added = fetch(search(commander), want)
+                    added = crawl_one(commander, want)
+                    if added is None:
+                        continue
                     with lock:
                         state[turn(commander)] = date.today().isoformat()
                         with open(state_path, "w", encoding="utf-8") as f:
@@ -496,7 +526,9 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                 done.add(commander)
                 last = state.get(turn(commander))
                 print(f"[{len(done)}] {commander}" + (f" (last crawled {last})" if last else ""), flush=True)
-                added = fetch(search(commander), per_commander)
+                added = crawl_one(commander, per_commander)
+                if added is None:
+                    continue
                 state[turn(commander)] = date.today().isoformat()
                 with open(state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
@@ -512,7 +544,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
     if upload:
         share(corpus, state, path, state_path)
     else:
-        print(f"Share it with the site: gh release upload {RELEASE} {path} {state_path} --clobber", flush=True)
+        print("Share it with the site (merged with the release first): python build_decks.py share", flush=True)
 
 
 # === Build site/decks/ ===
@@ -898,6 +930,7 @@ if __name__ == "__main__":
                    help="don't merge with and upload to the deck-corpus release when the crawl stops")
     r = sub.add_parser("results", help="download the last two years' cEDH tournament results from edhtop16")
     r.add_argument("--hours", type=float, help="stop after this long")
+    sub.add_parser("share", help="merge with the release, upload the corpus, crawl state and results, and deploy")
     sub.add_parser("build", help="write site/decks/ from the corpus")
     args = p.parse_args()
     sys.stdout.reconfigure(errors="replace")  # deck names with emoji can't crash a non-UTF-8 console
@@ -907,6 +940,9 @@ if __name__ == "__main__":
               bracket=args.bracket)
     elif args.cmd == "results":
         fetch_results(args.hours)
+    elif args.cmd == "share":
+        state = json.load(open(STATE, encoding="utf-8")) if os.path.exists(STATE) else {}
+        sys.exit(0 if share(load_corpus(), state) else 1)
     else:
         build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=load_printings()[0],
               results=load_corpus(RESULTS))
