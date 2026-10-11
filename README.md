@@ -173,6 +173,7 @@ past about 3 requests a second.
 python build_decks.py crawl --top 3500 --per-commander 5 --rate 2    # enough for every commander first
 python build_decks.py crawl --top 3500 --per-commander 20 --rate 2   # then more
 python build_decks.py crawl --only "Atraxa, Praetors' Voice" --per-commander 3000 --rate 2   # one commander's newest 3,000
+python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000   # just its bracket 5 decks
 ```
 
 ## The deck link Worker

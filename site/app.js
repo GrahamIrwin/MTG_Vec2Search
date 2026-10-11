@@ -615,6 +615,7 @@ const showAdds = typedGallery($("add-types"), $("adds"), $("more-adds"));
 const PAGE_COMMANDERS = 30;
 const SIGNATURE_SHOWN = 60;
 const PAGE_LISTS = 20;
+const BRACKETS = ["Any", "1 Exhibition", "2 Core", "3 Upgraded", "4 Optimized", "5 cEDH"];
 const BASIC_OF = { W: "Plains", U: "Island", B: "Swamp", R: "Mountain", G: "Forest" };
 const commanderMessage = text => {
   $("commander-message").textContent = text;
@@ -769,23 +770,45 @@ async function showCommander(key) {
         ?? names[shard.cards[distinctive(shard, members, { n: 1, ignore: lands })[0]]],
     };
   });
-  const groups = [{ name: "All decks", members: shard.decks.map((_, d) => d) }, ...builds];
+  const groups = [{ name: "All decks", members: shard.decks.map((_, d) => d), all: true }, ...builds];
   $("builds-lede").textContent = builds.length
     ? `${lead} decks fall into ${builds.length} builds by the cards they play, each named for the kind of card (Scryfall Tagger tag) it plays more of than the rest. Pick one to see its cards and decks.`
     : `There aren't enough ${lead} decks, or they're too alike, to tell builds apart.`;
   $("builds").hidden = !builds.length;
+  // The build's decks of one bracket (the one its builder gave it), or all of them. The URL holds
+  // both (the build by name), so a view of a commander is a link to share.
+  let build = groups.find(g => g.name === params.get("build")) ?? groups[0];
+  let bracket = Math.max(0, BRACKETS.findIndex((_, b) => b && String(b) === params.get("bracket")));
   $("builds").replaceChildren(...groups.map((g, i) => el("button", {
-    type: "button", ariaPressed: String(i === 0),
+    type: "button", ariaPressed: String(g === build),
     onclick: e => {
       for (const b of $("builds").children) b.ariaPressed = String(b === e.currentTarget);
-      showGroup(g);
+      build = g;
+      showBuild();
     },
   }, g.name, el("small", { textContent: i ? `${Math.round(g.members.length / n * 100)}%` : n.toLocaleString() }))));
+
+  const ofBracket = (members, b) => members.filter(d => shard.decks[d].bracket === b);
+  $("bracket-filter").hidden = !shard.decks.some(d => d.bracket);
+  function showBuild() {
+    if (!ofBracket(build.members, bracket).length) bracket = 0;
+    history.replaceState(null, "", "?" + new URLSearchParams([["commander", key],
+      ...(build.all ? [] : [["build", build.name]]), ...(bracket ? [["bracket", bracket]] : [])]));
+    const given = build.members.length - ofBracket(build.members, 0).length;
+    $("brackets-lede").textContent = `The bracket each deck's builder gave it. ${percent(given / build.members.length)} of these decks have one.`;
+    $("brackets").replaceChildren(...BRACKETS.map((label, b) => {
+      const k = b ? ofBracket(build.members, b).length : build.members.length;
+      return el("button", { type: "button", ariaPressed: String(b === bracket), disabled: !k,
+        onclick: () => { bracket = b; showBuild(); } }, label, el("small", { textContent: k.toLocaleString() }));
+    }));
+    return showGroup(!bracket ? build : { ...build, all: false, members: ofBracket(build.members, bracket),
+      name: [build.all ? "" : build.name, `bracket ${bracket}`].filter(Boolean).join(", ") });
+  }
 
   let current;
   async function showGroup(g) {
     current = g;
-    const all = g === groups[0];
+    const all = g.all;
     const counts = playCounts(shard, g.members);
     const share = p => counts[p] / g.members.length;
     const detail = p => `in ${Math.round(share(p) * 100)}% of decks`;
@@ -796,7 +819,8 @@ async function showCommander(key) {
     // or from the commander's other decks (a build)
     $("signature-lede").textContent = all
       ? `What ${lead} decks play far more often than other commanders' decks do.`
-      : `What this build plays far more often than other ${lead} decks do. It leans on: ${g.tags.map(t => tagLabel(t).toLowerCase()).join(", ") || "no tag in particular"}.`;
+      : `What these decks play far more often than other ${lead} decks do.`
+        + (g.tags ? ` They lean on: ${g.tags.map(t => tagLabel(t).toLowerCase()).join(", ") || "no tag in particular"}.` : "");
     showSignature((all ? (shard.signature ?? entry[2]).map(c => shard.position.get(c)).filter(p => p !== undefined)
       : distinctive(shard, g.members, { n: SIGNATURE_SHOWN, ignore: lands })).slice(0, SIGNATURE_SHOWN).map(tile));
 
@@ -811,7 +835,7 @@ async function showCommander(key) {
     const basicCounts = kinds.map((b, i) => [names.indexOf(b), Math.floor(basics / kinds.length) + (i < basics % kinds.length)])
       .filter(([, k]) => k);
     $("average-lede").textContent = `${average.spells.length} spells and ${average.lands.length + basics} lands`
-      + ` (${basics} of them basic), as many of each as ${all ? "these" : "this build's"} decks play on average, picking the cards they play most.`;
+      + ` (${basics} of them basic), as many of each as these decks play on average, picking the cards they play most.`;
     const picks = [...average.spells, ...average.lands].map(p => ({ card: shard.cards[p], detail: detail(p), bar: share(p) }))
       .concat(basicCounts.map(([card, k]) => ({ card, detail: `× ${k}`, bar: null, copies: k })));
     const byType = new Map();
@@ -879,7 +903,7 @@ async function showCommander(key) {
     }, `${w.days} days`, el("small", { textContent: w.since === null ? "–" : recentOf(w).length }))));
     const w = windows[shownWindow];
     const recent = w ? recentOf(w) : [];
-    const whose = g === groups[0] ? `${lead}'s` : "this build's";
+    const whose = g.all ? `${lead}'s` : "these";
     $("commander-trends-lede").textContent = !w
       ? "Not enough data yet: decks show up here once the crawler knows when they were made."
       : `${recent.length.toLocaleString()} of ${whose} ${g.members.length.toLocaleString()} decks were made in the last ${w.days} days.`;
@@ -891,7 +915,7 @@ async function showCommander(key) {
       .map(p => pick(p, `in ${percent(counts[p] / g.members.length)} of decks`, counts[p] / g.members.length)));
   }
 
-  await showGroup(groups[0]);
+  await showBuild();
   commanderMessage("");
   $("commander-page").hidden = false;
 }

@@ -82,6 +82,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # Trends: deck 1 was made long ago, 4 three weeks ago and 5 three days ago; 2 and 3 have no date,
     # but Archidekt numbers decks as they're made, so 2 and 3 are older than 4
     corpus[1]["created"], corpus[4]["created"], corpus[5]["created"] = "2025-01-01", "2026-09-13", "2026-10-01"
+    corpus[5]["bracket"], corpus[4]["bracket"] = 4, None
     build(corpus, cards, tags, out, prices={"cmdr": 2.0, "c0": 1.0, "island": 0.5}, today=date(2026, 10, 4))
     with open(os.path.join(out, "0.json"), encoding="utf-8") as f:
         shard = json.load(f)
@@ -89,6 +90,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert shard["tags"] == [["pump", [0, 1]]] and len(shard["signature"]) == 60, shard["tags"]
     first = shard["decks"][0]
     assert first[0] == 5 and first[2] == "2026-09-05" and first[4] == "2026-10-01"  # newest first; when it was made
+    assert [d[5] for d in shard["decks"]] == [4, 0, 3, 3, 3]  # its bracket (0: none)
     assert [d[4] for d in shard["decks"]] == ["2026-10-01", "2026-09-13", "2025-01-01", "2025-01-01", "2025-01-01"]
     positions = [sum(first[3][:i + 1]) for i in range(len(first[3]))]
     assert [shard["cards"][p] for p in positions] == [2, 98]  # no commander, no basic land
@@ -225,6 +227,16 @@ with tempfile.TemporaryDirectory() as tmp:
         ["new-Descending1-0", "new-Descending1-1", "new-Descending2-0", "new-Descending2-1"]
     build_decks.crawl(10, only=["d"], site="moxfield")
     assert sum(isinstance(d["id"], str) and d["commanders"] == ["D"] for d in load_corpus("decks.jsonl.gz").values()) == 8
+    # --bracket: each site's search asks for just that bracket, and the crawl takes its own turns
+    searched = []
+    build_decks.get_json = lambda path, base=build_decks.ARCHIDEKT: searched.append(path) or fake_get_json(path, base)
+    build_decks.crawl(1, only=["a"], bracket=5)
+    build_decks.crawl(1, only=["a"], site="moxfield", bracket=5)
+    query = lambda prefix: [urllib.parse.parse_qs(p.partition("?")[2]) for p in searched if p.startswith(prefix)]
+    assert query("/decks/v3/") and all(q["edhBracket"] == ["5"] for q in query("/decks/v3/"))
+    assert query("/v2/decks/search") and all(q["minBracket"] == q["maxBracket"] == ["5"] for q in query("/v2/decks/search"))
+    with open("crawl_state.json", encoding="utf-8") as f:
+        assert {"A (bracket 5)", "moxfield:A (bracket 5)"} <= set(json.load(f))
 
     # Before uploading, the release's copy is merged in: decks only it has, and newer versions
     os.makedirs("release")

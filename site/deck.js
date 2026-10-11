@@ -59,11 +59,11 @@ export function parseDecklist(text, lookup) {
 // `cards`, made (date, "" if unknown)]; tags = [tag, gaps between positions];
 // price (US cents), bracket and themes: what a typical deck costs, its bracket, what they're known for
 export function decodeShard(shard) {
-  const decks = shard.decks.map(([id, name, updated, gaps, made = ""]) => {
+  const decks = shard.decks.map(([id, name, updated, gaps, made = "", bracket = 0]) => {
     const cards = new Int32Array(gaps.length);
     let p = 0;
     gaps.forEach((gap, i) => (cards[i] = p += gap));
-    return { id, name, updated, cards, made };
+    return { id, name, updated, cards, made, bracket };
   });
   // How many decks play each card, and its weight: cards every deck plays (Sol Ring) say little
   // about a deck, rare ones say a lot (IDF)

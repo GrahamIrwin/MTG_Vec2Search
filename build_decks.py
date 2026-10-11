@@ -4,6 +4,7 @@ and turn it into site/decks/, the data behind "Find similar decks".
     python build_decks.py crawl --hours 5     # resumable: stop and restart any time
     python build_decks.py crawl --site moxfield --hours 5
     python build_decks.py crawl --top 3500 --per-commander 20 --rate 3   # fill in popular commanders
+    python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000
     python build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
@@ -78,13 +79,15 @@ def get_json(path, base=ARCHIDEKT):
     raise RuntimeError(f"{site} keeps failing for {path}")
 
 
-def search_decks(commander=None, pages=MAX_PAGES):
+def search_decks(commander=None, pages=MAX_PAGES, bracket=None):
     """(id, last update date, creation date) of complete Commander decks, most recently updated first,
-    optionally only those led by this commander. A search stops after MAX_PAGES (3,000 decks),
-    so a commander's search then goes on from its oldest decks: twice as many in all."""
+    optionally only those led by this commander, or of this bracket. A search stops after MAX_PAGES
+    (3,000 decks), so a commander's search then goes on from its oldest decks: twice as many in all."""
     query = {"deckFormat": COMMANDER_FORMAT, "pageSize": 50}
     if commander:
         query["commanderName"] = commander
+    if bracket:
+        query["edhBracket"] = bracket
     for order in ["-updatedAt", "updatedAt"] if commander else ["-updatedAt"]:
         for page in range(1, pages + 1):
             data = get_json("/decks/v3/?" + urllib.parse.urlencode({**query, "orderBy": order, "page": page}))
@@ -119,10 +122,12 @@ def slim_deck(deck):
             "commanders": sorted(commanders), "cards": cards}
 
 
-def search_moxfield(commander=None, pages=MOX_PAGES):
+def search_moxfield(commander=None, pages=MOX_PAGES, bracket=None):
     """search_decks, on Moxfield: (public id, last update date, creation date) of complete public
     Commander decks, most recently updated first; for a commander, then its oldest too."""
     query = {"fmt": "commander", "pageSize": 100, "sortType": "updated"}
+    if bracket:
+        query["minBracket"] = query["maxBracket"] = bracket
     if commander:  # Moxfield finds a commander's decks by its own card id
         found = get_json("/v2/cards/search?" + urllib.parse.urlencode({"q": commander}), MOXFIELD) or {}
         ids = [c["id"] for c in found.get("data") or [] if c.get("name", "").lower() == commander.lower()]
@@ -277,21 +282,24 @@ def share(corpus, state, path=CORPUS, state_path=STATE):
 
 
 def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=CORPUS, state_path=STATE,
-          site="archidekt"):
+          site="archidekt", bracket=None):
     """First the decks updated most recently on `site` (new decks, and new versions of ones we have),
     then up to per_commander more decks for each commander: commanders never crawled there first
     (most common in the corpus first), then the ones crawled longest ago, until `hours` run out.
     With `top`: instead, the `top` most played commanders, each topped up to per_commander of the
-    site's decks, several at once (as fast as DELAY allows)."""
+    site's decks, several at once (as fast as DELAY allows). With `bracket`: only decks their
+    builders gave that bracket."""
     moxfield = site == "moxfield"
     if moxfield:
         oracles = printing_oracles()  # Moxfield decks list printings
-        search, link = search_moxfield, "moxfield.com/decks/{}"
+        site_search, link = search_moxfield, "moxfield.com/decks/{}"
         get_deck = lambda i: slim_moxfield(get_json(f"/v3/decks/all/{i}", MOXFIELD) or {}, oracles)
     else:
-        search, link = search_decks, "archidekt.com/decks/{}"
+        site_search, link = search_decks, "archidekt.com/decks/{}"
         get_deck = lambda i: slim_deck(get_json(f"/decks/{i}/") or {})
-    turn = (lambda c: f"moxfield:{c}") if moxfield else (lambda c: c)  # a commander's key in state
+    search = lambda commander=None: site_search(commander, bracket=bracket)
+    # A commander's key in state; a bracket's crawl takes its own turns, apart from the commander's
+    turn = lambda c: ("moxfield:" if moxfield else "") + c + (f" (bracket {bracket})" if bracket else "")
     deadline = time.time() + hours * 3600 if hours else float("inf")
     stop = threading.Event()  # Ctrl+C: threads finish their request but save nothing more
     lock = threading.Lock()  # around the corpus, the file and the counts
@@ -309,6 +317,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
     start, before = time.time(), len(corpus)
     counts = {"new": 0, "updated": 0}
     print(f"{len(corpus):,} decks in {path}" + (f"; crawling for {hours:g} hours" if hours else "")
+          + (f"; only bracket {bracket} decks" if bracket else "")
           + "\n  + new deck   ~ newer version of a deck we had\n", flush=True)
 
     def progress():
@@ -413,10 +422,11 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 # a search downloads just the decks for the pasted deck's commander:
 #   <card>.json / <card>-<card>.json
 #       cards  the cards these decks play (card numbers), most played first
-#       decks  [id, name, last updated, cards, made], the newest MAX_DECKS; id is Archidekt's (a
+#       decks  [id, name, last updated, cards, made, bracket], the newest MAX_DECKS; id is Archidekt's (a
 #              number) or Moxfield's (a string); cards are positions in `cards`, sorted and stored
 #              as gaps (popular cards have small positions, so the gaps are small numbers; same
-#              idea as index/t/); made: when the deck was made (see made_dates; "" if unknown)
+#              idea as index/t/); made: when the deck was made (see made_dates; "" if unknown);
+#              bracket: what its builder gave it (0: none)
 #       signature  the SHOWN_SIGNATURE cards these decks play far more often than other decks do
 #       tags   [Scryfall Tagger tag, gaps between positions in `cards`], over the nonland cards
 #              at least COMMON of the decks play: what the site names a commander's builds by
@@ -584,7 +594,8 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None):
                     by_tag[t].append(i)
         write_json(os.path.join(out_dir, f"{key}.json"), {
             "cards": played_most,
-            "decks": [[d["id"], d["name"][:80], d["updated"], gaps(sorted(position[c] for c in played)), made[d["id"]]]
+            "decks": [[d["id"], d["name"][:80], d["updated"], gaps(sorted(position[c] for c in played)), made[d["id"]],
+                       d.get("bracket") or 0]
                       for d, played in decks],
             "signature": signature[:SHOWN_SIGNATURE],
             "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
@@ -620,6 +631,7 @@ if __name__ == "__main__":
     c.add_argument("--only", nargs="*", help="crawl just these commanders (card names; double-faced ones by either)")
     c.add_argument("--hours", type=float, help="stop after this long")
     c.add_argument("--top", type=int, help="instead: top up the N most played commanders to --per-commander decks each")
+    c.add_argument("--bracket", type=int, choices=range(1, 6), help="only decks their builders gave this bracket")
     c.add_argument("--rate", type=float, default=1 / DELAY, help="requests a second (default: %(default)g)")
     c.add_argument("--no-upload", action="store_true",
                    help="don't merge with and upload to the deck-corpus release when the crawl stops")
@@ -628,6 +640,7 @@ if __name__ == "__main__":
     sys.stdout.reconfigure(errors="replace")  # deck names with emoji can't crash a non-UTF-8 console
     if args.cmd == "crawl":
         DELAY = 1 / args.rate
-        crawl(args.per_commander, args.only, args.hours, args.top, upload=not args.no_upload, site=args.site)
+        crawl(args.per_commander, args.only, args.hours, args.top, upload=not args.no_upload, site=args.site,
+              bracket=args.bracket)
     else:
         build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=load_printings()[0])
