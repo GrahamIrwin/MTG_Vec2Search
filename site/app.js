@@ -421,7 +421,7 @@ async function showCardResults(card) {
     lines.push(el("p", {}, `In the last ${periodName(all.windows[w])}, ${percent1(decks / fieldDecks)} of ${fieldDecks.toLocaleString()} tournament decks play it (${decks.toLocaleString()} ${decks === 1 ? "deck" : "decks"}). `
       + (!commanders ? "Too few of any one commander's decks play it to compare."
         : Math.abs(evidence) < SIGNAL * 100 ? `No clear difference yet between decks with it and without it, within ${theCommanders(commanders)}.`
-          : `Within ${theCommanders(commanders)}, decks with it won ${Math.abs(lift / 100).toFixed(1)} points ${lift > 0 ? "more" : "less"} of their games than decks without it.`),
+          : `Within ${theCommanders(commanders)}, decks with it had a win rate ${Math.abs(lift / 100).toFixed(1)} pts ${lift > 0 ? "higher" : "lower"} than decks without it.`),
       " ", el("a", { href: "?tournaments", textContent: "Tournaments →" })));
   }
   if (!lines.length) return;
@@ -598,12 +598,12 @@ async function showAgainst(target, mine, ownKey) {
   const adds = [...target.cards].filter(c => !yours.has(c)).sort(order(1));
   const cuts = mine.filter(c => !target.cards.has(c)).sort(order(-1));
   $("against-lede").textContent = `${target.label}. ${mine.length - cuts.length} of your cards are in it; it has ${adds.length} yours doesn't, and yours has ${cuts.length} it doesn't. `
-    + (results ? `▲ and ▼ are how many points more or less of their games ${target.lead} tournament decks with the card won than those without it, `
+    + (results ? `▲ and ▼: how much higher or lower the win rate of ${target.lead} tournament decks with the card is than of those without it, `
       + `in the last ${periodName(results.windows[w])}. A card can stand for a style of build, so weigh them together.` : "There are no tournament results to rank them by.")
     + (ownKey !== target.key ? " Your deck's commander isn't theirs, so expect many differences." : "");
-  $("against-adds-lede").textContent = adds.length ? "In their list, not yours: the cards whose decks won most first. Faded: too few decks to be sure yet."
+  $("against-adds-lede").textContent = adds.length ? "In their list, not yours: the biggest win rate boosts first. Faded: too few decks to be sure yet."
     : "Your deck has every card in their list.";
-  $("against-cuts-lede").textContent = cuts.length ? "In your deck, not theirs: the cards whose decks won least first."
+  $("against-cuts-lede").textContent = cuts.length ? "In your deck, not theirs: the lowest win rates first."
     : "Every card in your deck is in their list.";
   await Promise.all([showAgainstAdds(adds.map(tile)), showAgainstCuts(cuts.map(tile))]);
 }
@@ -690,10 +690,10 @@ async function findSimilar(key) {
     const less = tested.filter(x => yours.has(x.card) && x.lift < 0 && x.evidence <= -SIGNAL).sort((a, b) => a.lift - b.lift);
     const more = tested.filter(x => !yours.has(x.card) && (identity[x.card] & ~colors) === 0 && x.lift > 0 && x.evidence >= SIGNAL)
       .sort((a, b) => b.lift - a.lift);
-    $("mine-less-lede").textContent = less.length ? "Decks that play these won less often than those that don't."
-      : "None of your cards' decks clearly won less than the rest.";
-    $("missing-more-lede").textContent = more.length ? "Decks that play these won more often than those that don't."
-      : "Every card whose decks clearly won more is already in your deck.";
+    $("mine-less-lede").textContent = less.length ? "Decks with these have a lower win rate than decks without them."
+      : "None of your cards clearly lowers the win rate of the decks that play it.";
+    $("missing-more-lede").textContent = more.length ? "Decks with these have a higher win rate than decks without them."
+      : "Every card with a clearly higher win rate is already in your deck.";
     await Promise.all([showMineLess(less.map(x => resultTile(x, decksThere))), showMissingMore(more.map(x => resultTile(x, decksThere)))]);
   }
 
@@ -1108,6 +1108,11 @@ const showWinsMore = typedGallery($("wins-more-types"), $("wins-more"), $("more-
 const showWinsLess = typedGallery($("wins-less-types"), $("wins-less"), $("more-wins-less"));
 const showResultsNew = typedGallery($("results-new-types"), $("results-new"), $("more-results-new"));
 const percent1 = x => `${(x * 100).toFixed(1)}%`;
+// "win rate +4 pts with it": how much higher (or lower) a win rate is with a card than without
+const winChange = (withIt, without) => {
+  const d = Math.round((withIt - without) * 100);
+  return d ? `win rate ${d > 0 ? "+" : "−"}${Math.abs(d)} pts with it` : "same win rate with it or without";
+};
 const points = x => `${x > 0 ? "▲" : x < 0 ? "▼" : ""} ${Math.abs(x * 100).toFixed(1)} pts`.trim();
 const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th");
 // A decklist link, named for where it is
@@ -1128,8 +1133,8 @@ function resultTile(x, decks) {
   return {
     card: x.card, type: typeOf(x.card), bar: null, detail: points(x.lift), tone: x.lift > 0 ? "up" : "down",
     faint: Math.abs(x.evidence) < SIGNAL,
-    note: `${percent(x.winRate)} vs ${percent(x.winRateWithout)} won · ${played(x.decks, x.share)}`,
-    story: `Decks with it won ${percent1(x.winRate)} of ${x.games.toLocaleString()} games; decks without it, ${percent1(x.winRateWithout)}.`
+    note: `Win rate ${percent(x.winRate)} with it, ${percent(x.winRateWithout)} without · ${played(x.decks, x.share)}`,
+    story: `Win rate ${percent1(x.winRate)} with it (over ${x.games.toLocaleString()} games), ${percent1(x.winRateWithout)} without.`
       + (x.conversion === null || x.conversionWithout === null ? ""
         : ` ${percent1(x.conversion)} of decks with it made the top cut, ${percent1(x.conversionWithout)} without.`)
       + ` ${x.decks.toLocaleString()} of ${decks.toLocaleString()} decks play it.`
@@ -1200,10 +1205,10 @@ function showResults(key, results, names, released, onPeriod) {
       + (s.cutDecks ? `; ${percent(s.cuts / s.cutDecks)} made the top cut` : "");
     const sure = r.lift !== null && Math.abs(r.evidence) >= SIGNAL;
     $("package-result").replaceChildren(
-      statTile(`${one ? "With it" : "With all of them"}: games won`, r.all.games ? percent1(r.all.wins / r.all.games) : "–", sides(r.all)),
-      statTile(`${one ? "Without it" : "With none"}: games won`, r.none.games ? percent1(r.none.wins / r.none.games) : "–", sides(r.none)),
+      statTile(`${one ? "With it" : "With all of them"}: win rate`, r.all.games ? percent1(r.all.wins / r.all.games) : "–", sides(r.all)),
+      statTile(`${one ? "Without it" : "With none"}: win rate`, r.none.games ? percent1(r.none.wins / r.none.games) : "–", sides(r.none)),
       r.lift === null ? statTile("Difference", "–", `Too few decks ${r.all.decks ? "without" : "with"} ${one ? "it" : "them"} to compare`)
-        : statTile("Difference", points(r.lift), sure ? `Decks with ${one ? "it" : "them"} clearly won ${r.lift > 0 ? "more" : "less"}`
+        : statTile("Difference", points(r.lift), sure ? `A clearly ${r.lift > 0 ? "higher" : "lower"} win rate with ${one ? "it" : "them"}`
           : "Too few decks to be sure yet", sure ? (r.lift > 0 ? "up" : "down") : ""));
     $("package-note").textContent = (r.some.decks ? `${r.some.decks.toLocaleString()} ${r.some.decks === 1 ? "deck plays" : "decks play"} only some of them, left out. ` : "")
       + `In the last ${period()}. As for single cards, both sides are pulled toward ${lead}'s win rate, so a few decks need a big difference to show one; `
@@ -1248,7 +1253,7 @@ function showResults(key, results, names, released, onPeriod) {
     $("results-stats").replaceChildren(
       statTile("Tournament decks", decks.toLocaleString(), `in the last ${period()}, ${games.toLocaleString()} games`),
       statTile("Points per game", ppg.toFixed(2), vsPoints(ppg, fieldPpg), pointsTone(ppg, fieldPpg)),
-      statTile("Games won", percent1(rate), vs(rate, fieldRate), tone(rate - fieldRate)),
+      statTile("Win rate", percent1(rate), vs(rate, fieldRate), tone(rate - fieldRate)),
       cutDecks && fieldCutDecks
         ? statTile("Made the top cut", percent1(cuts / cutDecks), vs(cuts / cutDecks, fieldCuts / fieldCutDecks), tone(cuts / cutDecks - fieldCuts / fieldCutDecks))
         : statTile("Made the top cut", "–", "No events with a top cut"));
@@ -1263,13 +1268,13 @@ function showResults(key, results, names, released, onPeriod) {
     const bestGames = best.reduce((k, p) => k + p.games, 0), bestWins = best.reduce((k, p) => k + p.wins, 0);
     $("pilots-lede").textContent = `${pilots.length.toLocaleString()} ${pilots.length === 1 ? "pilot" : "pilots"} in the last ${period()}, most decks first.`
       + (pilots.length > TOP_PILOTS && games > bestGames
-        ? ` Its ${TOP_PILOTS} pilots with the most wins (${best.map(p => p.name).join(" and ")}) won ${bestWins.toLocaleString()} of its ${wins.toLocaleString()} games won.`
-          + ` Without them, its decks won ${percent1((wins - bestWins) / (games - bestGames))} of their games, against ${percent1(rate)} with them`
+        ? ` Its ${TOP_PILOTS} pilots with the most wins (${best.map(p => p.name).join(" and ")}) have ${bestWins.toLocaleString()} of its ${wins.toLocaleString()} wins.`
+          + ` Without them its win rate is ${percent1((wins - bestWins) / (games - bestGames))}, against ${percent1(rate)} with them`
           + ` and ${percent1(fieldRate)} for all decks.`
         : "");
     const pilotChip = p => el("a", {
-      className: "term", href: pilotLink(p.id), title: `${p.decks} ${p.decks === 1 ? "deck" : "decks"}, won ${p.wins} of ${p.games} games`,
-    }, p.name || "Unknown", el("small", { textContent: `${p.decks} · ${p.games ? percent(p.wins / p.games) : "–"} won` }));
+      className: "term", href: pilotLink(p.id), title: `${p.decks} ${p.decks === 1 ? "deck" : "decks"}, ${p.wins} wins in ${p.games} games`,
+    }, p.name || "Unknown", el("small", { textContent: `${p.decks} ${p.decks === 1 ? "deck" : "decks"} · ${p.games ? percent(p.wins / p.games) : "–"} win rate` }));
     const showAll = el("button", { type: "button", className: "term", textContent: `All ${pilots.length.toLocaleString()} →`,
       onclick: () => $("pilots").replaceChildren(...pilots.map(pilotChip)) });
     $("pilots").replaceChildren(...pilots.slice(0, SHOWN_PILOTS).map(pilotChip), pilots.length > SHOWN_PILOTS ? showAll : "");
@@ -1281,9 +1286,9 @@ function showResults(key, results, names, released, onPeriod) {
     const few = !usable(w) ? `There are too few ${lead} decks in the last ${period()} to compare cards. Try a longer period.` : "";
     const more = cards.filter(x => x.lift > 0 && x.evidence >= SIGNAL).sort((a, b) => b.lift - a.lift);
     $("wins-more-lede").textContent = few || (more.length
-      ? "Decks that play these won more of their games than the commander's other decks. ▲ is how many points more, allowing for how few decks play a card. "
+      ? "Decks with these have a higher win rate than the commander's other decks. ▲ is how many points higher, allowing for how few decks play a card. "
         + "It's the decks that won: a card can stand for a style of build. Open a card for the full numbers."
-      : `No card's decks clearly won more than the rest in these ${decks.toLocaleString()} decks.`);
+      : `No card clearly raises the win rate of these ${decks.toLocaleString()} decks.`);
     showWinsMore(more.map(tile));
     const fresh = cards.filter(x => isNew(released, x.card)).sort((a, b) => b.lift - a.lift);
     $("results-new-lede").textContent = few || (fresh.length
@@ -1292,8 +1297,8 @@ function showResults(key, results, names, released, onPeriod) {
     showResultsNew(fresh.map(tile));
     const less = cards.filter(x => x.lift < 0 && x.evidence <= -SIGNAL).sort((a, b) => a.lift - b.lift);
     $("wins-less-lede").textContent = few || (less.length
-      ? "Decks that play these won less often than the commander's other decks: worth a second look before you play them."
-      : `No card's decks clearly won less than the rest.`);
+      ? "Decks with these have a lower win rate than the commander's other decks: worth a second look before you play them."
+      : "No card clearly lowers the win rate of these decks.");
     showWinsLess(less.map(tile));
 
     // Its best finishes in the period, newest first, each with its decklist
@@ -1374,7 +1379,7 @@ function rankCells(r, fieldDecks, field, columns) {
     ...columns.map(c => cells[c]())];
 }
 // Points a sort is by, in words
-const SORT_NAMES = { decks: "tournament decks", points: "match points", ppg: "match points per game", wins: "share of games won",
+const SORT_NAMES = { decks: "tournament decks", points: "match points", ppg: "match points per game", wins: "win rate",
   cut: "share of decks making the top cut" };
 
 async function showTournaments() {
@@ -1412,7 +1417,7 @@ async function showTournaments() {
     $("tour-stats").replaceChildren(
       statTile("Tournament decks", fieldDecks.toLocaleString(), `with decklists, in the last ${periodName(days)}`),
       statTile("Commanders", rows.length.toLocaleString(), `${rows.filter(r => r.decks >= DEFAULT_MIN_DECKS).length.toLocaleString()} with ${DEFAULT_MIN_DECKS} decks or more`),
-      statTile("Games won", percent1(field.rate), "by the average deck: with draws, about a fifth, not a quarter"),
+      statTile("Win rate", percent1(field.rate), "of the average deck: about 1 game in 5, as draws keep it under 1 in 4"),
       statTile("Points per game", field.ppg.toFixed(2), "by the average deck: 5 for a win, 1 for a draw"));
     showLeaderboard(rows, field);
     drawRanking();
@@ -1431,14 +1436,14 @@ async function showTournaments() {
     const less = cards.filter(x => x.lift < 0 && x.evidence <= -SIGNAL).sort((a, b) => a.lift - b.lift);
     const fresh = cards.filter(x => isNew(released, x.card)).sort((a, b) => b.lift - a.lift);
     const how = "Each card's decks are measured against the same commander's decks without it, then averaged over the commanders that play it, "
-      + "so a card isn't credited for the commanders it's played with. ▲ is how many points more of their games they won. "
+      + "so a card isn't credited for the commanders it's played with. ▲ is how many points higher their win rate is. "
       + "A card can stand for a style of deck (turbo lists play Rite of Flame, slower ones Force of Will), so read these as what winning decks play, not proof a card wins on its own.";
-    $("tour-more-lede").textContent = more.length ? `Cards whose decks clearly won more. ${how}` : "No card's decks clearly won more yet.";
+    $("tour-more-lede").textContent = more.length ? `Cards whose decks clearly have a higher win rate. ${how}` : "No card clearly raises its decks' win rate yet.";
     $("tour-new-lede").textContent = fresh.length ? `Cards from the last few months that enough decks play to compare, best results first. Faded: too few decks to be sure yet.`
       : "No new card is in enough decks to compare yet.";
-    $("tour-less-lede").textContent = less.length ? "Cards whose decks clearly won less than the same commanders' decks without them. "
+    $("tour-less-lede").textContent = less.length ? "Cards whose decks clearly have a lower win rate than the same commanders' decks without them. "
       + "Often a sign of the slower or older style of deck they're played in."
-      : "No card's decks clearly won less yet.";
+      : "No card clearly lowers its decks' win rate yet.";
     showTourMore(more.map(tile));
     showTourNew(fresh.map(tile));
     showTourLess(less.map(tile));
@@ -1473,7 +1478,7 @@ async function showTournaments() {
     }
     $("tour-commanders-lede").textContent = `${list.length.toLocaleString()} commanders with ${min} decks or more`
       + (f.active ? " that match the filters" : "")
-      + `, by ${SORT_NAMES[by]}. Points are 5 for a win and 1 for a draw. Points per game, games won and top cut are compared with every deck's.`;
+      + `, by ${SORT_NAMES[by]}. Points are 5 for a win and 1 for a draw. Points per game, win rate and top cut are compared with every deck's.`;
     const page = list.slice(0, shownRows);
     const infos = await Promise.all(page.map(r => Promise.all(r.key.split("-").map(c => cardInfo(+c)))));
     if (current.rows !== rows) return;
@@ -1623,7 +1628,7 @@ async function showPilot(id) {
   $("pilot-stats").replaceChildren(
     statTile("Tournament decks", rows.length.toLocaleString(), `in the last ${periodName(all?.windows.at(-1) ?? 730)}, ${games.toLocaleString()} games`),
     statTile("Points per game", games ? ppg.toFixed(2) : "–", fieldGames ? vsPoints(ppg, fieldPpg) : "", fieldGames ? pointsTone(ppg, fieldPpg) : ""),
-    statTile("Games won", games ? percent1(rate) : "–", vs(rate, fieldRate), tone(rate, fieldRate)),
+    statTile("Win rate", games ? percent1(rate) : "–", vs(rate, fieldRate), tone(rate, fieldRate)),
     cutEvents ? statTile("Made the top cut", `${cuts} of ${cutEvents}`, vs(cutRate, fieldCut), tone(cutRate, fieldCut))
       : statTile("Made the top cut", "–", "No events with a top cut"));
 
@@ -1638,8 +1643,8 @@ async function showPilot(id) {
   const theirs = [...byCommander.values()].sort((a, b) => b.decks - a.decks || b.wins - a.wins);
   $("pilot-commanders").replaceChildren(el("span", { className: "label", textContent: "Plays" }), ...theirs.map(c =>
     el(files.has(c.key) ? "a" : "span", { className: "term", ...(files.has(c.key) ? { href: commanderLink(c.key) } : {}),
-      title: `${c.decks} ${c.decks === 1 ? "deck" : "decks"}, won ${c.wins} of ${c.games} games` },
-    leadName(c.key, c.lead), el("small", { textContent: `${c.decks} · ${c.games ? percent(c.wins / c.games) : "–"} won` }))));
+      title: `${c.decks} ${c.decks === 1 ? "deck" : "decks"}, ${c.wins} wins in ${c.games} games` },
+    leadName(c.key, c.lead), el("small", { textContent: `${c.decks} ${c.decks === 1 ? "deck" : "decks"} · ${c.games ? percent(c.wins / c.games) : "–"} win rate` }))));
 
   // The header: their main commander's art, how long and how much they've played, their rank and best finish
   const main = theirs.find(c => c.key);
@@ -1669,12 +1674,12 @@ async function showPilot(id) {
   const knownGames = known.reduce((k, r) => k + r[5] + r[6] + r[7], 0), knownWins = known.reduce((k, r) => k + r[5], 0);
   $("pilot-cards-lede").textContent = liked.length
     ? `Cards they play in more of their ${known.length} decks than other pilots of the same commanders do, the most more first. `
-      + "Others: how many of those commanders' tournament decks play it. Won: their share of games won in their decks with it, and without."
+      + "For each: how many other tournament decks of those commanders play it, and how much higher or lower their win rate is with it than without it."
     : "Favorite cards need 2 or more of their decks to play a card more than other pilots' decks do.";
   await showPilotCards(liked.map(([card, decks, g, k, expected]) => ({
     card, type: typeOf(card), detail: `in ${decks} of ${known.length} decks`, bar: decks / known.length,
-    note: `Others: ${percent(Math.min(1, expected / known.length))} · won ${g ? percent(k / g) : "–"} with it`
-      + (knownGames > g ? `, ${percent((knownWins - k) / (knownGames - g))} without` : ""),
+    note: `In ${percent(Math.min(1, expected / known.length))} of others' decks`
+      + (g && knownGames > g ? ` · ${winChange(k / g, (knownWins - k) / (knownGames - g))}` : ""),
   })));
 
   showListsOverTime(id, rows, theirs, names, leadName);
@@ -1721,7 +1726,7 @@ function showListsOverTime(pilot, rows, theirs, names, leadName) {
     const n = decks.length;
     const half = Math.floor(n / 2);
     $("pilot-lists-lede").textContent = `Their ${n} ${leadName(key)} lists from tournaments, from ${dateName(decks[0].row[0])} to ${dateName(decks.at(-1).row[0])}. `
-      + (n >= 4 ? `They won ${rateOf(record(decks.slice(0, half)))} of their games in the first ${half} events and ${rateOf(record(decks.slice(half)))} in the last ${n - half}. ` : "")
+      + (n >= 4 ? `Their win rate was ${rateOf(record(decks.slice(0, half)))} in their first ${half} events and ${rateOf(record(decks.slice(half)))} in their last ${n - half}. ` : "")
       + "A few events are few games, so read the differences loosely.";
 
     // Cards in some lists but not all, the clearest difference in games won first: a difference
@@ -1736,13 +1741,13 @@ function showListsOverTime(pilot, rows, theirs, names, leadName) {
     }).map(x => ({ ...x, clear: Math.abs(x.rate - x.without) * Math.sqrt(1 / (1 / x.g + 1 / x.gw)) }))
       .sort((a, b) => b.clear - a.clear || b.decks - a.decks);
     $("pilot-changed-lede").textContent = changed.length
-      ? "In some of these lists but not all. ▲ and ▼: how many points more or less of their games they won with it than without it, "
+      ? "In some of these lists but not all. ▲ and ▼: how much higher or lower their win rate was with it than without it, "
         + "the clearest differences first, counting more games for more."
       : "They played the same cards every time.";
     showChanged(changed.map(x => ({
       card: x.card, type: typeOf(x.card), bar: x.decks / n, detail: points(x.rate - x.without),
       tone: x.rate > x.without ? "up" : x.rate < x.without ? "down" : "",
-      note: `In ${x.decks} of ${n} lists · won ${percent(x.rate)} with it, ${percent(x.without)} without`,
+      note: `In ${x.decks} of ${n} lists · win rate ${percent(x.rate)} with it, ${percent(x.without)} without`,
     })));
 
     // Event by event, newest first, each against the list before it
@@ -1756,7 +1761,7 @@ function showListsOverTime(pilot, rows, theirs, names, leadName) {
       const change = !before ? "their first list here" : added.length || cut.length ? `+${added.length} −${cut.length} since the last` : "no changes since the last";
       const details = el("details", {},
         el("summary", {},
-          el("span", { className: "sim", textContent: games ? percent(won / games) : "–", title: "Games won" }),
+          el("span", { className: "sim", textContent: games ? percent(won / games) : "–", title: "Win rate" }),
           el("span", { className: "deck-name", textContent: event }),
           el("span", { className: "finish-links" }, listLink(link) ?? "", compareLink(key, deck, pilot)),
           el("span", { className: "deck-meta", textContent: [dateName(date), `${ordinal(standing)} of ${size}`, `${won}–${lost}–${drew}`, change].join(" · ") })));
