@@ -435,6 +435,22 @@
     .commander-head .btn-quiet { display: inline-block; margin-top: 10px; text-decoration: none; }
     .commander-art { display: flex; gap: 12px; }
     .commander-art img { width: min(200px, 36vw); border-radius: 4.75% / 3.4%; box-shadow: var(--shadow-md); }
+    /* Partners: two cards at 90%, the one behind up and left so its name and cost show */
+    .pair { position: relative; display: block; aspect-ratio: 488 / 680; }
+    .commander-art .pair { width: min(230px, 40vw); }
+    .card .card-art.pair { overflow: visible; background: none; animation: none; box-shadow: none; }
+    .pair > :is(img, button) {
+      position: absolute; top: 0; left: 0; width: 90%; height: 90%; z-index: 1;
+      translate: 11.11% 11.11%;
+    }
+    .pair > .back { translate: 0 0; z-index: 0; }
+    /* Swapping: they slide apart, trade places on top halfway, and settle (not on first showing) */
+    .pair.shuffled > * { animation: to-front .45s ease-in-out; }
+    .pair.shuffled > .back { animation: to-back .45s ease-in-out; }
+    @keyframes to-front { from { translate: 0 0; z-index: 0; } 50% { translate: -22% 3%; z-index: 0; } 50.1% { z-index: 2; } to { z-index: 2; } }
+    @keyframes to-back { from { translate: 11.11% 11.11%; z-index: 1; } 50% { translate: 33% 8%; } to { z-index: 1; } }
+    .card-art.pair img { border-radius: 4.75% / 3.4%; box-shadow: 0 1px 1px rgb(0 0 0 / .25), 0 8px 16px -8px rgb(0 0 0 / .5); }
+    .commander-art .pair img { width: 100%; }
     .theme-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 2px; }
     .sub-heading { font-size: 19px; margin: 26px 0 4px; }
     .type-filter button:disabled { opacity: .45; cursor: default; }

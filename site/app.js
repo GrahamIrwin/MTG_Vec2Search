@@ -622,6 +622,29 @@ const commanderMessage = text => {
 };
 const commanderLink = key => "?" + new URLSearchParams({ commander: key });
 
+// Partners, overlapped: the one behind shows its name and cost above the other, and pointing at it
+// (or focusing it) brings it forward until the pointer leaves the pair (or focus moves on)
+function overlap(cards, className = "") {
+  const pair = el("span", { className: `pair ${className}` }, ...cards);
+  const flip = second => {
+    if (cards[0].classList.contains("back") === second) return;
+    pair.classList.add("shuffled");
+    cards[0].classList.toggle("back", second);
+    cards[1].classList.toggle("back", !second);
+  };
+  cards[1].classList.add("back");
+  // The strip where the one behind shows: the top and left 10%, by where the pointer is rather
+  // than which card is under it, since flipping slides the other card under the pointer
+  pair.onpointermove = e => {
+    const r = pair.getBoundingClientRect();
+    if (e.clientX - r.left < r.width * 0.1 || e.clientY - r.top < r.height * 0.1) flip(true);
+  };
+  pair.onpointerleave = () => flip(false);
+  pair.addEventListener("focusin", e => flip(cards[1].contains(e.target)));
+  pair.addEventListener("focusout", () => flip(false));
+  return pair;
+}
+
 // A gallery of commanders, PAGE_COMMANDERS at a time, each opening its page. Returns a function
 // that shows a list: [{key, name, detail}]
 function commanderGallery(gallery, moreButton) {
@@ -631,14 +654,17 @@ function commanderGallery(gallery, moreButton) {
     const current = list;
     moreButton.hidden = true;
     const page = current.slice(shown, shown + PAGE_COMMANDERS);
-    const infos = await Promise.all(page.map(c => cardInfo(+c.key.split("-")[0])));
+    const infos = await Promise.all(page.map(c => Promise.all(c.key.split("-").map(k => cardInfo(+k)))));
     if (current !== list) return; // shown another list while loading
     gallery.append(...page.map((c, i) => {
-      const img = el("img", { alt: "", loading: "lazy", decoding: "async" });
-      img.onload = () => img.classList.add("loaded");
-      img.src = imageUrl(infos[i].id);
+      const imgs = infos[i].map(info => {
+        const img = el("img", { alt: "", loading: "lazy", decoding: "async" });
+        img.onload = () => img.classList.add("loaded");
+        img.src = imageUrl(info.id);
+        return img;
+      });
       const tile = el("a", { className: "card", href: commanderLink(c.key) },
-        el("span", { className: "card-art" }, img),
+        imgs.length > 1 ? overlap(imgs, "card-art") : el("span", { className: "card-art" }, ...imgs),
         el("span", { className: "card-name", textContent: c.name }),
         el("span", { className: "card-meta" }, el("span", { textContent: c.detail })));
       tile.style.setProperty("--i", i);
@@ -658,17 +684,24 @@ function commanderGallery(gallery, moreButton) {
 const showCommanderList = commanderGallery($("commanders"), $("more-commanders"));
 
 async function showCommanders() {
-  const { names, decks } = await loadDeckData();
+  const [{ names, decks }, trends] = await Promise.all([loadDeckData(), loadTrends()]);
   const all = decks.commanders.map(([key, count]) => ({ key, name: commanderNames(key, names), detail: `${count.toLocaleString()} decks` }));
   $("random-commander").onclick = () => (location.search = commanderLink(pick(all).key));
-  $("commander-filter").oninput = () => {
+  // The Trends filters, over all time
+  $("commander-list").insertBefore($("trend-form"), $("commanders"));
+  const readFilters = trendFilters(trends, ["commanders"]);
+  const update = () => {
+    const f = readFilters(0);
+    const kept = f.active && new Set(filterCommanders(trends.commanders, f).map(c => c.key));
     const q = $("commander-filter").value.trim().toLowerCase();
-    const matches = all.filter(c => c.name.toLowerCase().includes(q));
+    const matches = all.filter(c => (!kept || kept.has(c.key)) && c.name.toLowerCase().includes(q));
     $("commander-count").textContent = `${matches.length.toLocaleString()} ${matches.length === 1 ? "commander" : "commanders"}`
-      + (q ? "" : ` · ${decks.decks.toLocaleString()} decks`);
+      + (q || f.active ? "" : ` · ${decks.decks.toLocaleString()} decks`);
     showCommanderList(matches);
   };
-  $("commander-filter").oninput();
+  $("commander-filter").oninput = update;
+  $("trend-form").addEventListener("input", update);
+  update();
   commanderMessage("");
   $("commander-list").hidden = false;
 }
@@ -704,8 +737,9 @@ async function showCommander(key) {
     Promise.all(leaders.map(cardInfo)), getReleased()]);
   const n = shard.decks.length;
 
-  $("commander-art").replaceChildren(...infos.map(({ name, id }, i) =>
-    el("button", { type: "button", className: "card", onclick: () => openCard(id, leaders[i]) }, el("img", { src: imageUrl(id), alt: name }))));
+  const art = infos.map(({ name, id }, i) =>
+    el("button", { type: "button", className: "card", onclick: () => openCard(id, leaders[i]) }, el("img", { src: imageUrl(id), alt: name })));
+  $("commander-art").replaceChildren(art.length > 1 ? overlap(art) : art[0]);
   const identity = leaders.reduce((m, c) => m | index.columns.identity[c], 0);
   const colors = [..."WUBRG"].filter((_, i) => identity & (1 << i));
   $("commander-name").textContent = lead;
@@ -899,13 +933,10 @@ function loadTrends() {
 let cardsLoaded;
 const loadTrendCards = trends => (cardsLoaded ??= getJson("decks/trend-cards.json").then(data => withCards(trends.commanders, data)));
 
-async function showTrends() {
-  const [{ decks }, trends, released] = await Promise.all([loadDeckData(), loadTrends(), getReleased()]);
-  const windows = [{ days: null, since: 0 }, ...decks.windows.map((days, i) => ({ days, since: decks.since[i] }))];
-  const fromUrl = windows.findIndex(w => String(w.days ?? "all") === params.get("w"));
-  let w = windows[fromUrl]?.since != null ? fromUrl : windows.findIndex(x => x.days === DEFAULT_DAYS && x.since !== null);
-  if (w < 0) w = 0;
-
+// The Trends filters, shared with the commander list: restored from the URL, then a function of the
+// period that reads them as filterCommanders' options (with how many are active) and puts them in
+// the URL after `lead` and `extra`, so a filtered view is a link to share
+function trendFilters(trends, lead) {
   const tform = $("trend-form");
   for (const input of tform.elements) {
     if (input.type === "checkbox") input.checked = params.getAll(input.name).includes(input.value);
@@ -913,13 +944,15 @@ async function showTrends() {
   }
   linkColorless(tform);
   $("trend-themes").replaceChildren(...trends.themes.map(t => el("option", { value: tagLabel(t) })));
-
-  const readFilters = () => {
+  $("clear-trend-filters").href = "?" + new URLSearchParams(lead.map(k => [k, ""]));
+  tform.addEventListener("submit", e => e.preventDefault());
+  $("trend-filters").open = [...new FormData(tform)].some(([, v]) => v);
+  return (window, extra = []) => {
     const data = new FormData(tform);
     const colors = data.getAll("c");
     const theme = data.get("theme").trim().toLowerCase();
-    return {
-      window: w,
+    const f = {
+      window,
       colors: !colors.length ? null : colors.includes("C") ? 0 : colors.reduce((m, c) => m | (1 << "WUBRG".indexOf(c)), 0),
       maxPrice: data.get("budget") ? Math.round((data.get("budget") / (money.rate ?? 1)) * 100) : null,
       themes: theme ? new Set(trends.themes.flatMap((t, i) => (tagLabel(t).toLowerCase().includes(theme) ? [i] : []))) : null,
@@ -927,19 +960,28 @@ async function showTrends() {
       kind: data.get("kind"),
       min: Number(data.get("min")) || 0,
     };
+    f.active = (f.colors !== null) + (f.maxPrice !== null) + !!f.themes + !!f.brackets.length + !!f.kind + !!f.min;
+    $("trend-filter-count").textContent = f.active;
+    $("trend-filter-count").hidden = !f.active;
+    history.replaceState(null, "", "?" + new URLSearchParams([...lead.map(k => [k, ""]), ...extra,
+      ...[...data].filter(([, v]) => v)]));
+    return f;
   };
+}
+
+async function showTrends() {
+  const [{ decks }, trends, released] = await Promise.all([loadDeckData(), loadTrends(), getReleased()]);
+  const windows = [{ days: null, since: 0 }, ...decks.windows.map((days, i) => ({ days, since: decks.since[i] }))];
+  const fromUrl = windows.findIndex(w => String(w.days ?? "all") === params.get("w"));
+  let w = windows[fromUrl]?.since != null ? fromUrl : windows.findIndex(x => x.days === DEFAULT_DAYS && x.since !== null);
+  if (w < 0) w = 0;
+
+  const readFilters = trendFilters(trends, ["trends"]);
 
   let shownFor;
   async function update() {
-    const f = readFilters();
-    const active = (f.colors !== null) + (f.maxPrice !== null) + !!f.themes + !!f.brackets.length + !!f.kind + !!f.min;
-    $("trend-filter-count").textContent = active;
-    $("trend-filter-count").hidden = !active;
-    // The URL holds the period and filters, so a view of Trends is a link to share
-    const next = new URLSearchParams([["trends", ""], ...(w ? [["w", windows[w].days]] : [["w", "all"]]),
-      ...[...new FormData(tform)].filter(([, v]) => v)]);
-    history.replaceState(null, "", "?" + next);
-
+    const f = readFilters(w, [["w", windows[w].days ?? "all"]]);
+    const { active } = f;
     $("trend-windows").replaceChildren(...windows.map((x, i) => ({ x, i })).reverse().map(({ x, i }) => el("button", {
       type: "button", ariaPressed: String(i === w), disabled: x.since === null, title: x.since === null ? "Not enough data yet" : "",
       onclick: () => { w = i; update(); },
@@ -975,9 +1017,7 @@ async function showTrends() {
     showTrendNew(cards.popular.filter(x => isNew(released, x.card)).slice(0, MAX_TRENDING)
       .map(x => pick(x, `in ${percent(x.share)} of decks`)));
   }
-  tform.addEventListener("input", update);
-  tform.addEventListener("submit", e => e.preventDefault());
-  $("trend-filters").open = [...params.keys()].some(k => !["trends", "w"].includes(k));
+  $("trend-form").addEventListener("input", update);
   await update();
   trendsMessage("");
   $("trends-page").hidden = false;
