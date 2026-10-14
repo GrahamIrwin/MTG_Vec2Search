@@ -119,8 +119,8 @@ test("search ranks by IDF-weighted coverage, then popularity, and applies filter
   assert.deepEqual(names("flying", { colors: ["R"] }), ["Big Dragon"]);
   assert.deepEqual(names("flying", { format: "standard" }), ["Big Dragon", "Common Flyer"]);
   assert.deepEqual(names("creature", { min: 2, max: 3 }), ["Popular Flyer", "Collector Ouphe", "Common Flyer"]);
-  // Colorless cards fit any color filter
-  assert.deepEqual(names("draw", { colors: ["G"] }), ["Opt"]);
+  // Colors are exact: a colorless card is left out of a green filter
+  assert.deepEqual(names("draw", { colors: ["G"] }), []);
   // Colorless alone keeps only colorless-identity cards
   assert.deepEqual(names("land", { colors: ["C"] }), ["Wasteland"]);
   // Set: only cards printed in it

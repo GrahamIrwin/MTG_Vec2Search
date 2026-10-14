@@ -213,7 +213,7 @@ function filterFn(index, filters) {
   const formatBit = format ? 1 << index.formats.indexOf(format) : 0;
   const cents = maxPrice === null ? null : Math.round(maxPrice * 100);
   return i =>
-    (!colors.length || (identity[i] & ~colorMask) === 0) &&
+    (!colors.length || identity[i] === colorMask) &&
     (!types.length || typeBits[i] & typeMask) &&
     (!formatBit || legal[i] & formatBit) &&
     (min === null || cmc[i] >= min) &&
