@@ -1068,12 +1068,12 @@ async function showCommander(key) {
     },
   }, g.name, el("small", { textContent: i ? `${Math.round(g.members.length / n * 100)}%` : n.toLocaleString() }))));
 
-  // Packages, with the decks in groups of alike ones (see packageGroups); one a combo has every card
-  // of is left out (the combo says more)
+  // Packages, with the decks in groups of alike ones (see packageGroups), each with the combos it's part of
+  // (Displacer Kitten and Teferi: with Sol Ring, or Mana Vault, ...)
   const groupOf = packageGroups(shard, builds.map(b => b.members), { lands, gameChangers: new Set(index.game_changers ?? []) });
   const staples = new Set((decks.staples ?? []).map(c => shard.position.get(c)));
   const packages = findPackages(shard, { lands, staples, groups: groupOf }).map(p => p.cards.map(q => shard.cards[q]))
-    .filter(cards => !shard.combos.some(c => cards.every(x => c.cards.includes(x))));
+    .map(cards => ({ cards, combos: shard.combos.filter(c => cards.every(x => c.cards.includes(x))).length }));
 
   const ofBracket = (members, b) => members.filter(d => shard.decks[d].bracket === b);
   $("bracket-filter").hidden = !shard.decks.some(d => d.bracket);
@@ -1187,16 +1187,17 @@ async function showCommander(key) {
       : `None of Commander Spellbook's combos is in 1% of ${these}.`;
     showRows($("combos"), $("more-combos"), combos.map(group => comboRow(group, k => `${percent(k / m)} of ${these} (${k.toLocaleString()})`)), testPackage);
     shard.sets ??= shard.decks.map(d => new Set(d.cards));
-    const counted = packages.map(cards => {
+    const counted = packages.map(({ cards, combos }) => {
       const ps = cards.map(c => shard.position.get(c));
-      return { cards, decks: g.members.reduce((k, d) => k + ps.every(p => shard.sets[d].has(p)), 0) };
+      return { cards, combos, decks: g.members.reduce((k, d) => k + ps.every(p => shard.sets[d].has(p)), 0) };
     }).filter(p => p.decks >= Math.max(3, 0.03 * m)).sort((a, b) => b.decks - a.decks);
     $("packages-lede").textContent = counted.length
-      ? `Cards ${these} play together far more often than chance would have it, besides the combos. They're compared among decks of the same build, as tuned and with as many Game Changers, so cards don't go together just for being in the same kind of deck. Staples every kind of deck plays (Force of Will and Force of Negation) and ${lead}'s precon are left out.`
+      ? `Cards ${these} play together far more often than chance would have it, combo pieces among them. They're compared among decks of the same build, as tuned and with as many Game Changers, so cards don't go together just for being in the same kind of deck. Staples every kind of deck plays (Force of Will and Force of Negation) and ${lead}'s precon are left out.`
       : `No cards that ${these} play together far more often than chance would have it.`;
     showRows($("packages"), $("more-packages"), counted.map(p => ({
       cards: joined(p.cards.map(c => miniCard(c))),
-      meta: [`${percent(p.decks / m)} of ${these} play all of them (${p.decks.toLocaleString()})`],
+      meta: [`${percent(p.decks / m)} of ${these} play all of them (${p.decks.toLocaleString()})`,
+        ...(p.combos ? [` · part of ${p.combos === 1 ? "a combo" : `${p.combos} combos`}`] : [])],
       test: p.cards,
     })), testPackage);
     // Combos or packages, one at a time
