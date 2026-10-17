@@ -133,13 +133,13 @@ test("combos: the decks playing every card (the commander's a given), near-copie
 
 test("combos for a primer: cards as [[links]], what comes first, steps and result", () => {
   const combo = { id: "1-2", cards: [0, 1], needs: ["Mana Dork"], makes: ["Infinite mana", "Infinite ETB"],
-    how: { mana: "{G}", easy: "", notable: "You control a creature.\n", steps: "Tap it.\nUntap it.\nRepeat." } };
+    how: { mana: "{G}", easy: "", notable: "You control a creature.\n", steps: "Tap it, adding {G}{W/U}.\nPay {3}.\nRepeat." } };
   assert.equal(comboPrimer([combo], ["Derevi, Empyrial Tactician", "Brigid, Clachan's Heart // Brigid, Doun's Mind"]), [
     "# Combos", "",
     "## Derevi, Empyrial Tactician + Brigid, Clachan's Heart // Brigid, Doun's Mind", "",
     "**Cards:** [[Derevi, Empyrial Tactician]] + [[Brigid, Clachan's Heart]]", "",
-    "**First:**", "- Any Mana Dork", "- You control a creature.", "- {G} available", "",
-    "**Steps:**", "1. Tap it.", "2. Untap it.", "3. Repeat.", "",
+    "**First:**", "- Any Mana Dork", "- You control a creature.", "- [[symbol:g]] available", "",
+    "**Steps:**", "1. Tap it, adding [[symbol:g]][[symbol:wu]].", "2. Pay [[symbol:3]].", "3. Repeat.", "",
     "**Result:** Infinite mana, Infinite ETB", "",
   ].join("\n"));
 });

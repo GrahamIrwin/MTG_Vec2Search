@@ -421,13 +421,15 @@ export function packageGroups(shard, builds, { lands = new Set(), gameChangers =
 }
 
 // Combos as Markdown for a deck's primer: each one's cards, other pieces it needs, what comes first,
-// its steps and what it makes. Cards are [[Card Name]] (their front face), which Moxfield's primers
-// show as the card. combos: shard.combos'; names: card names by number.
+// its steps and what it makes. Cards are [[Card Name]] (their front face) and mana symbols
+// [[symbol:g]], which Moxfield's primers show as the card and the symbol. combos: shard.combos';
+// names: card names by number.
 export function comboPrimer(combos, names) {
   const card = c => `[[${names[c].split(" // ")[0]}]]`;
-  const lines = text => text.split("\n").map(t => t.trim()).filter(Boolean);
+  const lines = text => text.replace(/\{([^}]+)\}/g, (_, s) => `[[symbol:${s.replace("/", "").toLowerCase()}]]`)
+    .split("\n").map(t => t.trim()).filter(Boolean);
   return ["# Combos", "", ...combos.flatMap(({ cards, needs, makes, how }) => {
-    const first = [...needs.map(n => `Any ${n}`), ...lines(how.easy), ...lines(how.notable), ...(how.mana ? [`${how.mana} available`] : [])];
+    const first = [...needs.map(n => `Any ${n}`), ...lines(how.easy), ...lines(how.notable), ...lines(how.mana).map(m => `${m} available`)];
     return [
       `## ${cards.map(c => names[c]).join(" + ")}`, "",
       `**Cards:** ${cards.map(card).join(" + ")}`, "",
