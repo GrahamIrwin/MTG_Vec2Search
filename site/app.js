@@ -684,12 +684,12 @@ async function findSimilar(key) {
   $("deck-combos-lede").textContent = complete.length
     ? `Combos from Commander Spellbook in your deck, of those at least 2% of ${lead} decks play.`
     : `None of the combos at least 2% of ${lead} decks play (from Commander Spellbook) is in your deck.`;
-  showRows($("deck-combos"), $("more-deck-combos"), groupCombos(complete).map(g => comboRow(g, names, decksSay, null)));
+  showRows($("deck-combos"), $("more-deck-combos"), groupCombos(complete).map(g => comboRow(g, decksSay)));
   $("near-combos-lede").textContent = near.length
     ? `Combos your deck is one card from (marked), most played first.`
     : `No combo ${lead} decks play is one card from your deck.`;
   showRows($("near-combos"), $("more-near-combos"), near.map(c => comboRow({ core: c.cards, options: [{ card: null, decks: c.decks, combo: c }] },
-    names, decksSay, null, away(c)[0])));
+    decksSay, away(c)[0])));
 
   // Cuts only make sense against decks with your own commander: another's never play its cards
   $("cuts-section").hidden = key !== ownKey;
@@ -911,42 +911,62 @@ function typeGroups(cards, names) {
 const showPlayed = typedGallery($("played-types"), $("played"), $("more-played"));
 const showSignature = typedGallery($("signature-types"), $("signature"), $("more-signature"));
 // Scryfall Tagger tags, readably: "gives-pp-counters" -> "Gives +1/+1 counters"
-// Combos and packages, PAGE_COMBOS at a time. rows: [{cards: elements, meta: text and elements}]
+// Combos and packages, PAGE_COMBOS at a time. rows: [{cards: elements, meta: text and elements, test:
+// cards to test}]. test: showResults' tester, which "Test in tournaments" shows the results of in the row
 const PAGE_COMBOS = 10;
-function showRows(list, more, rows) {
+function showRows(list, more, rows, test = null) {
   let shown = 0;
   list.replaceChildren();
+  const row = r => {
+    const result = el("div", { className: "combo-test", hidden: true });
+    const button = test && r.test && el("button", { type: "button", className: "link-button", textContent: "Test in tournaments",
+      ariaExpanded: "false", onclick: async () => {
+        const open = button.ariaExpanded !== "true";
+        button.ariaExpanded = String(open);
+        result.hidden = !open;
+        if (open && !result.childElementCount) {
+          result.append(el("p", { className: "muted", textContent: "Loading…" }));
+          result.replaceChildren(...await test(r.test).catch(() => [el("p", { className: "muted", textContent: "Couldn't load the tournament decks." })]));
+        }
+      } });
+    return el("li", {}, el("div", { className: "combo-cards" }, ...r.cards),
+      el("p", { className: "combo-meta" }, ...r.meta, ...(button ? [" · ", button] : [])), result);
+  };
   more.onclick = () => {
-    list.append(...rows.slice(shown, shown + PAGE_COMBOS).map(r => el("li", {},
-      el("div", { className: "term-items" }, ...r.cards), el("p", { className: "combo-meta" }, ...r.meta))));
+    list.append(...rows.slice(shown, shown + PAGE_COMBOS).map(row));
     shown += PAGE_COMBOS;
     more.hidden = shown >= rows.length;
   };
   more.onclick();
 }
 const joined = (items, by = "+") => items.flatMap((x, i) => (i ? [el("span", { className: "plus", textContent: by }), x] : [x]));
-const withCount = (button, k) => (button.append(el("small", { textContent: k.toLocaleString() })), button);
-// " · Test in tournaments", when the commander has results (test: showResults' tester)
-const testLink = (cards, test) => (test ? [" · ", el("button", { type: "button", className: "link-button", textContent: "Test in tournaments",
-  onclick: () => test(cards) })] : []);
-// A row for a group of combos (see groupCombos): its cards, the one that differs as choices, the other
-// pieces it needs, and what it makes. decks(k): how to say how many decks play it. missing: a card
-// to add, marked (one card away)
-function comboRow({ core, options }, names, decks, test, missing = null) {
-  const button = c => {
-    const b = cardButton(c, names);
-    if (c === missing) b.classList.add("missing"), (b.title = "Not in your deck");
-    return b;
-  };
+// A small card image that opens the card, with a caption under it (optional)
+function miniCard(card, caption = "", className = "") {
+  const img = el("img", { alt: "", loading: "lazy", decoding: "async" });
+  img.onload = () => img.classList.add("loaded");
+  const tile = el("button", { type: "button", className: `card mini ${className}` }, el("span", { className: "card-art" }, img),
+    ...(caption ? [el("span", { className: "card-meta", textContent: caption })] : []));
+  cardInfo(card).then(info => {
+    img.alt = tile.title = info.name;
+    img.src = imageUrl(info.id);
+    tile.onclick = () => openCard(info.id, card);
+  });
+  return tile;
+}
+// A row for a group of combos (see groupCombos): its cards, the one that differs as choices (each with
+// its decks), the other pieces it needs, and what it makes. decks(k): how to say how many decks play
+// it. missing: a card to add, marked (one card away)
+function comboRow({ core, options }, decks, missing = null) {
+  const card = (c, caption = "") => (c === missing ? miniCard(c, "Not in your deck", "missing") : miniCard(c, caption));
   const first = options[0].combo;
   const choices = options.length > 1 ? [el("span", { className: "choices" },
-    ...joined(options.map(o => withCount(button(o.card), o.decks)), "or"))] : [];
+    ...joined(options.map(o => card(o.card, `${o.decks.toLocaleString()} ${o.decks === 1 ? "deck" : "decks"}`)), "or"))] : [];
   return {
-    cards: [...joined([...core.map(button), ...choices]),
-      ...first.needs.map(n => el("span", { className: "plus", textContent: `+ any ${n}` }))],
+    cards: [...joined([...core.map(c => card(c)), ...choices]),
+      ...first.needs.map(n => el("span", { className: "plus need", textContent: `+ any ${n}` }))],
     meta: [`${decks(options[0].decks)} · ${first.makes.join(", ") || "a combo"} · `,
-      el("a", { href: `https://commanderspellbook.com/combo/${first.id}/`, target: "_blank", rel: "noopener", textContent: "How it works ↗" }),
-      ...testLink(first.cards, test)],
+      el("a", { href: `https://commanderspellbook.com/combo/${first.id}/`, target: "_blank", rel: "noopener", textContent: "How it works ↗" })],
+    test: first.cards,
   };
 }
 
@@ -1137,7 +1157,7 @@ async function showCommander(key) {
     $("combos-lede").textContent = combos.length
       ? `Combos from Commander Spellbook that at least 1% of ${these} play every card of, most played first. Combos that differ in one card are shown as one, with each choice's decks.`
       : `None of Commander Spellbook's combos is in 1% of ${these}.`;
-    showRows($("combos"), $("more-combos"), combos.map(group => comboRow(group, names, k => `${percent(k / m)} of ${these} (${k.toLocaleString()})`, testPackage)));
+    showRows($("combos"), $("more-combos"), combos.map(group => comboRow(group, k => `${percent(k / m)} of ${these} (${k.toLocaleString()})`)), testPackage);
     shard.sets ??= shard.decks.map(d => new Set(d.cards));
     const counted = packages.map(cards => {
       const ps = cards.map(c => shard.position.get(c));
@@ -1147,10 +1167,22 @@ async function showCommander(key) {
       ? `Cards ${these} play together far more often than chance would have it, besides the combos above. They're measured within each build, so cards don't go together just for being in the same kind of deck; and ${lead}'s precon is left out.`
       : `No cards that ${these} play together far more often than chance would have it.`;
     showRows($("packages"), $("more-packages"), counted.map(p => ({
-      cards: joined(p.cards.map(c => cardButton(c, names))),
-      meta: [`${percent(p.decks / m)} of ${these} play all of them (${p.decks.toLocaleString()})`, ...testLink(p.cards, testPackage)],
-    })));
+      cards: joined(p.cards.map(c => miniCard(c))),
+      meta: [`${percent(p.decks / m)} of ${these} play all of them (${p.decks.toLocaleString()})`],
+      test: p.cards,
+    })), testPackage);
+    // Combos or packages, one at a time
+    const tabs = [["combos", "Combos", combos.length], ["packages", "Packages", counted.length]];
+    const pickTab = name => {
+      comboTab = name;
+      for (const [t] of tabs) $(`${t}-tab`).hidden = t !== name;
+      $("combo-tabs").replaceChildren(...tabs.map(([t, label, k]) => el("button", {
+        type: "button", ariaPressed: String(t === name), onclick: () => pickTab(t),
+      }, label, el("small", { textContent: k.toLocaleString() }))));
+    };
+    pickTab(comboTab);
   }
+  let comboTab = "combos";
 
   // Trends: what the decks made lately play more of, for a window of days (index.json's windows)
   const windows = (decks.windows ?? []).map((days, i) => ({ days, since: decks.since[i] }));
@@ -1288,20 +1320,29 @@ function showResults(key, results, names, released, onPeriod) {
     if (!pkg.length) return;
     const shown = pkg, data = await getLists();
     if (shown !== pkg) return; // changed while loading
-    const r = packageResults(data, pkg, w);
-    const one = pkg.length === 1;
+    const { tiles, note } = packageView(data, pkg);
+    $("package-result").replaceChildren(...tiles);
+    $("package-note").textContent = note;
+  }
+  // A package's results over the period shown: stat tiles, and a note on them
+  function packageView(data, cards) {
+    const r = packageResults(data, cards, w);
+    const one = cards.length === 1;
     const sides = s => `${s.decks.toLocaleString()} ${s.decks === 1 ? "deck" : "decks"}, ${s.games.toLocaleString()} games`
       + (s.cutDecks ? `; ${percent(s.cuts / s.cutDecks)} made the top cut` : "");
     const sure = r.lift !== null && Math.abs(r.evidence) >= SIGNAL;
-    $("package-result").replaceChildren(
-      statTile(`${one ? "With it" : "With all of them"}: win rate`, r.all.games ? percent1(r.all.wins / r.all.games) : "–", sides(r.all)),
-      statTile(`${one ? "Without it" : "With none"}: win rate`, r.none.games ? percent1(r.none.wins / r.none.games) : "–", sides(r.none)),
-      r.lift === null ? statTile("Difference", "–", `Too few decks ${r.all.decks ? "without" : "with"} ${one ? "it" : "them"} to compare`)
-        : statTile("Difference", points(r.lift), sure ? `A clearly ${r.lift > 0 ? "higher" : "lower"} win rate with ${one ? "it" : "them"}`
-          : "Too few decks to be sure yet", sure ? (r.lift > 0 ? "up" : "down") : ""));
-    $("package-note").textContent = (r.some.decks ? `${r.some.decks.toLocaleString()} ${r.some.decks === 1 ? "deck plays" : "decks play"} only some of them, left out. ` : "")
-      + `In the last ${period()}. As for single cards, both sides are pulled toward ${lead}'s win rate, so a few decks need a big difference to show one; `
-      + "and a card can stand for a style of build rather than win on its own.";
+    return {
+      tiles: [
+        statTile(`${one ? "With it" : "With all of them"}: win rate`, r.all.games ? percent1(r.all.wins / r.all.games) : "–", sides(r.all)),
+        statTile(`${one ? "Without it" : "With none"}: win rate`, r.none.games ? percent1(r.none.wins / r.none.games) : "–", sides(r.none)),
+        r.lift === null ? statTile("Difference", "–", `Too few decks ${r.all.decks ? "without" : "with"} ${one ? "it" : "them"} to compare`)
+          : statTile("Difference", points(r.lift), sure ? `A clearly ${r.lift > 0 ? "higher" : "lower"} win rate with ${one ? "it" : "them"}`
+            : "Too few decks to be sure yet", sure ? (r.lift > 0 ? "up" : "down") : ""),
+      ],
+      note: (r.some.decks ? `${r.some.decks.toLocaleString()} ${r.some.decks === 1 ? "deck plays" : "decks play"} only some of them, left out. ` : "")
+        + `In the last ${period()}. As for single cards, both sides are pulled toward ${lead}'s win rate, so a few decks need a big difference to show one; `
+        + "and a card can stand for a style of build rather than win on its own.",
+    };
   }
   // The example to test: a niche card, one that some but not most of its decks play (over two years)
   const last = results.windows.length - 1;
@@ -1409,11 +1450,11 @@ function showResults(key, results, names, released, onPeriod) {
   }
   show();
   showPackage();
-  // To test a package from elsewhere on the page (every deck plays the commander, so it's left out)
-  return cards => {
-    pkg = cards.filter(c => names[c] !== undefined && !key.split("-").includes(String(c)));
-    showPackage();
-    $("package-result").scrollIntoView({ block: "center" });
+  // To test a package from elsewhere on the page, over the period shown here: elements to show
+  // (every deck plays the commander, so it's left out)
+  return async cards => {
+    const { tiles, note } = packageView(await getLists(), cards.filter(c => !key.split("-").includes(String(c))));
+    return [el("div", { className: "result-stats" }, ...tiles), el("p", { className: "muted deck-lede", textContent: note })];
   };
 }
 const TOP_FINISH = 4; // TOP_FINISH in build_decks.py
