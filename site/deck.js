@@ -426,7 +426,7 @@ export function packageGroups(shard, builds, { lands = new Set(), gameChangers =
 export function comboPrimer(combos, names) {
   const card = c => `[[${names[c].split(" // ")[0]}]]`;
   const lines = text => text.split("\n").map(t => t.trim()).filter(Boolean);
-  return ["# Combos", "", ...combos.flatMap(({ id, cards, needs, makes, how }) => {
+  return ["# Combos", "", ...combos.flatMap(({ cards, needs, makes, how }) => {
     const first = [...needs.map(n => `Any ${n}`), ...lines(how.easy), ...lines(how.notable), ...(how.mana ? [`${how.mana} available`] : [])];
     return [
       `## ${cards.map(c => names[c]).join(" + ")}`, "",
@@ -434,7 +434,6 @@ export function comboPrimer(combos, names) {
       ...(first.length ? ["**First:**", ...first.map(t => `- ${t}`), ""] : []),
       "**Steps:**", ...lines(how.steps).map((t, i) => `${i + 1}. ${t}`), "",
       `**Result:** ${makes.join(", ") || "a combo"}`, "",
-      `[How it works on Commander Spellbook](https://commanderspellbook.com/combo/${id}/)`, "",
     ];
   })].join("\n");
 }

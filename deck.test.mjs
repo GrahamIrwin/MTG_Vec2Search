@@ -141,7 +141,6 @@ test("combos for a primer: cards as [[links]], what comes first, steps and resul
     "**First:**", "- Any Mana Dork", "- You control a creature.", "- {G} available", "",
     "**Steps:**", "1. Tap it.", "2. Untap it.", "3. Repeat.", "",
     "**Result:** Infinite mana, Infinite ETB", "",
-    "[How it works on Commander Spellbook](https://commanderspellbook.com/combo/1-2/)", "",
   ].join("\n"));
 });
 
