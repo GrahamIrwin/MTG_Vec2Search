@@ -77,7 +77,8 @@ export function decodeShard(shard) {
   });
   let q = 0;
   const precon = new Set((shard.precon ?? []).map(gap => (q += gap)));
-  return { cards: shard.cards, decks, plays, weight, position, tags, precon, signature: shard.signature,
+  const combos = (shard.combos ?? []).map(([id, cards, needs, makes]) => ({ id, cards, needs, makes }));
+  return { cards: shard.cards, decks, plays, weight, position, tags, precon, combos, signature: shard.signature,
     price: shard.price ?? -1, bracket: shard.bracket ?? 0, themes: shard.themes ?? [], results: shard.results ?? 0 };
 }
 
@@ -355,6 +356,44 @@ export function findPackages(shard, { lands = new Set(), phi = PHI, max = MAX_PA
     if (all >= 5) packages.push({ cards, decks: all });
   }
   return packages;
+}
+
+// === Combos: Commander Spellbook's, that a commander's decks play (shard.combos, see build_decks.py) ===
+// How many of these decks (numbers in shard.decks) play every card of each combo, but those has(card)
+// says are there anyway (the commander). Returns [{...combo, decks}], most played first.
+export function comboDecks(shard, members, has = () => false) {
+  shard.sets ??= shard.decks.map(d => new Set(d.cards));
+  return shard.combos.map(combo => {
+    const need = combo.cards.filter(c => !has(c)).map(c => shard.position.get(c));
+    const decks = need.includes(undefined) ? 0 : members.reduce((k, d) => k + need.every(p => shard.sets[d].has(p)), 0);
+    return { ...combo, decks };
+  }).sort((a, b) => b.decks - a.decks);
+}
+
+// Combos that differ in one card (Teferi, Displacer Kitten and Sol Ring, or Mana Vault, ...), need the same
+// other pieces and make the same thing first, as one:
+// [{core: the cards they share, options: [{card: the one that differs (null for a lone combo), decks, combo}]}],
+// in the order given. A combo with the same cards as one before it is left out.
+export function groupCombos(combos) {
+  const groups = [], seen = new Set();
+  for (const combo of combos) {
+    const key = [...combo.cards].sort((a, b) => a - b).join();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const size = combo.cards.length;
+    const like = String([combo.needs, combo.makes?.[0]]);
+    const group = groups.find(g => g.size === size && g.like === like && g.core.filter(c => combo.cards.includes(c)).length === size - 1);
+    if (!group) {
+      groups.push({ size, like, core: combo.cards, options: [{ card: null, decks: combo.decks, combo }] });
+      continue;
+    }
+    if (group.core.length === size) { // a lone combo, now a group
+      group.core = group.core.filter(c => combo.cards.includes(c));
+      group.options[0].card = group.options[0].combo.cards.find(c => !group.core.includes(c));
+    }
+    group.options.push({ card: combo.cards.find(c => !group.core.includes(c)), decks: combo.decks, combo });
+  }
+  return groups.map(({ core, options }) => ({ core, options }));
 }
 
 // A name for a build from the word its deck names use far more than the commander's other

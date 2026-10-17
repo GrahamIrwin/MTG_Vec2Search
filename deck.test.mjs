@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages,
+  findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages, comboDecks, groupCombos,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "./site/deck.js";
 
@@ -108,6 +108,22 @@ test("packages: cards played together, but not just for being in the same group 
   assert.deepEqual(findPackages(shard, { groups: shard.decks.map((_, i) => +(i < 50)) }).map(p => p.cards.sort()), [[0, 1]]);
   assert.deepEqual(findPackages(shard, { lands: new Set([0, 1]) }).map(p => p.cards.sort()), [[3, 4]]); // lands don't start one
   assert.deepEqual(findPackages(decodeShard({ ...raw, precon: [3, 1] })).map(p => p.cards.sort()), [[0, 1]]); // 3 and 4: the precon
+});
+
+test("combos: the decks playing every card (the commander's a given), near-copies as one", () => {
+  // Card 9 is the commander; 1 and 2 are in every deck, 3 in half, 4 in none
+  const raw = { cards: [1, 2, 3], decks: Array.from({ length: 10 }, (_, i) => [i, "", "", i % 2 ? [0, 1] : [0, 1, 1]]),
+    combos: [["a", [9, 1, 2], [], ["Infinite mana"]], ["b", [9, 1, 3], ["Mana Dork"], []], ["c", [9, 1, 4], [], ["Infinite mana", "Lock"]],
+      ["d", [2, 1, 9], [], []], ["e", [9, 1, 5], [], ["Win the game"]]] };
+  const shard = decodeShard(raw);
+  const counted = comboDecks(shard, shard.decks.map((_, d) => d), c => c === 9);
+  assert.deepEqual(counted.map(c => [c.id, c.decks]), [["a", 10], ["d", 10], ["b", 5], ["c", 0], ["e", 0]]);
+  assert.deepEqual(counted[2].needs, ["Mana Dork"]);
+  // d has a's cards; c differs from a in one card, and makes the same first; b needs a Mana Dork, e makes another thing
+  const groups = groupCombos(counted);
+  assert.deepEqual(groups.map(g => [g.core, g.options.map(o => [o.card, o.decks])]),
+    [[[9, 1], [[2, 10], [4, 0]]], [[9, 1, 3], [[null, 5]]], [[9, 1, 5], [[null, 0]]]]);
+  assert.deepEqual(groupCombos([{ cards: [5, 6], decks: 3 }]), [{ core: [5, 6], options: [{ card: null, decks: 3, combo: { cards: [5, 6], decks: 3 } }] }]);
 });
 
 test("deck link worker: Moxfield and Archidekt decks become plain decklists", async () => {

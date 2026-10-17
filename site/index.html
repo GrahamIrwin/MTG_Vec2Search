@@ -429,6 +429,15 @@
     .deck-list .deck-body { padding: 0 14px 12px; border-top: 1px solid var(--rule); }
     .deck-list .deck-body p { margin: 10px 0 6px; font-size: 15px; color: var(--ink-soft); }
     @media (max-width: 600px) { .deck-list summary { grid-template-columns: 3.4em 1fr; } .deck-list summary > a.open { grid-column: 2; } }
+    .combo-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; align-items: start; }
+    @media (min-width: 900px) { .combo-list { grid-template-columns: 1fr 1fr; } }
+    .combo-list li { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 10px 14px; min-width: 0; }
+    .combo-list .term-items { padding: 0; align-items: center; }
+    .combo-list .plus { color: var(--ink-faint); font-size: 15px; }
+    .combo-list .choices { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 6px; border: 1px dashed var(--rule); border-radius: 10px; }
+    .combo-list .term.missing { border: 1px dashed var(--accent); background: var(--accent-soft); }
+    .combo-list .combo-meta { margin: 8px 0 0; font-size: 14px; color: var(--ink-soft); overflow-wrap: anywhere; }
+    .combo-list .combo-meta .link-button { font: inherit; }
     button.term { cursor: pointer; font: inherit; font-size: 15px; }
     .type-filter { margin: 4px 0 2px; }
     .type-filter button {
@@ -758,6 +767,17 @@
             <div class="gallery" id="cuts"></div>
             <div class="more-wrap"><button id="more-cuts" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          <details class="panel" open id="deck-combos-panel" hidden>
+            <summary><h2 class="deck-heading">Combos</h2></summary>
+            <h3 class="sub-heading">In your deck</h3>
+            <p class="muted deck-lede" id="deck-combos-lede"></p>
+            <ol class="combo-list" id="deck-combos"></ol>
+            <div class="more-wrap"><button id="more-deck-combos" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">One card away</h3>
+            <p class="muted deck-lede" id="near-combos-lede"></p>
+            <ol class="combo-list" id="near-combos"></ol>
+            <div class="more-wrap"><button id="more-near-combos" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
           <details class="panel" open id="deck-tournament" hidden>
             <summary><h2 class="deck-heading">Tournament check</h2></summary>
             <p class="muted deck-lede" id="deck-tournament-lede"></p>
@@ -880,6 +900,17 @@
               <p class="muted deck-lede" id="brackets-lede"></p>
               <div class="chips type-filter" id="brackets" role="group" aria-label="Bracket"></div>
             </div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Combos &amp; packages</h2></summary>
+            <h3 class="sub-heading">Combos</h3>
+            <p class="muted deck-lede" id="combos-lede"></p>
+            <ol class="combo-list" id="combos"></ol>
+            <div class="more-wrap"><button id="more-combos" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">Packages</h3>
+            <p class="muted deck-lede" id="packages-lede"></p>
+            <ol class="combo-list" id="packages"></ol>
+            <div class="more-wrap"><button id="more-packages" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
           <details class="panel" open id="commander-trends">
             <summary><h2 class="deck-heading">Trends</h2></summary>

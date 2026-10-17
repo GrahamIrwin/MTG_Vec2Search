@@ -91,13 +91,19 @@ with tempfile.TemporaryDirectory() as tmp:
     precons = precon_sets({"cmdr": {"blc", "c13", "m14"}, "c0": {"c13"}, "c5": {"blc", "c13"}, "c6": {"blc"}}, sets)
     assert precons["cmdr"] == ["c13", "blc"], precons
     build(corpus, cards, tags, out, prices={"cmdr": 2.0, "c0": 1.0, "island": 0.5}, today=date(2026, 10, 4),
-          results={"e": event}, precons=precons)
+          results={"e": event}, precons=precons, combos=[
+              ("1-2", ["cmdr", "c0"], ["cmdr"], [], ["Win the game"]),  # the commander counts as played
+              ("w", ["c96", "c0"], [], ["Mana Dork"], ["Infinite mana"]),
+              ("x", ["c0", "c1"], [], [], []),  # c1: in 4 of the 5 decks, under MIN_COMBO_DECKS
+              ("y", ["c0", "c96"], ["c0"], [], []),  # c0 isn't the commander
+              ("z", ["c0", "not a card"], [], [], [])])
     with open(os.path.join(out, "0.json"), encoding="utf-8") as f:
         shard = json.load(f)
     assert shard["cards"][:2] == [2, 98] and len(shard["cards"]) == 97  # c0 and c96 are in every deck
     assert shard["tags"] == [["pump", [0, 1]]] and len(shard["signature"]) == 60, shard["tags"]
     precon = [sum(shard["precon"][:i + 1]) for i in range(len(shard["precon"]))]
     assert sorted(shard["cards"][p] for p in precon) == [2, 7], shard["precon"]
+    assert shard["combos"] == [["1-2", [0, 2], [], ["Win the game"]], ["w", [98, 2], ["Mana Dork"], ["Infinite mana"]]], shard["combos"]
     first = shard["decks"][0]
     assert first[0] == 5 and first[2] == "2026-09-05" and first[4] == "2026-10-01"  # newest first; when it was made
     assert [d[5] for d in shard["decks"]] == [4, 0, 3, 3, 3]  # its bracket (0: none)

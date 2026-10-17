@@ -5,7 +5,7 @@ import {
 import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.js";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags,
+  findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags, findPackages, comboDecks, groupCombos,
   decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
   cardResults, packageResults, MIN_RESULT_DECKS,
 } from "./deck.js";
@@ -671,6 +671,26 @@ async function findSimilar(key) {
   $("adds-lede").textContent = `What the ${neighbors} decks most like yours play that yours doesn't, favoring cards they play more than most ${lead} decks do.`;
   await showAdds(picks);
 
+  // Combos: Commander Spellbook's that this commander's decks play, in your deck or one card from it
+  // (a card in your colors, not another commander)
+  const inDeck = new Set([...mine, ...commanders]);
+  const shardLeaders = key.split("-").map(Number);
+  const known = comboDecks(shard, shard.decks.map((_, d) => d), c => shardLeaders.includes(c));
+  const away = combo => combo.cards.filter(c => !inDeck.has(c));
+  const complete = known.filter(c => !away(c).length);
+  const near = known.filter(c => away(c).length === 1 && !shardLeaders.includes(away(c)[0]) && (identity[away(c)[0]] & ~colors) === 0);
+  const decksSay = k => `${k.toLocaleString()} ${lead} ${k === 1 ? "deck plays" : "decks play"} it`;
+  $("deck-combos-panel").hidden = !shard.combos.length;
+  $("deck-combos-lede").textContent = complete.length
+    ? `Combos from Commander Spellbook in your deck, of those at least 2% of ${lead} decks play.`
+    : `None of the combos at least 2% of ${lead} decks play (from Commander Spellbook) is in your deck.`;
+  showRows($("deck-combos"), $("more-deck-combos"), groupCombos(complete).map(g => comboRow(g, names, decksSay, null)));
+  $("near-combos-lede").textContent = near.length
+    ? `Combos your deck is one card from (marked), most played first.`
+    : `No combo ${lead} decks play is one card from your deck.`;
+  showRows($("near-combos"), $("more-near-combos"), near.map(c => comboRow({ core: c.cards, options: [{ card: null, decks: c.decks, combo: c }] },
+    names, decksSay, null, away(c)[0])));
+
   // Cuts only make sense against decks with your own commander: another's never play its cards
   $("cuts-section").hidden = key !== ownKey;
   const rare = cuts.filter(c => c.share < CUT_BELOW).slice(0, SHOW_CUTS);
@@ -891,6 +911,45 @@ function typeGroups(cards, names) {
 const showPlayed = typedGallery($("played-types"), $("played"), $("more-played"));
 const showSignature = typedGallery($("signature-types"), $("signature"), $("more-signature"));
 // Scryfall Tagger tags, readably: "gives-pp-counters" -> "Gives +1/+1 counters"
+// Combos and packages, PAGE_COMBOS at a time. rows: [{cards: elements, meta: text and elements}]
+const PAGE_COMBOS = 10;
+function showRows(list, more, rows) {
+  let shown = 0;
+  list.replaceChildren();
+  more.onclick = () => {
+    list.append(...rows.slice(shown, shown + PAGE_COMBOS).map(r => el("li", {},
+      el("div", { className: "term-items" }, ...r.cards), el("p", { className: "combo-meta" }, ...r.meta))));
+    shown += PAGE_COMBOS;
+    more.hidden = shown >= rows.length;
+  };
+  more.onclick();
+}
+const joined = (items, by = "+") => items.flatMap((x, i) => (i ? [el("span", { className: "plus", textContent: by }), x] : [x]));
+const withCount = (button, k) => (button.append(el("small", { textContent: k.toLocaleString() })), button);
+// " · Test in tournaments", when the commander has results (test: showResults' tester)
+const testLink = (cards, test) => (test ? [" · ", el("button", { type: "button", className: "link-button", textContent: "Test in tournaments",
+  onclick: () => test(cards) })] : []);
+// A row for a group of combos (see groupCombos): its cards, the one that differs as choices, the other
+// pieces it needs, and what it makes. decks(k): how to say how many decks play it. missing: a card
+// to add, marked (one card away)
+function comboRow({ core, options }, names, decks, test, missing = null) {
+  const button = c => {
+    const b = cardButton(c, names);
+    if (c === missing) b.classList.add("missing"), (b.title = "Not in your deck");
+    return b;
+  };
+  const first = options[0].combo;
+  const choices = options.length > 1 ? [el("span", { className: "choices" },
+    ...joined(options.map(o => withCount(button(o.card), o.decks)), "or"))] : [];
+  return {
+    cards: [...joined([...core.map(button), ...choices]),
+      ...first.needs.map(n => el("span", { className: "plus", textContent: `+ any ${n}` }))],
+    meta: [`${decks(options[0].decks)} · ${first.makes.join(", ") || "a combo"} · `,
+      el("a", { href: `https://commanderspellbook.com/combo/${first.id}/`, target: "_blank", rel: "noopener", textContent: "How it works ↗" }),
+      ...testLink(first.cards, test)],
+  };
+}
+
 function tagLabel(tag) {
   const label = tag.replaceAll("-", " ").replace(/\bpp\b/g, "+1/+1").replace(/\bmm\b/g, "−1/−1");
   return label[0].toUpperCase() + label.slice(1);
@@ -961,6 +1020,13 @@ async function showCommander(key) {
     },
   }, g.name, el("small", { textContent: i ? `${Math.round(g.members.length / n * 100)}%` : n.toLocaleString() }))));
 
+  // Packages: within builds, so cards a build plays a lot of don't go together just for that; one
+  // a combo has every card of is left out (the combo says more)
+  const buildOf = shard.decks.map(() => 0);
+  builds.forEach((b, i) => b.members.forEach(d => (buildOf[d] = i)));
+  const packages = findPackages(shard, { lands, groups: buildOf }).map(p => p.cards.map(q => shard.cards[q]))
+    .filter(cards => !shard.combos.some(c => cards.every(x => c.cards.includes(x))));
+
   const ofBracket = (members, b) => members.filter(d => shard.decks[d].bracket === b);
   $("bracket-filter").hidden = !shard.decks.some(d => d.bracket);
   function showBuild() {
@@ -998,6 +1064,7 @@ async function showCommander(key) {
       : distinctive(shard, g.members, { n: SIGNATURE_SHOWN, ignore: lands })).slice(0, SIGNATURE_SHOWN).map(tile));
 
     showPlayed([...counts.keys()].filter(p => counts[p]).sort((a, b) => counts[b] - counts[a] || a - b).map(tile));
+    showCombos(g);
     showCommanderTrends(g, counts);
 
     // The average deck: as many spells and nonbasic lands as these decks play on average, then
@@ -1063,6 +1130,28 @@ async function showCommander(key) {
     ]));
   }
 
+  // Combos and packages these decks play, each with how many of them play all of it
+  function showCombos(g) {
+    const m = g.members.length, these = g.all ? `${lead} decks` : "these decks";
+    const combos = groupCombos(comboDecks(shard, g.members, c => leaders.includes(c)).filter(c => c.decks && c.decks >= 0.01 * m));
+    $("combos-lede").textContent = combos.length
+      ? `Combos from Commander Spellbook that at least 1% of ${these} play every card of, most played first. Combos that differ in one card are shown as one, with each choice's decks.`
+      : `None of Commander Spellbook's combos is in 1% of ${these}.`;
+    showRows($("combos"), $("more-combos"), combos.map(group => comboRow(group, names, k => `${percent(k / m)} of ${these} (${k.toLocaleString()})`, testPackage)));
+    shard.sets ??= shard.decks.map(d => new Set(d.cards));
+    const counted = packages.map(cards => {
+      const ps = cards.map(c => shard.position.get(c));
+      return { cards, decks: g.members.reduce((k, d) => k + ps.every(p => shard.sets[d].has(p)), 0) };
+    }).filter(p => p.decks >= Math.max(3, 0.03 * m)); // strongest first: by decks, staples would lead
+    $("packages-lede").textContent = counted.length
+      ? `Cards ${these} play together far more often than chance would have it, besides the combos above. They're measured within each build, so cards don't go together just for being in the same kind of deck; and ${lead}'s precon is left out.`
+      : `No cards that ${these} play together far more often than chance would have it.`;
+    showRows($("packages"), $("more-packages"), counted.map(p => ({
+      cards: joined(p.cards.map(c => cardButton(c, names))),
+      meta: [`${percent(p.decks / m)} of ${these} play all of them (${p.decks.toLocaleString()})`, ...testLink(p.cards, testPackage)],
+    })));
+  }
+
   // Trends: what the decks made lately play more of, for a window of days (index.json's windows)
   const windows = (decks.windows ?? []).map((days, i) => ({ days, since: decks.since[i] }));
   let shownWindow = windows.findIndex(w => w.days === DEFAULT_DAYS && w.since !== null);
@@ -1091,7 +1180,7 @@ async function showCommander(key) {
   // Tournament results; picking bracket 5 also notes each card's on its tile
   tournament = null;
   $("results-panel").hidden = !results;
-  if (results) showResults(key, results, names, released, () => bracket === 5 && showBuild());
+  const testPackage = results ? showResults(key, results, names, released, () => bracket === 5 && showBuild()) : null;
   const cedh = card => (bracket === 5 ? tournamentNote(card) : {});
   await showBuild();
   commanderMessage("");
@@ -1320,6 +1409,12 @@ function showResults(key, results, names, released, onPeriod) {
   }
   show();
   showPackage();
+  // To test a package from elsewhere on the page (every deck plays the commander, so it's left out)
+  return cards => {
+    pkg = cards.filter(c => names[c] !== undefined && !key.split("-").includes(String(c)));
+    showPackage();
+    $("package-result").scrollIntoView({ block: "center" });
+  };
 }
 const TOP_FINISH = 4; // TOP_FINISH in build_decks.py
 const TOP_PILOTS = 2; // the pilots a commander's results are shown without

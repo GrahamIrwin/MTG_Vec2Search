@@ -46,6 +46,8 @@ STATE = "crawl_state.json"  # when each commander was last crawled, so crawls ta
 # (Moxfield's turns are "moxfield:<commander>"). A deck's id says where it's from: Archidekt's are
 # numbers, Moxfield's strings (its public id, the one in the deck's link).
 RELEASE = "deck-corpus"  # the GitHub release the corpus lives on (too big for git)
+COMBOS_URL = "https://json.commanderspellbook.com/variants.json.gz"  # Commander Spellbook's combos, updated daily
+COMBOS = "combos.json.gz"
 
 
 _last = {}  # per site: when its next request may go out
@@ -593,6 +595,9 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #       precon  gaps between the positions in `cards` of the cards in the commander's precon: the
 #              oldest Commander set it's in, every deck of it (decks barely changed from it play
 #              these together, which the site's packages leave out)
+#       combos  Commander Spellbook combos at least COMMON of the decks play every card of (MIN_COMBO_DECKS
+#              at least), most played first: [Spellbook id, card numbers (with the commander's), other
+#              pieces it needs ("Mana Dork"), what it makes (its first three results)]
 #       price  what a typical (median) deck costs, in US cents (-1: unknown)
 #       bracket  the typical bracket of the decks that give one (0: none do)
 #       themes  the Tagger tags these decks play far more of than other decks do
@@ -650,6 +655,7 @@ MONTH, BEFORE = 30, 90  # days: highlights compare the last month with the BEFOR
 BEST_DECKS, BREAKOUT_DECKS, RISING_DECKS = 20, 10, 15  # decks a commander needs for each highlight
 TOP_FINISH, MAX_FINISHES = 4, 200  # best finishes on a commander page: the newest MAX_FINISHES in the top 4
 MIN_DECKS = 5  # fewer decks than this don't make useful recommendations
+MIN_COMBO_DECKS = 5  # decks playing every card of a combo, for its commander's file to have it
 MAX_DECKS = 10000  # per commander, newest first: keeps a file around 1 MB to download (gzipped)
 SIGNATURE = 24
 SHOWN_SIGNATURE = 60
@@ -664,6 +670,30 @@ CARD_BLOCK = 16  # cards per card-commanders/ file: the most played are in most 
 NOT_A_PLAN = re.compile(r"^cycle-|-effect$|vanilla|^multiple-|^passive-ability$|^delayed-trigger$|"
                         r"^inverted-effects$|^intervening-if|out-of-color|^noncreature-typal$|"
                         r"^unique-type-line$|^drawback$|^cheaper-than-mv$|^staple-with")
+
+
+def played_combos(decks, here, leaders, by_rarest):
+    """The combos (see build: by_rarest) at least COMMON of these decks (here: plays by card) play every
+    card of, most played first, as written in a commander's file."""
+    least = max(MIN_COMBO_DECKS, COMMON * len(decks))
+    sets, masks = [set(played) for _, played in decks], {}
+
+    def mask(c):  # the decks playing c, as bits
+        if c not in masks:
+            masks[c] = sum(1 << i for i, s in enumerate(sets) if c in s)
+        return masks[c]
+    found = []
+    for c in [*here, *leaders]:
+        for id, ns, must, needs, makes in by_rarest.get(c, ()):
+            need = [x for x in ns if x not in leaders]
+            if must <= leaders and all(here[x] >= least for x in need):
+                k = (mask(need[0]) if need else (1 << len(decks)) - 1)
+                for x in need[1:]:
+                    k &= mask(x)
+                k = k.bit_count()
+                if k >= least:
+                    found.append((-k, id, ns, needs, makes))
+    return [[id, ns, needs, makes] for _, id, ns, needs, makes in sorted(found)]
 
 
 def gaps(numbers):
@@ -990,18 +1020,40 @@ def pooled(standings, field):
     return out
 
 
+def load_combos(path=COMBOS):
+    """Commander Spellbook's combos: [(id, oracle ids, those that must be the commander, other pieces it
+    needs, what it makes)]. Downloads them the first time (about 30 MB; unzipped, 2 GB to read)."""
+    if not os.path.exists(path):
+        print(f"Downloading {COMBOS_URL}...", flush=True)
+        with urllib.request.urlopen(urllib.request.Request(COMBOS_URL, headers={"User-Agent": HEADERS["User-Agent"]})) as r,                 open(path, "wb") as f:
+            shutil.copyfileobj(r, f)
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        variants = json.load(f)["variants"]
+    return [(v["id"], [u["card"]["oracleId"] for u in v["uses"]],
+             [u["card"]["oracleId"] for u in v["uses"] if u.get("mustBeCommander")],
+             [r["template"]["name"] for r in v["requires"]], [p["feature"]["name"] for p in v["produces"]][:3])
+            for v in variants if v["status"] == "OK"]
+
+
 def precon_sets(in_sets, sets):
     """{oracle id: the Commander sets it's in, oldest first}, from load_printings."""
     return {o: sorted((s for s in ss if sets[s][2] == "commander"), key=lambda s: sets[s][1]) for o, ss in in_sets.items()}
 
 
-def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, results=None, precons=None):
+def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, results=None, precons=None, combos=None):
     """corpus: {id: deck} (see slim_deck); cards: Scryfall cards in card-index order;
     tags: Scryfall Tagger tags, {slug: (oracle ids, names)} (see load_oracle_tags);
-    prices: {oracle id: cheapest USD price} (see load_printings); precons: see precon_sets."""
+    prices: {oracle id: cheapest USD price} (see load_printings); precons: see precon_sets;
+    combos: see load_combos."""
     number = {c["oracle_id"]: i for i, c in enumerate(cards) if c.get("oracle_id")}
     basic = {c["oracle_id"] for c in cards if "Basic" in c.get("type_line", "")}
     prices, precons = prices or {}, precons or {}
+    # Combos by their least played card (the highest number), which a commander's decks must play
+    by_rarest = defaultdict(list)
+    for id, oracles, must, needs, makes in combos or []:
+        if all(o in number for o in oracles):
+            ns = [number[o] for o in oracles]
+            by_rarest[max(ns)].append((id, ns, {number[o] for o in must}, needs, makes))
     card_tags = defaultdict(list)
     for slug, (ids, _) in (tags or {}).items():
         if len(ids) <= MAX_TAG_CARDS and not NOT_A_PLAN.search(slug):
@@ -1097,6 +1149,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
             # ponytail: a commander first printed as one of the 99 in a Commander set (Kenrith in ltc) gets
             # that set's cards; a precon decklist source if that hides real packages
+            "combos": played_combos(decks, here, {number[o] for o in decks[0][0]["commanders"]}, by_rarest),
             "precon": gaps([i for i, c in enumerate(played_most) if precon & set(precons.get(cards[c]["oracle_id"], ()))]),
             "price": price, "bracket": bracket, "themes": known_themes,
             **({"results": standings[key]["totals"][-1][0]} if key in standings else {}),
@@ -1173,6 +1226,7 @@ if __name__ == "__main__":
         state = json.load(open(STATE, encoding="utf-8")) if os.path.exists(STATE) else {}
         sys.exit(0 if share(load_corpus(), state) else 1)
     else:
+        combos = load_combos()  # first: reading it takes 2 GB for a moment, before the corpus is in memory
         prices, _, in_sets, sets = load_printings()
         build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=prices,
-              results=load_corpus(RESULTS), precons=precon_sets(in_sets, sets))
+              results=load_corpus(RESULTS), precons=precon_sets(in_sets, sets), combos=combos)

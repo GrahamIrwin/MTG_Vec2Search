@@ -3,6 +3,7 @@
 site/index/
 # Deck corpus (kept on the deck-corpus release) and what's built from it: python build_decks.py
 crawl_state.json
+combos.json.gz
 site/decks/
 node_modules/
 
