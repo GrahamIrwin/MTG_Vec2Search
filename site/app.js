@@ -911,26 +911,34 @@ function typeGroups(cards, names) {
 const showPlayed = typedGallery($("played-types"), $("played"), $("more-played"));
 const showSignature = typedGallery($("signature-types"), $("signature"), $("more-signature"));
 // Scryfall Tagger tags, readably: "gives-pp-counters" -> "Gives +1/+1 counters"
-// Combos and packages, PAGE_COMBOS at a time. rows: [{cards: elements, meta: text and elements, test:
-// cards to test}]. test: showResults' tester, which "Test in tournaments" shows the results of in the row
+// Combos and packages, PAGE_COMBOS at a time. rows: [{cards: elements, meta: text and elements, how:
+// async () => elements explaining it, test: cards to test}]. test: showResults' tester. "How it works" and "Test
+// in tournaments" each open a box in the row.
 const PAGE_COMBOS = 10;
 function showRows(list, more, rows, test = null) {
   let shown = 0;
   list.replaceChildren();
-  const row = r => {
-    const result = el("div", { className: "combo-test", hidden: true });
-    const button = test && r.test && el("button", { type: "button", className: "link-button", textContent: "Test in tournaments",
-      ariaExpanded: "false", onclick: async () => {
+  // A button that opens a box under the row with what show() gives, the first time it's opened
+  const opener = (label, show) => {
+    const box = el("div", { className: "combo-box", hidden: true });
+    const button = el("button", { type: "button", className: "link-button", textContent: label, ariaExpanded: "false",
+      onclick: async () => {
         const open = button.ariaExpanded !== "true";
         button.ariaExpanded = String(open);
-        result.hidden = !open;
-        if (open && !result.childElementCount) {
-          result.append(el("p", { className: "muted", textContent: "Loading…" }));
-          result.replaceChildren(...await test(r.test).catch(() => [el("p", { className: "muted", textContent: "Couldn't load the tournament decks." })]));
+        box.hidden = !open;
+        if (open && !box.childElementCount) {
+          box.append(el("p", { className: "muted", textContent: "Loading…" }));
+          box.replaceChildren(...await show());
         }
       } });
+    return [button, box];
+  };
+  const row = r => {
+    const opens = [r.how && opener("How it works", r.how),
+      test && r.test && opener("Test in tournaments", () => test(r.test)
+        .catch(() => [el("p", { className: "muted", textContent: "Couldn't load the tournament decks." })]))].filter(Boolean);
     return el("li", {}, el("div", { className: "combo-cards" }, ...r.cards),
-      el("p", { className: "combo-meta" }, ...r.meta, ...(button ? [" · ", button] : [])), result);
+      el("p", { className: "combo-meta" }, ...r.meta, ...opens.flatMap(([button]) => [" · ", button])), ...opens.map(([, box]) => box));
   };
   more.onclick = () => {
     list.append(...rows.slice(shown, shown + PAGE_COMBOS).map(row));
@@ -964,10 +972,28 @@ function comboRow({ core, options }, decks, missing = null) {
   return {
     cards: [...joined([...core.map(c => card(c)), ...choices]),
       ...first.needs.map(n => el("span", { className: "plus need", textContent: `+ any ${n}` }))],
-    meta: [`${decks(options[0].decks)} · ${first.makes.join(", ") || "a combo"} · `,
-      el("a", { href: `https://commanderspellbook.com/combo/${first.id}/`, target: "_blank", rel: "noopener", textContent: "How it works ↗" })],
+    meta: [`${decks(options[0].decks)} · ${first.makes.join(", ") || "a combo"}`],
+    how: () => comboSteps(first, options.length > 1 && options[0].card),
     test: first.cards,
   };
+}
+// Text with mana symbols ({G}, {2/W}, {T}) as Scryfall's images
+const withSymbols = text => text.split(/(\{[^}]+\})/).filter(Boolean).map(part => (/^\{.+\}$/.test(part)
+  ? el("img", { className: "mana", alt: part, src: `https://svgs.scryfall.io/card-symbols/${part.slice(1, -1).replace("/", "")}.svg` })
+  : part));
+// How a combo works, from Commander Spellbook: what it needs first, then its steps. choice: the card
+// these steps are for, of a group's choices
+async function comboSteps({ id, how }, choice) {
+  const lines = text => text.split("\n").map(t => t.trim()).filter(Boolean);
+  const before = [...lines(how.easy), ...lines(how.notable), ...(how.mana ? [`${how.mana} available.`] : [])];
+  return [
+    ...(choice ? [el("p", { className: "muted", textContent: `With ${(await cardInfo(choice)).name}; the others work the same way.` })] : []),
+    ...(before.length ? [el("h4", { textContent: "First" }), el("ul", {}, ...before.map(t => el("li", {}, ...withSymbols(t))))] : []),
+    el("h4", { textContent: "Then" }),
+    el("ol", {}, ...lines(how.steps).map(t => el("li", {}, ...withSymbols(t)))),
+    el("p", { className: "muted" }, "From ",
+      el("a", { href: `https://commanderspellbook.com/combo/${id}/`, target: "_blank", rel: "noopener", textContent: "Commander Spellbook ↗" })),
+  ];
 }
 
 function tagLabel(tag) {
@@ -1162,7 +1188,7 @@ async function showCommander(key) {
     const counted = packages.map(cards => {
       const ps = cards.map(c => shard.position.get(c));
       return { cards, decks: g.members.reduce((k, d) => k + ps.every(p => shard.sets[d].has(p)), 0) };
-    }).filter(p => p.decks >= Math.max(3, 0.03 * m)); // strongest first: by decks, staples would lead
+    }).filter(p => p.decks >= Math.max(3, 0.03 * m)).sort((a, b) => b.decks - a.decks);
     $("packages-lede").textContent = counted.length
       ? `Cards ${these} play together far more often than chance would have it, besides the combos above. They're measured within each build, so cards don't go together just for being in the same kind of deck; and ${lead}'s precon is left out.`
       : `No cards that ${these} play together far more often than chance would have it.`;

@@ -597,7 +597,8 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #              these together, which the site's packages leave out)
 #       combos  Commander Spellbook combos at least COMMON of the decks play every card of (MIN_COMBO_DECKS
 #              at least), most played first: [Spellbook id, card numbers (with the commander's), other
-#              pieces it needs ("Mana Dork"), what it makes (its first three results)]
+#              pieces it needs ("Mana Dork"), what it makes (its first three results), how it works:
+#              [mana needed, easy prerequisites, notable ones, steps (one a line)] ("": none)]
 #       price  what a typical (median) deck costs, in US cents (-1: unknown)
 #       bracket  the typical bracket of the decks that give one (0: none do)
 #       themes  the Tagger tags these decks play far more of than other decks do
@@ -684,7 +685,7 @@ def played_combos(decks, here, leaders, by_rarest):
         return masks[c]
     found = []
     for c in [*here, *leaders]:
-        for id, ns, must, needs, makes in by_rarest.get(c, ()):
+        for id, ns, must, shown in by_rarest.get(c, ()):
             need = [x for x in ns if x not in leaders]
             if must <= leaders and all(here[x] >= least for x in need):
                 k = (mask(need[0]) if need else (1 << len(decks)) - 1)
@@ -692,8 +693,8 @@ def played_combos(decks, here, leaders, by_rarest):
                     k &= mask(x)
                 k = k.bit_count()
                 if k >= least:
-                    found.append((-k, id, ns, needs, makes))
-    return [[id, ns, needs, makes] for _, id, ns, needs, makes in sorted(found)]
+                    found.append((-k, id, ns, shown))
+    return [[id, ns, *shown] for _, id, ns, shown in sorted(found, key=lambda f: f[:2])]
 
 
 def gaps(numbers):
@@ -1021,8 +1022,9 @@ def pooled(standings, field):
 
 
 def load_combos(path=COMBOS):
-    """Commander Spellbook's combos: [(id, oracle ids, those that must be the commander, other pieces it
-    needs, what it makes)]. Downloads them the first time (about 30 MB; unzipped, 2 GB to read)."""
+    """Commander Spellbook's combos: [(id, oracle ids, those that must be the commander, what a commander's
+    file says of it: [other pieces it needs, what it makes, how it works])], see build. Downloads them the
+    first time (about 30 MB; unzipped, 2 GB to read)."""
     if not os.path.exists(path):
         print(f"Downloading {COMBOS_URL}...", flush=True)
         with urllib.request.urlopen(urllib.request.Request(COMBOS_URL, headers={"User-Agent": HEADERS["User-Agent"]})) as r,                 open(path, "wb") as f:
@@ -1031,7 +1033,8 @@ def load_combos(path=COMBOS):
         variants = json.load(f)["variants"]
     return [(v["id"], [u["card"]["oracleId"] for u in v["uses"]],
              [u["card"]["oracleId"] for u in v["uses"] if u.get("mustBeCommander")],
-             [r["template"]["name"] for r in v["requires"]], [p["feature"]["name"] for p in v["produces"]][:3])
+             [[r["template"]["name"] for r in v["requires"]], [p["feature"]["name"] for p in v["produces"]][:3],
+              [v["manaNeeded"], v["easyPrerequisites"], v["notablePrerequisites"], v["description"]]])
             for v in variants if v["status"] == "OK"]
 
 
@@ -1050,10 +1053,10 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
     prices, precons = prices or {}, precons or {}
     # Combos by their least played card (the highest number), which a commander's decks must play
     by_rarest = defaultdict(list)
-    for id, oracles, must, needs, makes in combos or []:
+    for id, oracles, must, shown in combos or []:
         if all(o in number for o in oracles):
             ns = [number[o] for o in oracles]
-            by_rarest[max(ns)].append((id, ns, {number[o] for o in must}, needs, makes))
+            by_rarest[max(ns)].append((id, ns, {number[o] for o in must}, shown))
     card_tags = defaultdict(list)
     for slug, (ids, _) in (tags or {}).items():
         if len(ids) <= MAX_TAG_CARDS and not NOT_A_PLAN.search(slug):

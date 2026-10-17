@@ -77,7 +77,8 @@ export function decodeShard(shard) {
   });
   let q = 0;
   const precon = new Set((shard.precon ?? []).map(gap => (q += gap)));
-  const combos = (shard.combos ?? []).map(([id, cards, needs, makes]) => ({ id, cards, needs, makes }));
+  const combos = (shard.combos ?? []).map(([id, cards, needs, makes, how = ["", "", "", ""]]) =>
+    ({ id, cards, needs, makes, how: { mana: how[0], easy: how[1], notable: how[2], steps: how[3] } }));
   return { cards: shard.cards, decks, plays, weight, position, tags, precon, combos, signature: shard.signature,
     price: shard.price ?? -1, bracket: shard.bracket ?? 0, themes: shard.themes ?? [], results: shard.results ?? 0 };
 }
