@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages, comboDecks, groupCombos,
+  findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "./site/deck.js";
 
@@ -108,6 +108,11 @@ test("packages: cards played together, but not just for being in the same group 
   assert.deepEqual(findPackages(shard, { groups: shard.decks.map((_, i) => +(i < 50)) }).map(p => p.cards.sort()), [[0, 1]]);
   assert.deepEqual(findPackages(shard, { lands: new Set([0, 1]) }).map(p => p.cards.sort()), [[3, 4]]); // lands don't start one
   assert.deepEqual(findPackages(decodeShard({ ...raw, precon: [3, 1] })).map(p => p.cards.sort()), [[0, 1]]); // 3 and 4: the precon
+  // 0 and 1 are staples, 3 isn't
+  assert.deepEqual(findPackages(shard, { staples: new Set([0, 1, 4]) }).map(p => p.cards.sort()), [[3, 4]]);
+  // Groups: the first 50 decks play two Game Changers (cards 3 and 4), the rest none; too few decks for tuned bands
+  assert.deepEqual(new Set(packageGroups(shard, [], { gameChangers: new Set([3, 4]) })), new Set([1, 0]));
+  assert.equal(packageGroups(shard, [], { gameChangers: new Set([3, 4]) })[0], 1);
 });
 
 test("combos: the decks playing every card (the commander's a given), near-copies as one", () => {

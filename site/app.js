@@ -5,7 +5,7 @@ import {
 import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.js";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags, findPackages, comboDecks, groupCombos,
+  findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos,
   decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
   cardResults, packageResults, MIN_RESULT_DECKS,
 } from "./deck.js";
@@ -1068,11 +1068,11 @@ async function showCommander(key) {
     },
   }, g.name, el("small", { textContent: i ? `${Math.round(g.members.length / n * 100)}%` : n.toLocaleString() }))));
 
-  // Packages: within builds, so cards a build plays a lot of don't go together just for that; one
-  // a combo has every card of is left out (the combo says more)
-  const buildOf = shard.decks.map(() => 0);
-  builds.forEach((b, i) => b.members.forEach(d => (buildOf[d] = i)));
-  const packages = findPackages(shard, { lands, groups: buildOf }).map(p => p.cards.map(q => shard.cards[q]))
+  // Packages, with the decks in groups of alike ones (see packageGroups); one a combo has every card
+  // of is left out (the combo says more)
+  const groupOf = packageGroups(shard, builds.map(b => b.members), { lands, gameChangers: new Set(index.game_changers ?? []) });
+  const staples = new Set((decks.staples ?? []).map(c => shard.position.get(c)));
+  const packages = findPackages(shard, { lands, staples, groups: groupOf }).map(p => p.cards.map(q => shard.cards[q]))
     .filter(cards => !shard.combos.some(c => cards.every(x => c.cards.includes(x))));
 
   const ofBracket = (members, b) => members.filter(d => shard.decks[d].bracket === b);
@@ -1192,7 +1192,7 @@ async function showCommander(key) {
       return { cards, decks: g.members.reduce((k, d) => k + ps.every(p => shard.sets[d].has(p)), 0) };
     }).filter(p => p.decks >= Math.max(3, 0.03 * m)).sort((a, b) => b.decks - a.decks);
     $("packages-lede").textContent = counted.length
-      ? `Cards ${these} play together far more often than chance would have it, besides the combos above. They're measured within each build, so cards don't go together just for being in the same kind of deck; and ${lead}'s precon is left out.`
+      ? `Cards ${these} play together far more often than chance would have it, besides the combos. They're compared among decks of the same build, as tuned and with as many Game Changers, so cards don't go together just for being in the same kind of deck. Staples every kind of deck plays (Force of Will and Force of Negation) and ${lead}'s precon are left out.`
       : `No cards that ${these} play together far more often than chance would have it.`;
     showRows($("packages"), $("more-packages"), counted.map(p => ({
       cards: joined(p.cards.map(c => miniCard(c))),

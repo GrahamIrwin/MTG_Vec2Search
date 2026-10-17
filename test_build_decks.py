@@ -115,6 +115,7 @@ with tempfile.TemporaryDirectory() as tmp:
         index = json.load(f)
     assert index["decks"] == 5 and index["commanders"][0][:2] == ["0", 5]
     assert index["since"] == ["2026-07-06", "2026-09-04", "2026-09-27"], index["since"]  # the 90, 30 and 7 day windows
+    assert index["staples"][:2] == [2, 3] and len(index["staples"]) == 97  # every card these few decks play is in 4 or 5 of 5
     assert shard["price"] == 300 and shard["bracket"] == 3  # basic lands are left out of the price
     assert shard["results"] == 1 and os.path.exists(os.path.join(out, "results", "0.json"))  # 1 tournament deck
     assert os.path.exists(os.path.join(out, "results", "lists", "0.json"))

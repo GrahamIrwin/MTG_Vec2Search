@@ -630,7 +630,9 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #              cards: the cards at least MIN_POOLED_DECKS decks play; stats: for each card, per window,
 #              [decks, commanders counted, lift (in hundredths of a point), evidence (hundredths)],
 #              from pooled()
-#   index.json  every commander with a file: [file name, deck count, signature cards], where the
+#   index.json  staples: the cards at least STAPLE of all decks play, which the site's packages need
+#              more than (Force of Will and Force of Negation say nothing about a commander).
+#              commanders: every commander with a file: [file name, deck count, signature cards], where the
 #              signature cards are what its decks play far more often than other decks do. Used to
 #              find decks with other commanders, and for commanders without enough decks.
 #              Also windows (days) and since: the date each window starts (null: not known yet).
@@ -657,6 +659,7 @@ BEST_DECKS, BREAKOUT_DECKS, RISING_DECKS = 20, 10, 15  # decks a commander needs
 TOP_FINISH, MAX_FINISHES = 4, 200  # best finishes on a commander page: the newest MAX_FINISHES in the top 4
 MIN_DECKS = 5  # fewer decks than this don't make useful recommendations
 MIN_COMBO_DECKS = 5  # decks playing every card of a combo, for its commander's file to have it
+STAPLE = 0.05  # of all decks: a card played this widely says nothing about a commander's packages
 MAX_DECKS = 10000  # per commander, newest first: keeps a file around 1 MB to download (gzipped)
 SIGNATURE = 24
 SHOWN_SIGNATURE = 60
@@ -1163,7 +1166,8 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
         commanders.append([key, counts[0], signature[:SIGNATURE]])
     commanders.sort(key=lambda c: -c[1])
     write_json(os.path.join(out_dir, "index.json"),
-               {"decks": total, "commanders": commanders, "windows": WINDOWS, "since": since})
+               {"decks": total, "commanders": commanders, "windows": WINDOWS, "since": since,
+                "staples": sorted(c for c, k in everywhere.items() if k >= STAPLE * total)})
     trends.sort(key=lambda c: -c[1][0])
     names = sorted({t for c in trends for t in c[4]})
     for c in trends:

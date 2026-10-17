@@ -289,18 +289,19 @@ export function buildTags(shard, members, n = 3) {
   return picked.map(t => t.name);
 }
 
-// Packages: a few cards these decks play together far more often than chance would have it
-// (Agatha's Soul Cauldron, Intuition, Sevinne's Reclamation), by the phi correlation of each pair's
-// plays. A package grows from its strongest pair, adding the card whose weakest link to the cards
-// already in is strongest, while that link is at least PHI, so a chain A–B–C doesn't join A and C.
-// A card can be in more than one package, but a package most of whose pairs are in packages found
-// before is left out,
-// as is one mostly of the commander's precon (shard.precon: decks barely changed from it). Lands
-// (a Set of positions) can join a package but not start one, or the duals would be one. Cards most
-// decks play (Sol Ring) or few do are left out.
+// Packages: a few different cards these decks play together far more often than chance would have
+// it (Displacer Kitten and Teferi; Intuition and Sevinne's Reclamation), by the phi correlation of
+// each pair's plays within groups of alike decks (see packageGroups). A package grows from its
+// strongest pair, adding the card whose weakest link to the cards already in is strongest, while that
+// link is at least PHI, so a chain A–B–C doesn't join A and C.
+// Left out: staples played together (Force of Will and Force of Negation; Rhystic Study and Mystic
+// Remora), every card in staples (a Set of positions); a package most of whose pairs are in packages
+// found before (a card can be in more than one); and one mostly of the commander's precon
+// (shard.precon: decks barely changed from it). Lands (a Set of positions) can join a package but not start one, or
+// the duals would be one. Cards most decks play (Sol Ring) or few do are left out.
 // Returns [{ cards: positions in shard.cards, decks: how many play them all }], strongest first.
 export const PHI = 0.3, MAX_PACKAGE = 8;
-export function findPackages(shard, { lands = new Set(), phi = PHI, max = MAX_PACKAGE, groups } = {}) {
+export function findPackages(shard, { lands = new Set(), staples = new Set(), phi = PHI, max = MAX_PACKAGE, groups } = {}) {
   const { decks, plays } = shard;
   const n = decks.length;
   const least = Math.max(5, 0.03 * n);
@@ -352,7 +353,8 @@ export function findPackages(shard, { lands = new Set(), phi = PHI, max = MAX_PA
     const old = members.reduce((k, x, i) => k + members.slice(i + 1).filter(y => together[x * m + y]).length, 0);
     for (const x of members) for (const y of members) together[x * m + y] = 1;
     const cards = members.map(x => picked[x]);
-    if (old * 4 > members.length * (members.length - 1) || cards.filter(p => shard.precon.has(p)).length * 2 >= cards.length) continue;
+    if (old * 4 > members.length * (members.length - 1) || cards.filter(p => shard.precon.has(p)).length * 2 >= cards.length
+      || cards.every(p => staples.has(p))) continue;
     const all = decks.reduce((k, d) => k + cards.every(p => d.cards.includes(p)), 0);
     if (all >= 5) packages.push({ cards, decks: all });
   }
@@ -395,6 +397,27 @@ export function groupCombos(combos) {
     group.options.push({ card: combo.cards.find(c => !group.core.includes(c)), decks: combo.decks, combo });
   }
   return groups.map(({ core, options }) => ({ core, options }));
+}
+
+// Groups of alike decks for findPackages, a number per deck: cards are played together for being in
+// the same kind of deck, as much as for working together, so they're compared within decks of the
+// same build (builds: findBuilds'), as tuned (how many of its build's TUNED_TOP most played nonland
+// cards a deck plays, in bands of at least BAND_DECKS decks, up to TUNED_BANDS) and with as many Game
+// Changers (bands as the brackets': none, up to 3, 4 to 7, more; gameChangers: a Set of card numbers).
+export const TUNED_TOP = 60, BAND_DECKS = 100, TUNED_BANDS = 5;
+export function packageGroups(shard, builds, { lands = new Set(), gameChangers = new Set() } = {}) {
+  const groups = shard.decks.map(() => 0);
+  (builds.length ? builds : [shard.decks.map((_, d) => d)]).forEach((members, b) => {
+    const counts = playCounts(shard, members);
+    const top = new Set([...counts.keys()].filter(p => !lands.has(p)).sort((x, y) => counts[y] - counts[x]).slice(0, TUNED_TOP));
+    const tuned = d => shard.decks[d].cards.reduce((k, p) => k + top.has(p), 0);
+    const bands = Math.max(1, Math.min(TUNED_BANDS, Math.floor(members.length / BAND_DECKS)));
+    [...members].sort((x, y) => tuned(x) - tuned(y)).forEach((d, i) => {
+      const k = shard.decks[d].cards.reduce((n, p) => n + gameChangers.has(shard.cards[p]), 0);
+      groups[d] = (b * TUNED_BANDS + Math.floor(i * bands / members.length)) * 4 + (k === 0 ? 0 : k <= 3 ? 1 : k <= 7 ? 2 : 3);
+    });
+  });
+  return groups;
 }
 
 // A name for a build from the word its deck names use far more than the commander's other

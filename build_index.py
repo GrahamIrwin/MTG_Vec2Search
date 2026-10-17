@@ -297,6 +297,8 @@ def build_index(cards, updated, tags, printings):
         "tag_names": {t: [n for n in tags[t[4:]][1] if n != t[4:]] for t in terms if t.startswith("tag:")},
         "categories": [[name, [index[t] for t in ts if t in index]] for name, ts in categories.items()],
         "sets": [[code, all_sets[code][0]] for code in sets],
+        # The cards the Commander brackets limit, which decks tend to play all or none of
+        "game_changers": [i for i, c in enumerate(cards) if c.get("game_changer")],
     })
     write_json(os.path.join(OUT_DIR, "columns.json"), columns)
     write_json(os.path.join(OUT_DIR, "names.json"), [c["name"] for c in cards])
