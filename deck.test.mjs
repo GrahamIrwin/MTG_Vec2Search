@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, distinctive, averageDeck, buildName, buildTags,
+  findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "./site/deck.js";
 
@@ -95,6 +95,19 @@ test("builds: decks that play different cards split apart, and are named for the
   assert.deepEqual(buildTags(shard, poison), ["poison-mechanics"]); // ramp: every deck plays it
   assert.deepEqual(buildTags(shard, builds.find(b => b !== poison)), ["proliferate"]);
   assert.deepEqual(averageDeck(shard, poison, new Set([30])), { spells: range(0, 20), lands: [30] });
+});
+
+test("packages: cards played together, but not just for being in the same group of decks, nor the precon", () => {
+  // Cards 0 and 1: every third deck plays both; 2: every other deck, apart from them; 3 and 4: the
+  // first 50 decks (one group) play both
+  const plays = i => [...(i % 3 ? [] : [0, 1]), ...(i % 2 ? [] : [2]), ...(i < 50 ? [3, 4] : [])];
+  const gaps = ps => ps.map((p, i) => p - (i ? ps[i - 1] : 0));
+  const raw = { cards: [0, 1, 2, 3, 4], decks: Array.from({ length: 100 }, (_, i) => [i, "", "", gaps(plays(i))]) };
+  const shard = decodeShard(raw);
+  assert.deepEqual(findPackages(shard).map(p => [p.cards.sort(), p.decks]), [[[0, 1], 34], [[3, 4], 50]]);
+  assert.deepEqual(findPackages(shard, { groups: shard.decks.map((_, i) => +(i < 50)) }).map(p => p.cards.sort()), [[0, 1]]);
+  assert.deepEqual(findPackages(shard, { lands: new Set([0, 1]) }).map(p => p.cards.sort()), [[3, 4]]); // lands don't start one
+  assert.deepEqual(findPackages(decodeShard({ ...raw, precon: [3, 1] })).map(p => p.cards.sort()), [[0, 1]]); // 3 and 4: the precon
 });
 
 test("deck link worker: Moxfield and Archidekt decks become plain decklists", async () => {

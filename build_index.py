@@ -196,7 +196,7 @@ def vectorize_card(card, index, find_keywords, card_tags=(), subtype_names=froze
 def load_printings():
     """From every paper printing, by oracle_id: the cheapest current USD price (nonfoil, foil or
     etched), the first release date (YYYY-MM-DD) and the sets it was printed in.
-    Also {set code: (name, release date)} for every paper set."""
+    Also {set code: (name, release date, set type)} for every paper set."""
     prices, released, in_sets, sets = {}, {}, {}, {}
     with gzip.open(PRINTINGS_FILE, "rt", encoding="utf-8") as f:
         for line in f:
@@ -216,7 +216,7 @@ def load_printings():
                 in_sets.setdefault(oracle_id, set()).add(c["set"])
                 day = c.get("released_at") or ""
                 first = min(sets.get(c["set"], ("", day))[1], day)
-                sets[c["set"]] = (c["set_name"], first)
+                sets[c["set"]] = (c["set_name"], first, c.get("set_type"))
     return prices, released, in_sets, sets
 
 

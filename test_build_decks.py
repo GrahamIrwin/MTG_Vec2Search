@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from datetime import date
 
 import build_decks
-from build_decks import build, load_corpus, save_corpus, slim_deck, slim_moxfield
+from build_decks import build, load_corpus, precon_sets, save_corpus, slim_deck, slim_moxfield
 
 
 def entry(uid, categories, quantity=1):
@@ -86,12 +86,18 @@ with tempfile.TemporaryDirectory() as tmp:
     corpus[5]["bracket"], corpus[4]["bracket"] = 4, None
     event = {"id": "e", "name": "Event", "date": "2026-09-30", "size": 40, "top_cut": 4,
              "entries": [["Cmdr", 3, 2, 2, 1, "deck link", []], ["Nobody", 1, 5, 0, 0, "", []]]}
+    # The commander's precon is its oldest Commander set (c13): c0 and c5 are in it, c6 only in blc
+    sets = {"c13": ("C13", "2013-11-01", "commander"), "blc": ("BLC", "2024-08-02", "commander"), "m14": ("M14", "2013-07-19", "core")}
+    precons = precon_sets({"cmdr": {"blc", "c13", "m14"}, "c0": {"c13"}, "c5": {"blc", "c13"}, "c6": {"blc"}}, sets)
+    assert precons["cmdr"] == ["c13", "blc"], precons
     build(corpus, cards, tags, out, prices={"cmdr": 2.0, "c0": 1.0, "island": 0.5}, today=date(2026, 10, 4),
-          results={"e": event})
+          results={"e": event}, precons=precons)
     with open(os.path.join(out, "0.json"), encoding="utf-8") as f:
         shard = json.load(f)
     assert shard["cards"][:2] == [2, 98] and len(shard["cards"]) == 97  # c0 and c96 are in every deck
     assert shard["tags"] == [["pump", [0, 1]]] and len(shard["signature"]) == 60, shard["tags"]
+    precon = [sum(shard["precon"][:i + 1]) for i in range(len(shard["precon"]))]
+    assert sorted(shard["cards"][p] for p in precon) == [2, 7], shard["precon"]
     first = shard["decks"][0]
     assert first[0] == 5 and first[2] == "2026-09-05" and first[4] == "2026-10-01"  # newest first; when it was made
     assert [d[5] for d in shard["decks"]] == [4, 0, 3, 3, 3]  # its bracket (0: none)

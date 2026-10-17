@@ -590,6 +590,9 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #       tags   [Scryfall Tagger tag, gaps between positions in `cards`], over the nonland cards
 #              at least COMMON of the decks play: what the site names a commander's builds by
 #              (only for BUILD_DECKS decks or more, as fewer aren't split into builds)
+#       precon  gaps between the positions in `cards` of the cards in the commander's precon: the
+#              oldest Commander set it's in, every deck of it (decks barely changed from it play
+#              these together, which the site's packages leave out)
 #       price  what a typical (median) deck costs, in US cents (-1: unknown)
 #       bracket  the typical bracket of the decks that give one (0: none do)
 #       themes  the Tagger tags these decks play far more of than other decks do
@@ -647,7 +650,7 @@ MONTH, BEFORE = 30, 90  # days: highlights compare the last month with the BEFOR
 BEST_DECKS, BREAKOUT_DECKS, RISING_DECKS = 20, 10, 15  # decks a commander needs for each highlight
 TOP_FINISH, MAX_FINISHES = 4, 200  # best finishes on a commander page: the newest MAX_FINISHES in the top 4
 MIN_DECKS = 5  # fewer decks than this don't make useful recommendations
-MAX_DECKS = 3000  # per commander, newest first: keeps a file around 300 KB to download
+MAX_DECKS = 10000  # per commander, newest first: keeps a file around 1 MB to download (gzipped)
 SIGNATURE = 24
 SHOWN_SIGNATURE = 60
 COMMON = 0.02  # same as `rare` in findBuilds (site/deck.js)
@@ -987,13 +990,18 @@ def pooled(standings, field):
     return out
 
 
-def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, results=None):
+def precon_sets(in_sets, sets):
+    """{oracle id: the Commander sets it's in, oldest first}, from load_printings."""
+    return {o: sorted((s for s in ss if sets[s][2] == "commander"), key=lambda s: sets[s][1]) for o, ss in in_sets.items()}
+
+
+def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, results=None, precons=None):
     """corpus: {id: deck} (see slim_deck); cards: Scryfall cards in card-index order;
     tags: Scryfall Tagger tags, {slug: (oracle ids, names)} (see load_oracle_tags);
-    prices: {oracle id: cheapest USD price} (see load_printings)."""
+    prices: {oracle id: cheapest USD price} (see load_printings); precons: see precon_sets."""
     number = {c["oracle_id"]: i for i, c in enumerate(cards) if c.get("oracle_id")}
     basic = {c["oracle_id"] for c in cards if "Basic" in c.get("type_line", "")}
-    prices = prices or {}
+    prices, precons = prices or {}, precons or {}
     card_tags = defaultdict(list)
     for slug, (ids, _) in (tags or {}).items():
         if len(ids) <= MAX_TAG_CARDS and not NOT_A_PLAN.search(slug):
@@ -1075,6 +1083,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
         lift = {c: here[c] / len(decks) - everywhere[c] / total for c in here}
         signature = sorted(here, key=lambda c: -lift[c])
         by_tag = defaultdict(list)
+        precon = {precons[o][0] for o in decks[0][0]["commanders"] if precons.get(o)}
         for i, c in enumerate(played_most if len(decks) >= BUILD_DECKS else []):
             if here[c] >= max(2, COMMON * len(decks)) and "Land" not in cards[c].get("type_line", ""):
                 for t in card_tags[c]:
@@ -1086,6 +1095,9 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
                       for d, played in decks],
             "signature": signature[:SHOWN_SIGNATURE],
             "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
+            # ponytail: a commander first printed as one of the 99 in a Commander set (Kenrith in ltc) gets
+            # that set's cards; a precon decklist source if that hides real packages
+            "precon": gaps([i for i, c in enumerate(played_most) if precon & set(precons.get(cards[c]["oracle_id"], ()))]),
             "price": price, "bracket": bracket, "themes": known_themes,
             **({"results": standings[key]["totals"][-1][0]} if key in standings else {}),
         })
@@ -1161,5 +1173,6 @@ if __name__ == "__main__":
         state = json.load(open(STATE, encoding="utf-8")) if os.path.exists(STATE) else {}
         sys.exit(0 if share(load_corpus(), state) else 1)
     else:
-        build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=load_printings()[0],
-              results=load_corpus(RESULTS))
+        prices, _, in_sets, sets = load_printings()
+        build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=prices,
+              results=load_corpus(RESULTS), precons=precon_sets(in_sets, sets))

@@ -75,7 +75,9 @@ export function decodeShard(shard) {
     let p = 0;
     return { name, positions: gaps.map(gap => (p += gap)) };
   });
-  return { cards: shard.cards, decks, plays, weight, position, tags, signature: shard.signature,
+  let q = 0;
+  const precon = new Set((shard.precon ?? []).map(gap => (q += gap)));
+  return { cards: shard.cards, decks, plays, weight, position, tags, precon, signature: shard.signature,
     price: shard.price ?? -1, bracket: shard.bracket ?? 0, themes: shard.themes ?? [], results: shard.results ?? 0 };
 }
 
@@ -283,6 +285,76 @@ export function buildTags(shard, members, n = 3) {
     if (!alike) picked.push(t);
   }
   return picked.map(t => t.name);
+}
+
+// Packages: a few cards these decks play together far more often than chance would have it
+// (Agatha's Soul Cauldron, Intuition, Sevinne's Reclamation), by the phi correlation of each pair's
+// plays. A package grows from its strongest pair, adding the card whose weakest link to the cards
+// already in is strongest, while that link is at least PHI, so a chain A–B–C doesn't join A and C.
+// A card can be in more than one package, but a package most of whose pairs are in packages found
+// before is left out,
+// as is one mostly of the commander's precon (shard.precon: decks barely changed from it). Lands
+// (a Set of positions) can join a package but not start one, or the duals would be one. Cards most
+// decks play (Sol Ring) or few do are left out.
+// Returns [{ cards: positions in shard.cards, decks: how many play them all }], strongest first.
+export const PHI = 0.3, MAX_PACKAGE = 8;
+export function findPackages(shard, { lands = new Set(), phi = PHI, max = MAX_PACKAGE, groups } = {}) {
+  const { decks, plays } = shard;
+  const n = decks.length;
+  const least = Math.max(5, 0.03 * n);
+  const picked = [...plays.keys()].filter(p => plays[p] >= least && plays[p] <= 0.8 * n);
+  const m = picked.length;
+  const index = new Int32Array(plays.length).fill(-1);
+  picked.forEach((p, i) => (index[p] = i));
+  const both = new Int32Array(m * m);
+  for (const d of decks) {
+    const mine = [];
+    for (const p of d.cards) if (index[p] >= 0) mine.push(index[p]);
+    for (const a of mine) for (const b of mine) if (a < b) both[a * m + b]++;
+  }
+  // With groups (a group number per deck), the correlation is within groups, pooled: cards a
+  // group plays a lot of (cEDH staples) don't link just by being in the same group
+  const g = groups ?? decks.map(() => 0);
+  const G = Math.max(...g) + 1;
+  const size = new Int32Array(G), per = new Int32Array(G * m);
+  decks.forEach((d, i) => { size[g[i]]++; for (const p of d.cards) if (index[p] >= 0) per[g[i] * m + index[p]]++; });
+  const spread = Float64Array.from(picked, (_, a) => size.reduce((s, z, j) => s + (z && per[j * m + a] - per[j * m + a] ** 2 / z), 0));
+  const link = (a, b) => {
+    const k = a < b ? both[a * m + b] : both[b * m + a];
+    if (k < 5) return 0;
+    let cov = k;
+    for (let j = 0; j < G; j++) if (size[j]) cov -= per[j * m + a] * per[j * m + b] / size[j];
+    return cov / Math.sqrt(spread[a] * spread[b] || 1);
+  };
+  const pairs = [];
+  for (let a = 0; a < m; a++) for (let b = a + 1; b < m; b++) {
+    const s = link(a, b);
+    if (s >= phi && !lands.has(picked[a]) && !lands.has(picked[b])) pairs.push([s, a, b]);
+  }
+  pairs.sort((x, y) => y[0] - x[0]);
+  const together = new Uint8Array(m * m); // pairs already in a package
+  const packages = [];
+  for (const [, a, b] of pairs) {
+    if (together[a * m + b]) continue;
+    const members = [a, b];
+    while (members.length < max) {
+      let best = -1, bestLink = phi;
+      for (let c = 0; c < m; c++) {
+        if (members.includes(c)) continue;
+        const weakest = Math.min(...members.map(x => link(x, c)));
+        if (weakest >= bestLink) [best, bestLink] = [c, weakest];
+      }
+      if (best < 0) break;
+      members.push(best);
+    }
+    const old = members.reduce((k, x, i) => k + members.slice(i + 1).filter(y => together[x * m + y]).length, 0);
+    for (const x of members) for (const y of members) together[x * m + y] = 1;
+    const cards = members.map(x => picked[x]);
+    if (old * 4 > members.length * (members.length - 1) || cards.filter(p => shard.precon.has(p)).length * 2 >= cards.length) continue;
+    const all = decks.reduce((k, d) => k + cards.every(p => d.cards.includes(p)), 0);
+    if (all >= 5) packages.push({ cards, decks: all });
+  }
+  return packages;
 }
 
 // A name for a build from the word its deck names use far more than the commander's other
