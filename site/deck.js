@@ -121,13 +121,16 @@ export function foldCopies(results, limit) {
 }
 
 // === Recommendations ===
-// The NEIGHBORS most similar decks vote for cards, by similarity. A card's score is its share
-// of the votes minus part of how often any deck with this commander plays it, so the list is
-// what decks like yours play more than usual, not just staples.
-export const NEIGHBORS = 25; // tuned by hiding 10 cards of real decks and recommending them back
+// The decks at least NEIGHBORS.ratio as similar as the most similar one vote for cards, by
+// similarity: never fewer than NEIGHBORS.min, nor more than NEIGHBORS.max. A card's score is its
+// share of the votes minus part of how often any deck with this commander plays it, so the list
+// is what decks like yours play more than usual, not just staples.
+// Tuned by hiding 10 cards of real decks and recommending them back (tune_recommend.mjs)
+export const NEIGHBORS = { ratio: 0.3, min: 10, max: 100 };
 export const STAPLE_DISCOUNT = 0.5;
 export function recommend(shard, similar, deckCards, { neighbors = NEIGHBORS, discount = STAPLE_DISCOUNT } = {}) {
-  const top = similar.slice(0, neighbors).filter(r => r.similarity > 0);
+  const cut = neighbors.ratio * (similar[0]?.similarity ?? 0);
+  const top = similar.filter((r, i) => r.similarity > 0 && i < neighbors.max && (i < neighbors.min || r.similarity >= cut));
   const total = top.reduce((s, r) => s + r.similarity, 0) || 1;
   const share = new Float64Array(shard.cards.length);
   const decks = new Int32Array(shard.cards.length); // how many of them play it, for display
