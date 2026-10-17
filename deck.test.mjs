@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos,
+  findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "./site/deck.js";
 
@@ -129,6 +129,20 @@ test("combos: the decks playing every card (the commander's a given), near-copie
   assert.deepEqual(groups.map(g => [g.core, g.options.map(o => [o.card, o.decks])]),
     [[[9, 1], [[2, 10], [4, 0]]], [[9, 1, 3], [[null, 5]]], [[9, 1, 5], [[null, 0]]]]);
   assert.deepEqual(groupCombos([{ cards: [5, 6], decks: 3 }]), [{ core: [5, 6], options: [{ card: null, decks: 3, combo: { cards: [5, 6], decks: 3 } }] }]);
+});
+
+test("combos for a primer: cards as [[links]], what comes first, steps and result", () => {
+  const combo = { id: "1-2", cards: [0, 1], needs: ["Mana Dork"], makes: ["Infinite mana", "Infinite ETB"],
+    how: { mana: "{G}", easy: "", notable: "You control a creature.\n", steps: "Tap it.\nUntap it.\nRepeat." } };
+  assert.equal(comboPrimer([combo], ["Derevi, Empyrial Tactician", "Brigid, Clachan's Heart // Brigid, Doun's Mind"]), [
+    "# Combos", "",
+    "## Derevi, Empyrial Tactician + Brigid, Clachan's Heart // Brigid, Doun's Mind", "",
+    "**Cards:** [[Derevi, Empyrial Tactician]] + [[Brigid, Clachan's Heart]]", "",
+    "**First:**", "- Any Mana Dork", "- You control a creature.", "- {G} available", "",
+    "**Steps:**", "1. Tap it.", "2. Untap it.", "3. Repeat.", "",
+    "**Result:** Infinite mana, Infinite ETB", "",
+    "[How it works on Commander Spellbook](https://commanderspellbook.com/combo/1-2/)", "",
+  ].join("\n"));
 });
 
 test("deck link worker: Moxfield and Archidekt decks become plain decklists", async () => {

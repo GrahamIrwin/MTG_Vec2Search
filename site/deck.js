@@ -420,6 +420,25 @@ export function packageGroups(shard, builds, { lands = new Set(), gameChangers =
   return groups;
 }
 
+// Combos as Markdown for a deck's primer: each one's cards, other pieces it needs, what comes first,
+// its steps and what it makes. Cards are [[Card Name]] (their front face), which Moxfield's primers
+// show as the card. combos: shard.combos'; names: card names by number.
+export function comboPrimer(combos, names) {
+  const card = c => `[[${names[c].split(" // ")[0]}]]`;
+  const lines = text => text.split("\n").map(t => t.trim()).filter(Boolean);
+  return ["# Combos", "", ...combos.flatMap(({ id, cards, needs, makes, how }) => {
+    const first = [...needs.map(n => `Any ${n}`), ...lines(how.easy), ...lines(how.notable), ...(how.mana ? [`${how.mana} available`] : [])];
+    return [
+      `## ${cards.map(c => names[c]).join(" + ")}`, "",
+      `**Cards:** ${cards.map(card).join(" + ")}`, "",
+      ...(first.length ? ["**First:**", ...first.map(t => `- ${t}`), ""] : []),
+      "**Steps:**", ...lines(how.steps).map((t, i) => `${i + 1}. ${t}`), "",
+      `**Result:** ${makes.join(", ") || "a combo"}`, "",
+      `[How it works on Commander Spellbook](https://commanderspellbook.com/combo/${id}/)`, "",
+    ];
+  })].join("\n");
+}
+
 // A name for a build from the word its deck names use far more than the commander's other
 // decks do ("Poison", "Superfriends"), or null. skip: words that say nothing (the commander's name)
 const NAME_WORDS = /[\p{L}\p{N}][\p{L}\p{N}'+-]*/gu;

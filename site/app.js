@@ -5,7 +5,7 @@ import {
 import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.js";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos,
+  findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
   cardResults, packageResults, MIN_RESULT_DECKS,
 } from "./deck.js";
@@ -685,6 +685,16 @@ async function findSimilar(key) {
     ? `Combos from Commander Spellbook in your deck, of those at least 2% of ${lead} decks play.`
     : `None of the combos at least 2% of ${lead} decks play (from Commander Spellbook) is in your deck.`;
   showRows($("deck-combos"), $("more-deck-combos"), groupCombos(complete).map(g => comboRow(g, decksSay)));
+  $("combos-export").hidden = !complete.length;
+  $("copy-combos").textContent = "Copy for a primer";
+  $("copy-combos").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(comboPrimer(complete, names));
+      $("copy-combos").textContent = "Copied";
+    } catch {
+      $("copy-combos").textContent = "Couldn't copy";
+    }
+  };
   $("near-combos-lede").textContent = near.length
     ? `Combos your deck is one card from (marked), most played first.`
     : `No combo ${lead} decks play is one card from your deck.`;
