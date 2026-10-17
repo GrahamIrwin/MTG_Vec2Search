@@ -938,7 +938,9 @@ function showRows(list, more, rows, test = null) {
       test && r.test && opener("Test in tournaments", () => test(r.test)
         .catch(() => [el("p", { className: "muted", textContent: "Couldn't load the tournament decks." })]))].filter(Boolean);
     return el("li", {}, el("div", { className: "combo-cards" }, ...r.cards),
-      el("p", { className: "combo-meta" }, ...r.meta, ...opens.flatMap(([button]) => [" · ", button])), ...opens.map(([, box]) => box));
+      el("p", { className: "combo-meta" }, ...r.meta),
+      ...(opens.length ? [el("p", { className: "combo-meta combo-actions" }, ...opens.flatMap(([button], i) => [...(i ? [" · "] : []), button]))] : []),
+      ...opens.map(([, box]) => box));
   };
   more.onclick = () => {
     list.append(...rows.slice(shown, shown + PAGE_COMBOS).map(row));
