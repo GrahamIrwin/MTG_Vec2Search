@@ -23,6 +23,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -93,8 +94,8 @@ def search_decks(commander=None, pages=MAX_PAGES, bracket=None):
     optionally only those led by this commander, or of this bracket. A search stops after MAX_PAGES
     (3,000 decks), so a commander's search then goes on from its oldest decks: twice as many in all."""
     query = {"deckFormat": COMMANDER_FORMAT, "pageSize": 50}
-    if commander:
-        query["commanderName"] = commander
+    if commander:  # Archidekt finds "Eowyn, Lady of Rohan" but not "Éowyn, Lady of Rohan"
+        query["commanderName"] = unicodedata.normalize("NFKD", commander).encode("ascii", "ignore").decode()
     if bracket:
         query["edhBracket"] = bracket
     for order in ["-updatedAt", "updatedAt"] if commander else ["-updatedAt"]:
@@ -347,7 +348,7 @@ def card_names(oracle_file="oracle_cards.jsonl.gz"):
 
 
 def top_commanders(n, oracle_file="oracle_cards.jsonl.gz"):
-    """(oracle id, name) of the n most played cards that can lead a Commander deck, by EDHREC rank."""
+    """(oracle id, name) of the n most played cards that can lead a Commander deck (None: all), by EDHREC rank."""
     def can_lead(c):
         front = c.get("type_line", "").split(" // ")[0]
         text = c.get("oracle_text") or " ".join(f.get("oracle_text", "") for f in c.get("card_faces") or [])
@@ -545,11 +546,13 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                 print(f"Recently updated decks on {site.capitalize()}:", flush=True)
                 print(f"Recently updated: +{fetch(search(), float('inf'))} decks ({progress()})\n", flush=True)
             done = set()
+            leaders = top_commanders(None) if names else []
             while not top and per_commander and time.time() < deadline:
                 if only:
                     queue = [c for c in only if c not in done]
                 else:  # recounted each time: crawling one commander turns up decks for others
                     by_lead = Counter(names[o] for d in corpus.values() for o in d["commanders"] if o in names)
+                    by_lead.update({name: 0 for _, name in leaders})  # and commanders with no decks yet
                     queue = sorted((c for c in by_lead if c not in done), key=lambda c: (state.get(turn(c), ""), -by_lead[c]))
                 if not queue:
                     break

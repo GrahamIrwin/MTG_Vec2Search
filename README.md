@@ -71,7 +71,7 @@ time, a few KB after that).
    - `build_decks.py crawl` downloads decks through Archidekt's API (one request a
      second) into `decks.jsonl.gz`: each deck's commanders and cards, by Scryfall
      oracle id. It takes the recently updated decks first, then takes turns
-     through every commander it has seen, least recently crawled first.
+     through every commander, least recently crawled first (ones it has no decks for too).
      `--site moxfield` does the same on Moxfield, whose search finds a commander
      by its own card id (looked up by name) and stops at 10,000 decks, and whose
      decks list printings (turned into oracle ids with Scryfall's
