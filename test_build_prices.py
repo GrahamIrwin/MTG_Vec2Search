@@ -1,9 +1,13 @@
 """Self-check for the price history: python test_build_prices.py"""
+import gzip
+import json
 import os
 import random
 import tempfile
+from datetime import date
 
-from build_prices import add_day, load, merge, mtgjson4_days, mtgjson_csv, mtgjson_days, on, save, scryfall_snapshot
+from build_prices import (add_day, load, merge, mtgjson4_days, mtgjson_csv, mtgjson_days, on, save, scryfall_snapshot,
+                          site_data)
 
 # Random days of random prices (some printings missing some days), added in a random order, read
 # back exactly: every day's prices, after saving and loading, and merged into another copy
@@ -57,4 +61,23 @@ v4 = {"LEA": {"cards": [{"scryfallId": "a", "prices": {"paper": {"2020-11-06": 7
                         {"scryfallId": "b", "prices": {"paper": {"2020-11-06": 2.5, "2020-08-16": 3}}},
                         {"scryfallId": "c", "prices": {"paper": {"2020-08-16": 1}}}]}}
 assert mtgjson4_days(v4) == {"2020-11-06": {"a": {"usd": 7800}, "b": {"usd": 250}}}
+
+# site/prices/: a printing that rose from $2 to $4 over 30 days, a reserve list one from $100 to $90,
+# and one at 50 cents (too cheap to rise or fall), with one odd day that the 3-day median ignores
+site = {"days": {}, "sources": [], "series": {}}
+for k in range(40):
+    day = f"2026-{9 + k // 30:02}-{k % 30 + 1:02}"
+    add_day(site, day, "test", {"up": {"usd": 200 if k < 10 else 400 if k != 38 else 9999, "usd_foil": 900},
+                                "rl": {"usd": 10000 if k < 10 else 9000}, "cheap": {"usd": 50 if k < 10 else 25}})
+with tempfile.TemporaryDirectory() as tmp:
+    with gzip.open(os.path.join(tmp, "p.jsonl.gz"), "wt") as f:
+        for i, oracle, rl in [("up", "o1", False), ("rl", "o2", True), ("cheap", "o1", False)]:
+            f.write(json.dumps({"id": i, "oracle_id": oracle, "set_name": "Set " + i, "reserved": rl}) + "\n")
+    site_data(site, [{"oracle_id": "o2"}, {"oracle_id": "o1"}], tmp, os.path.join(tmp, "p.jsonl.gz"))
+    read = lambda *path: json.load(open(os.path.join(tmp, *path)))
+    moved = read("movers-30.json")
+    assert [[moved["sets"][r[2]], *r[3:]] for r in moved["rows"]] == [["Set up", 0, 400, 200], ["Set rl", 0, 9000, 10000]], moved
+    reserved = read("reserved.json")
+    assert [r[1] for r in reserved["rows"]] == ["rl"] and reserved["total"][-1][1:] == [9000, 1], reserved
+    assert read("p", "up.json")["up"]["usd_foil"] == [[(date(2026, 9, 1) - date(1993, 1, 1)).days, 900]]
 print("ok")

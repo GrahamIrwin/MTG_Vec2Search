@@ -58,9 +58,13 @@ export async function usdRate(currency) {
 export function moneyFormatter(currency, rate) {
   const local = new Intl.NumberFormat(undefined, { style: "currency", currency, currencyDisplay: "narrowSymbol" });
   const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+  const whole = c => new Intl.NumberFormat(undefined, { style: "currency", currency: c, currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 });
+  const [localWhole, usdWhole] = [whole(currency), whole("USD")];
   return {
     currency, rate,
     formatUsd: amount => (rate ? local.format(amount * rate) : usd.format(amount)),
+    // In whole units ("$49,701"), for big amounts
+    formatUsdWhole: amount => (rate ? localWhole.format(amount * rate) : usdWhole.format(amount)),
     symbol: local.formatToParts(0).find(p => p.type === "currency")?.value ?? "$",
   };
 }

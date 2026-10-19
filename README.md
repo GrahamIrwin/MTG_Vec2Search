@@ -5,7 +5,8 @@ Search Magic: The Gathering cards by describing them in plain English
 mana value, format, price and set. Or paste a Commander deck (a Moxfield or
 Archidekt link, or a decklist) to see which cards similar decks play that
 yours doesn't, browse every commander's decks and what's trending, and see
-which cards' decks win more in cEDH tournaments. Dark mode by
+which cards' decks win more in cEDH tournaments, and which cards' prices are rising
+or falling, with every printing's price history since 2020. Dark mode by
 default. It's a static site: all the heavy lifting happens at build time, and a
 search only downloads the small pieces of the index it needs (~200 KB the first
 time, a few KB after that).
@@ -255,6 +256,21 @@ time, a few KB after that).
    say what winning decks play, not that a card wins on its own, and the page
    says so.
 
+7. **Prices** (`?prices`) shows the printings whose prices rose and fell the most over 7, 30 or
+   90 days or a year, and the reserve list, from the price history below. Filters for the finish
+   (nonfoil, or foil and etched) and a price ("$5 and up": at least that on both days, so a 10-cent
+   card doesn't top the list going to $5) go in the address bar (`?prices&w=90&finish=foil&min=20`).
+   - `build_prices.py site` writes `site/prices/`. A printing's price there is the median of its
+     last 3 days within a week, so one odd day doesn't make it rise or fall. `movers-<days>.json`
+     keeps the 250 biggest rises and falls of each finish and price band ($1, $5, $20, $100), so
+     the top of "$5 and up" is the top of its bands put together (about 240 KB a period).
+   - **Reserve list**: one of every card on it (its cheapest nonfoil printing) over time, and each
+     printing, rising, falling or most expensive.
+   - A card's details chart its printing's price (nonfoil or foil, as picked) over 3 months, a
+     year or all of it, from `prices/p/<first 3 characters of its Scryfall id>.json` (4,096 files
+     of about 20 KB). Lines across more than 3 weeks without prices are dashed: the backfill is
+     single days before mid-2026.
+
 ## Updating card data
 
 GitHub Actions rebuilds the index and redeploys every Monday. To update right
@@ -296,7 +312,7 @@ python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --pe
 
 `build_prices.py` keeps `prices.jsonl.gz` on the `price-history` release: the price of every paper
 printing on every day it has, nonfoil, foil and etched each on its own, in US dollars (TCGplayer)
-and euros (Cardmarket). The site doesn't use it yet.
+and euros (Cardmarket). The Prices tab and card details read it (see **Prices** above).
 
 - **Crawl decks** adds the day's prices from Scryfall's `default_cards` every day
   (`build_prices.py snapshot`), dated by when Scryfall made the file.
@@ -338,6 +354,8 @@ python build_index.py              # download data + build site/index/ (~1 min)
 gh release download deck-corpus --pattern decks.jsonl.gz
 gh release download deck-corpus --pattern results.jsonl.gz   # tournament results (optional)
 python build_decks.py build        # site/decks/, for Find similar decks
+gh release download price-history --pattern prices.jsonl.gz
+python build_prices.py site        # site/prices/, for Prices and price charts
 python -m http.server -d site      # http://localhost:8000
 ```
 

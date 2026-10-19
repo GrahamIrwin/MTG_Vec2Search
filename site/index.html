@@ -556,6 +556,27 @@
     .type-filter button:disabled { opacity: .45; cursor: default; }
     .trend-windows { justify-content: center; margin-bottom: 14px; }
     .trend-summary { text-align: center; margin: 14px 0 0; }
+    .price-filters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px; }
+    .price-source { text-align: center; margin-top: 28px; font-size: 15px; }
+    #reserved-sorts { margin: 18px 0 10px; }
+    /* Price charts: a line over time, with a crosshair and the day's price under the pointer */
+    .price-history { margin: -4px 0 18px; }
+    .price-history .chips button { font-size: 14px; padding: 2px 10px; }
+    #history-note { margin: 4px 0 0; font-size: 14px; }
+    .price-chart { position: relative; margin-top: 8px; touch-action: pan-y; }
+    .price-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+    .price-chart.wide { max-width: 900px; margin: 12px auto 4px; }
+    .price-chart .grid { stroke: var(--rule); stroke-width: 1; }
+    .price-chart .tick { fill: var(--ink-faint); font-size: 12px; font-family: inherit; font-variant-numeric: tabular-nums; }
+    .price-chart .line { fill: none; stroke: var(--link); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .price-chart .gap { fill: none; stroke: var(--link); stroke-width: 2; stroke-dasharray: 2 5; stroke-linecap: round; opacity: .7; }
+    .price-chart .cross { stroke: var(--ink-faint); stroke-width: 1; }
+    .price-chart .dot { fill: var(--link); stroke: var(--paper); stroke-width: 2; }
+    .price-chart .tip {
+      position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; white-space: nowrap;
+      background: var(--paper-2); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 8px;
+      font-size: 14px; font-variant-numeric: tabular-nums; box-shadow: var(--shadow-sm);
+    }
     .field input.short { width: 90px; }
     #trend-theme { width: 220px; max-width: 100%; }
     .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 10px; }
@@ -618,6 +639,7 @@
         <a href="?deck" id="mode-deck">Deck recommendations</a>
         <a href="?commanders" id="mode-commanders">Commanders</a>
         <a href="?trends" id="mode-trends">Trends</a>
+        <a href="?prices" id="mode-prices">Prices</a>
         <a href="?tournaments" id="mode-tournaments">Tournaments</a>
       </nav>
     </header>
@@ -1069,6 +1091,42 @@
           </details>
         </div>
       </section>
+      <section class="deck-view" id="prices-view" hidden>
+        <p class="message" id="prices-message" hidden></p>
+        <div id="prices-page" hidden>
+          <div class="chips type-filter trend-windows" id="price-windows" role="group" aria-label="Period"></div>
+          <div class="price-filters">
+            <div class="chips type-filter" id="price-finishes" role="group" aria-label="Finish"></div>
+            <div class="chips type-filter" id="price-bands" role="group" aria-label="Price"></div>
+          </div>
+          <p class="muted trend-summary" id="price-summary" role="status"></p>
+
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Rising prices</h2></summary>
+            <p class="muted deck-lede" id="price-rising-lede"></p>
+            <div class="chips type-filter" id="price-rising-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="price-rising"></div>
+            <div class="more-wrap"><button id="more-price-rising" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Falling prices</h2></summary>
+            <p class="muted deck-lede" id="price-falling-lede"></p>
+            <div class="chips type-filter" id="price-falling-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="price-falling"></div>
+            <div class="more-wrap"><button id="more-price-falling" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open>
+            <summary><h2 class="deck-heading">Reserve list</h2></summary>
+            <p class="muted deck-lede" id="reserved-lede"></p>
+            <div class="price-chart wide" id="reserved-chart"></div>
+            <div class="chips type-filter" id="reserved-sorts" role="group" aria-label="Order"></div>
+            <div class="chips type-filter" id="reserved-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="reserved"></div>
+            <div class="more-wrap"><button id="more-reserved" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <p class="muted deck-lede price-source">Prices are TCGplayer's, through <a href="https://scryfall.com">Scryfall</a> and <a href="https://mtgjson.com">MTGJSON</a>, in US dollars converted to yours. Each is the median of its last 3 days, so one odd sale doesn't make a card rise or fall.</p>
+        </div>
+      </section>
       <section class="deck-view" id="tournaments-view" hidden>
         <p class="message" id="tournaments-message" hidden></p>
         <div id="tournaments-page" hidden>
@@ -1249,6 +1307,11 @@
       <div class="price-row">
         <span class="price-line" id="price"></span>
         <label class="switch" id="foil-label" hidden><input type="checkbox" id="foil"> Foil</label>
+      </div>
+      <div class="price-history" id="price-history" hidden>
+        <div class="chips type-filter" id="history-ranges" role="group" aria-label="Period"></div>
+        <div class="price-chart" id="history-chart"></div>
+        <p class="muted" id="history-note"></p>
       </div>
       <span class="label">Printings</span>
       <ul class="printings" id="printings"></ul>

@@ -7,6 +7,7 @@ is never replaced.
                                        # Scryfall's bulk files and MTGJSON's price files, and MTGJSON's last 90 days
     python build_prices.py share       # merge with the release and upload (snapshot and backfill do this
                                        # unless given --no-upload)
+    python build_prices.py site        # write site/prices/ (after build_index.py: it uses its card numbers)
 
 The file's first line is {"days": {day: where its prices came from}, "sources": [files imported]}.
 Then a line per printing (Scryfall id), with a series per price: [[day, cents], ...], a point only
@@ -21,8 +22,10 @@ import gzip
 import io
 import json
 import lzma
+import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,9 +33,9 @@ import time
 import urllib.request
 import zipfile
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from build_index import HEADERS, PRINTINGS_FILE, SCRYFALL_BULK_LIST_URL, fetch
+from build_index import HEADERS, PRINTINGS_FILE, SCRYFALL_BULK_LIST_URL, by_popularity, fetch, load_cards, write_json
 
 HISTORY = "prices.jsonl.gz"
 RELEASE = "price-history"
@@ -42,6 +45,13 @@ MTGJSON_FIELDS = {"tcgplayer": {"normal": "usd", "foil": "usd_foil", "etched": "
                   "cardmarket": {"normal": "eur", "foil": "eur_foil"}}
 MTGJSON = "https://mtgjson.com/api/v5"
 WAYBACK = "http://web.archive.org"
+SITE = os.path.join("site", "prices")
+EPOCH = date(1993, 1, 1)  # app.js counts days from it
+WINDOWS = (7, 30, 90, 365)  # days back the Prices page compares with
+US = ("usd", "usd_foil", "usd_etched")  # the site shows US prices, in the visitor's currency
+MIN_MOVER = 100  # cents: cheaper printings move by cents, which make big percentages
+BANDS = (500, 2000, 10000)  # cents: the Prices page's "and up" filters, $1, $5, $20 and $100
+TOP = 250  # rises and falls kept per finish and band
 
 
 def load(path=HISTORY):
@@ -301,6 +311,90 @@ def backfill():
     print(f"{len(hist['days'])} days in all, {len(hist['series']):,} printings", flush=True)
 
 
+def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE):
+    """Write site/prices/, what the Prices page and card details read (days are days since 1993-01-01,
+    prices US cents, a printing's row is [card number, Scryfall id, set (in "sets"), finish (0 nonfoil,
+    1 foil, 2 etched), price on the last day, then ...]):
+      days.json        the days with prices
+      movers-<w>.json  {"sets", "rows": [..., price w days before]}: the printings at MIN_MOVER or more
+                       on both days whose prices rose or fell the most in w days, the top TOP of each finish (nonfoil, or foil and
+                       etched) and band of price (BANDS, by the lower of the two) both ways, so the
+                       top of "$5 and up", say, is the top of its bands put together
+      reserved.json    {"sets", "rows": [..., price 7, 30, 90 and 365 days before (-1: none)],
+                       "total": [[day, cents, cards]]}: every reserve list printing, and one of every
+                       reserve list card (its cheapest nonfoil printing) each day
+      p/<first 3 characters of the Scryfall id>.json  each printing's prices: {finish: [[day, cents]]}
+    A price on the Prices page is the median of the printing's last 3 days within a week, so one odd
+    day doesn't make it rise or fall."""
+    days = sorted(hist["days"])
+    num = [(date.fromisoformat(d) - EPOCH).days for d in days]
+    order = {c["oracle_id"]: n for n, c in enumerate(cards)}  # card numbers, in build_index.py's order
+    info, sets, reserved = {}, {}, defaultdict(list)
+    with gzip.open(printings, "rt", encoding="utf-8") as f:
+        for c in map(json.loads, f):
+            oracle = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
+            if oracle in order and c["id"] in hist["series"]:
+                info[c["id"]] = (order[oracle], sets.setdefault(c["set_name"], len(sets)))
+                if c.get("reserved"):
+                    reserved[oracle].append(c["id"])
+
+    def price(series, i):
+        if at(series, days[i]) is None:
+            return None
+        near = sorted(c for k in range(max(0, i - 2), i + 1)
+                      if num[i] - num[k] <= 7 and (c := at(series, days[k])) is not None)
+        return near[len(near) // 2]
+
+    def back(w):  # the last day on or before w days ago, if close enough to it
+        k = bisect.bisect_right(num, num[-1] - w) - 1
+        return k if k >= 0 and num[-1] - w - num[k] <= max(3, w // 10) else None
+
+    last, then = len(days) - 1, [back(w) for w in WINDOWS]
+    on_list = {i for ids in reserved.values() for i in ids}
+    rows = []  # every printing: [..., now, then 7, 30, 90 and 365 days before]
+    for i, (card, s) in info.items():
+        for finish, series in hist["series"][i].items():
+            if finish in US and (now := price(series, last)) is not None:
+                past = [-1 if k is None or (c := price(series, k)) is None else c for k in then]
+                rows.append([card, i, s, US.index(finish), now, *past])
+    shutil.rmtree(out_dir, ignore_errors=True)
+    write_json(os.path.join(out_dir, "days.json"), num)
+    names = list(sets)
+
+    def with_sets(chosen):  # just the sets they're from
+        used = sorted({r[2] for r in chosen})
+        new = {s: k for k, s in enumerate(used)}
+        return {"sets": [names[s] for s in used], "rows": [[r[0], r[1], new[r[2]], *r[3:]] for r in chosen]}
+
+    moved = 0
+    for k, w in enumerate(WINDOWS):
+        groups = defaultdict(list)
+        for r in rows:
+            now, was = r[4], r[5 + k]
+            if was > 0 and min(now, was) >= MIN_MOVER and abs(now - was) >= 25:
+                band = bisect.bisect_right(BANDS, min(now, was))
+                groups[min(r[3], 1), band, now > was].append(r)
+        top = [r for g in groups.values() for r in sorted(g, key=lambda r: -abs(math.log(r[4] / r[5 + k])))[:TOP]]
+        moved += len(top)
+        write_json(os.path.join(out_dir, f"movers-{w}.json"), with_sets([[*r[:5], r[5 + k]] for r in top]))
+    total = []
+    for k, d in enumerate(days):
+        cheapest = [c for ids in reserved.values()
+                    if (c := min((p for i in ids if (p := at(hist["series"][i].get("usd", ([], [])), d))), default=None))]
+        if cheapest:
+            total.append([num[k], sum(cheapest), len(cheapest)])
+    write_json(os.path.join(out_dir, "reserved.json"),
+               {**with_sets([r for r in rows if r[1] in on_list]), "total": total})
+    shards = defaultdict(dict)
+    for i in info:
+        shards[i[:3]][i] = {f: [[num[bisect.bisect_left(days, d)], c] for d, c in zip(*v)]
+                            for f, v in hist["series"][i].items() if f in US}
+    for k, shard in shards.items():
+        write_json(os.path.join(out_dir, "p", f"{k}.json"), shard)
+    print(f"Wrote {out_dir}: {len(days)} days, {moved:,} rises and falls, "
+          f"{len(reserved)} reserve list cards, {len(info):,} printings' prices", flush=True)
+
+
 def share(path=HISTORY):
     """Upload the history to the release, after merging in the days the release's copy has that this
     one doesn't (another run's), so nothing there is lost. Returns whether it uploaded."""
@@ -329,8 +423,10 @@ def share(path=HISTORY):
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd not in ("snapshot", "backfill", "share"):
+    if cmd not in ("snapshot", "backfill", "share", "site"):
         sys.exit(__doc__)
+    if cmd == "site":
+        sys.exit(site_data(load(), by_popularity(load_cards())))
     if cmd == "snapshot":
         snapshot()
     elif cmd == "backfill":
