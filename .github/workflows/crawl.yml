@@ -25,6 +25,12 @@ jobs:
       - uses: actions/checkout@v7
       - run: gh release download deck-corpus
       - run: python3 -c "import build_index; build_index.download_bulk_data()" # card names for commanders, printings for Moxfield
+      # The day's price of every printing, added to the history on the price-history release
+      # (downloaded first, so the day is added to the end of it rather than merged in on upload)
+      - run: |
+          gh release download price-history --pattern prices.jsonl.gz || echo "No price history yet"
+          python3 build_prices.py snapshot
+        continue-on-error: true
       # A day's tournaments take a few minutes; a failure here still lets the decks crawl
       - run: python3 build_decks.py results --hours 0.25
         continue-on-error: true

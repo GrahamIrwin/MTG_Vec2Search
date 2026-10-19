@@ -292,6 +292,22 @@ python build_decks.py crawl --only "Atraxa, Praetors' Voice" --per-commander 300
 python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000   # just its bracket 5 decks
 ```
 
+## Price history
+
+`build_prices.py` keeps `prices.jsonl.gz` on the `price-history` release: the price of every paper
+printing on every day it has, nonfoil, foil and etched each on its own, in US dollars (TCGplayer)
+and euros (Cardmarket). The site doesn't use it yet.
+
+- **Crawl decks** adds the day's prices from Scryfall's `default_cards` every day
+  (`build_prices.py snapshot`), dated by when Scryfall made the file.
+- `python build_prices.py backfill` adds every older day it can find: the Wayback Machine's copies of
+  Scryfall's bulk files (a day each, back to 2022) and of MTGJSON's `AllPrices` (90 days each),
+  then MTGJSON's current 90 days. Run it again any time: it only fetches files it hasn't imported.
+- Only changes are stored: each printing's prices are lists of `[day, cents]`, a point only where
+  the price changed since the day before (null when it stopped having one). The first line lists
+  the days and where each came from. A day already in it is never replaced, and both commands merge
+  with the release's copy before uploading, like the deck corpus.
+
 ## The deck link Worker
 
 Deploy it once to a free Cloudflare account, then put the URL it prints in
@@ -318,19 +334,20 @@ python build_decks.py build        # site/decks/, for Find similar decks
 python -m http.server -d site      # http://localhost:8000
 ```
 
-Tests: `python test_build_index.py`, `python test_build_decks.py` and `node --test` (Node 24).
+Tests: `python test_build_index.py`, `python test_build_decks.py`, `python test_build_prices.py` and `node --test` (Node 24).
 
 ## Files
 
 - `build_index.py`: downloads data from Scryfall, vectorizes the cards, writes the index
 - `build_decks.py`: crawls Archidekt and Moxfield decks and edhtop16's tournament results, writes the per-commander deck files
+- `build_prices.py`: keeps the price history of every printing (daily from Scryfall, backfilled from archives)
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
 - `site/deck.js`: decklist parsing, similar decks, recommendations, builds, trends and tournament results
 - `worker/deck-link.js`: Cloudflare Worker that turns a deck link into a decklist
 - `site/currency.js`: currency detection, exchange rate and price formatting
 - `.github/workflows/deploy.yml`: weekly rebuild and GitHub Pages deploy
-- `.github/workflows/crawl.yml`: daily deck crawl and tournament results, then a deploy
+- `.github/workflows/crawl.yml`: daily price snapshot, deck crawl and tournament results, then a deploy
 
 Card data and images come from [Scryfall](https://scryfall.com), decklists from
 [Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com), tournament results
