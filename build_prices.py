@@ -23,6 +23,7 @@ import bz2
 import csv
 import gzip
 import html
+import http.client
 import io
 import json
 import lzma
@@ -227,7 +228,7 @@ def get(url, tries=4):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=600) as r:
                 return r.read()
-        except OSError as e:
+        except (OSError, http.client.HTTPException) as e:  # HTTPException: a connection cut off mid-read
             if k == tries - 1:
                 raise
             print(f"  {e}; trying again in {30 * (k + 1)}s", flush=True)
@@ -381,7 +382,7 @@ def goldfish_get(path, **headers):
                 raise
             print(f"  {e}; waiting {60 * (k + 1)}s", flush=True)
             time.sleep(60 * (k + 1))
-        except OSError as e:
+        except (OSError, http.client.HTTPException) as e:
             print(f"  {e}; waiting {60 * (k + 1)}s", flush=True)
             time.sleep(60 * (k + 1))
     raise RuntimeError(f"{path} kept failing")
