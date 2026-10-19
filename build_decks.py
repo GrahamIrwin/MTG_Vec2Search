@@ -572,6 +572,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                 stop.set()
             print("\nStopped. Everything fetched so far is saved.", flush=True)
 
+    print(f"Compacting {path} ({len(corpus):,} decks, a few minutes; the decks are already saved)...", flush=True)
     save_corpus(corpus, path)
     print(f"Done in {duration(time.time() - start)}: {counts['new']:,} new decks, {counts['updated']:,} updated; "
           f"{len(corpus):,} in {path} (was {before:,}).", flush=True)
