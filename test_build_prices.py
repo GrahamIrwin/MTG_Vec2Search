@@ -6,8 +6,8 @@ import random
 import tempfile
 from datetime import date
 
-from build_prices import (add_day, load, merge, mtgjson4_days, mtgjson_csv, mtgjson_days, on, save, scryfall_snapshot,
-                          site_data)
+from build_prices import (add_day, estimator, load, merge, mtgjson4_days, mtgjson_csv, mtgjson_days, on, save,
+                          scryfall_snapshot, site_data)
 
 # Random days of random prices (some printings missing some days), added in a random order, read
 # back exactly: every day's prices, after saving and loading, and merged into another copy
@@ -73,11 +73,21 @@ with tempfile.TemporaryDirectory() as tmp:
     with gzip.open(os.path.join(tmp, "p.jsonl.gz"), "wt") as f:
         for i, oracle, rl in [("up", "o1", False), ("rl", "o2", True), ("cheap", "o1", False)]:
             f.write(json.dumps({"id": i, "oracle_id": oracle, "set_name": "Set " + i, "reserved": rl}) + "\n")
-    site_data(site, [{"oracle_id": "o2"}, {"oracle_id": "o1"}], tmp, os.path.join(tmp, "p.jsonl.gz"))
+    site_data(site, [{"oracle_id": "o2"}, {"oracle_id": "o1"}], tmp, os.path.join(tmp, "p.jsonl.gz"), os.path.join(tmp, "none"))
     read = lambda *path: json.load(open(os.path.join(tmp, *path)))
     moved = read("movers-30.json")
-    assert [[moved["sets"][r[2]], *r[3:]] for r in moved["rows"]] == [["Set up", 0, 400, 200], ["Set rl", 0, 9000, 10000]], moved
+    assert sorted([moved["sets"][r[2]], *r[3:]] for r in moved["rows"]) == [["Set rl", 0, 9000, 10000], ["Set up", 0, 400, 200]], moved
+    assert moved["cutoffs"][0][2] == [0, 0], "a band with fewer than TOP is complete"
     reserved = read("reserved.json")
-    assert [r[1] for r in reserved["rows"]] == ["rl"] and reserved["total"][-1][1:] == [9000, 1], reserved
+    assert [r[1] for r in reserved["rows"]] == ["rl"] and reserved["total"][-1][1:] == [9000, 1, 0], reserved
     assert read("p", "up.json")["up"]["usd_foil"] == [[(date(2026, 9, 1) - date(1993, 1, 1)).days, 900]]
+
+# Estimates between our days: the other guide's prices, scaled to meet ours. Theirs are 10% over
+# ours on day 0 and 20% over on day 10, so on day 5 they're scaled down by about 15%; before our
+# first day by 10%, after our last by 20%
+theirs = (-5, [110] * 5 + [110 + k for k in range(11)] + [None, 240])
+est = estimator({0: 100, 10: 100}, theirs)
+assert est(0) == 100 and est(10) == 100 and est(-5) == 100, [est(d) for d in (0, 10, -5)]
+assert abs(est(5) - 115 / (1.1 ** 0.5 * 1.2 ** 0.5)) <= 1 and est(11) is None and est(12) == 200
+assert estimator({0: 100}, (50, [1, 2]))(51) is None, "no day in common: no estimates"
 print("ok")

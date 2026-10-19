@@ -4,10 +4,13 @@ is never replaced.
 
     python build_prices.py snapshot    # add the day's prices from default_cards.jsonl.gz (the daily crawl does this)
     python build_prices.py backfill    # add every older day we can find: the Wayback Machine's copies of
-                                       # Scryfall's bulk files and MTGJSON's price files, and MTGJSON's last 90 days
+                                       # Scryfall's bulk files and MTGJSON's price files, Hugging Face datasets
+                                       # of them, and MTGJSON's last 90 days
     python build_prices.py share       # merge with the release and upload (snapshot and backfill do this
                                        # unless given --no-upload)
     python build_prices.py site        # write site/prices/ (after build_index.py: it uses its card numbers)
+    python build_prices.py goldfish --hours 24   # fetch daily histories to fill the days between ours
+                                                 # (resumable: stop and run it again any time)
 
 The file's first line is {"days": {day: where its prices came from}, "sources": [files imported]}.
 Then a line per printing (Scryfall id), with a series per price: [[day, cents], ...], a point only
@@ -19,6 +22,7 @@ import bisect
 import bz2
 import csv
 import gzip
+import html
 import io
 import json
 import lzma
@@ -30,6 +34,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
+import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from collections import defaultdict
@@ -45,13 +52,16 @@ MTGJSON_FIELDS = {"tcgplayer": {"normal": "usd", "foil": "usd_foil", "etched": "
                   "cardmarket": {"normal": "eur", "foil": "eur_foil"}}
 MTGJSON = "https://mtgjson.com/api/v5"
 WAYBACK = "http://web.archive.org"
+HF = "https://huggingface.co"
 SITE = os.path.join("site", "prices")
 EPOCH = date(1993, 1, 1)  # app.js counts days from it
 WINDOWS = (7, 30, 90, 365)  # days back the Prices page compares with
 US = ("usd", "usd_foil", "usd_etched")  # the site shows US prices, in the visitor's currency
-MIN_MOVER = 100  # cents: cheaper printings move by cents, which make big percentages
-BANDS = (500, 2000, 10000)  # cents: the Prices page's "and up" filters, $1, $5, $20 and $100
-TOP = 250  # rises and falls kept per finish and band
+# cents: cheaper printings move by cents, which make big percentages. Under $1 because the Prices
+# page's lowest filter is 1 of the visitor's currency, as low as about 60 US cents
+MIN_MOVER = 50
+BANDS = (50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000)  # cents: where each band of prices starts
+TOP = 150  # rises and falls kept per finish and band
 
 
 def load(path=HISTORY):
@@ -186,6 +196,18 @@ def mtgjson_csv(text):
     return data
 
 
+def parquet_days(table):
+    """{day: {printing: {field: cents}}} from a table of MTGJSON's prices by Scryfall id (columns
+    scryfall_id, medium, provider, list_type, finish, date, price), like mtgjson_days."""
+    cols = table.select(["scryfall_id", "medium", "provider", "list_type", "finish", "date", "price"]).to_pydict()
+    days = defaultdict(dict)
+    for i, medium, provider, listing, finish, day, price in zip(*cols.values()):
+        field = MTGJSON_FIELDS.get(provider, {}).get(finish)
+        if field and medium == "paper" and listing == "retail" and i and price:
+            days[str(day)[:10]].setdefault(i, {})[field] = round(price * 100)
+    return days
+
+
 def mtgjson4_days(printings):
     """{day: {printing: {field: cents}}} from MTGJSON 4's AllPrintings: TCGplayer's prices. A few
     printings kept a price from weeks before, so only the day nearly all have counts."""
@@ -270,18 +292,37 @@ def backfill():
               if u.endswith((".json", ".csv")) or re.search(r"\.(json|csv)\.(gz|xz|bz2|zip)$", u)]
     # MTGJSON 4's AllPrintings had each printing's TCGplayer prices in it
     files += [(t, u, "mtgjson4") for t, u in archived("mtgjson.com/json/AllPrintings.json*", 10_000_000)]
+    # Hugging Face datasets: MTGJSON's 90 days as of September 2026, and Scryfall's default_cards
+    # uploaded now and then (each upload a day: the day it was uploaded)
+    files += [("20260924000000", f"{HF}/datasets/pcwoods/mtg-card-prices/resolve/main/price_history.parquet", "parquet-prices")]
+    commits = json.loads(get(f"{HF}/api/datasets/nishtahir/scryfall-default-cards/commits/main"))
+    files += [(re.sub(r"\D", "", c["date"])[:14], f"{HF}/datasets/nishtahir/scryfall-default-cards/resolve/{c['id']}"
+               "/data/train-00000-of-00001.parquet", "parquet-cards") for c in commits if c["title"] == "Upload dataset"]
     files.sort(key=lambda f: (f[0][:8], "all-cards" in f[1], f[0]))
     for t, url, kind in files + [(today, f"{MTGJSON}/AllPrices.json.gz", "today")]:
         key = f"{t[:8]}/{url.split('.json')[0].split('.csv')[0]}"  # in another compression it's the same days
         if key in hist["sources"] or f"truncated: {t}/{url}" in hist["sources"]:
             continue
         made = re.search(r"-(\d{4})(\d\d)(\d\d)\d{6}\.json", url)  # default-cards-20240506090530.json
-        day = "-".join(made.groups()) if kind == "scryfall" else None
+        day = "-".join(made.groups()) if kind == "scryfall" else f"{t[:4]}-{t[4:6]}-{t[6:8]}" if kind == "parquet-cards" else None
         if day in hist["days"]:
             continue
         print(f"{t[:8]}: {url}", flush=True)
         try:
-            text = unpack(get(url if kind == "today" else f"{WAYBACK}/web/{t}id_/{url}"), url)
+            raw = get(url if kind in ("today", "parquet-prices", "parquet-cards") else f"{WAYBACK}/web/{t}id_/{url}")
+            if kind.startswith("parquet"):
+                import pyarrow.parquet  # only for these two files: pip install pyarrow
+                table = pyarrow.parquet.read_table(io.BytesIO(raw))
+                del raw
+                if kind == "parquet-cards":
+                    add_day(hist, day, "scryfall", scryfall_snapshot(table.select(["id", "prices", "digital"]).to_pylist()))
+                else:
+                    added = [d for d, snap in sorted(parquet_days(table).items()) if add_day(hist, d, "mtgjson", snap)]
+                    print(f"  {len(added)} new days" + (f": {added[0]} to {added[-1]}" if added else ""), flush=True)
+                hist["sources"].append(key)
+                save(hist)
+                continue
+            text = unpack(raw, url)
             if kind == "scryfall":
                 add_day(hist, day, "scryfall", scryfall_snapshot(cards_in(text)))
             else:
@@ -311,23 +352,228 @@ def backfill():
     print(f"{len(hist['days'])} days in all, {len(hist['series']):,} printings", flush=True)
 
 
-def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE):
+# === Daily history from another price guide (MTGGoldfish), to fill the days between ours ===
+# Its prices are its own measure, 0-20% off TCGplayer's depending on the year, so they're kept apart
+# (goldfish.jsonl, a line per printing and finish as it's fetched) and only used scaled to meet ours.
+GOLDFISH = "https://www.mtggoldfish.com"
+GOLDFISH_FILE = "goldfish.jsonl"
+GOLDFISH_SETS = "goldfish_sets.json"  # Scryfall set code -> its set code, from its set pages
+GOLDFISH_DELAY = 2.0  # seconds between requests
+GOLDFISH_HEADERS = {"User-Agent": "MTG_Vec2Search/1.0 (+https://github.com/GrahamIrwin/MTG_Vec2Search)"}
+_goldfish_next = 0.0
+
+
+def goldfish_get(path, **headers):
+    """GET a page of its site, at most one request per GOLDFISH_DELAY, waiting out errors that pass
+    (429, 5xx). Returns the text, or None when it isn't there (404)."""
+    global _goldfish_next
+    for k in range(6):
+        time.sleep(max(0.0, _goldfish_next - time.time()))
+        _goldfish_next = time.time() + GOLDFISH_DELAY
+        try:
+            req = urllib.request.Request(GOLDFISH + path, headers={**GOLDFISH_HEADERS, **headers})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            if e.code not in (429, 500, 502, 503, 504):
+                raise
+            print(f"  {e}; waiting {60 * (k + 1)}s", flush=True)
+            time.sleep(60 * (k + 1))
+        except OSError as e:
+            print(f"  {e}; waiting {60 * (k + 1)}s", flush=True)
+            time.sleep(60 * (k + 1))
+    raise RuntimeError(f"{path} kept failing")
+
+
+def fold(name):
+    return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", name).lower())
+
+
+def goldfish_sets(printings=PRINTINGS_FILE):
+    """{Scryfall set code: its set code}, matched by set name, read from each of its set pages
+    (cached in GOLDFISH_SETS: about 350 pages)."""
+    if os.path.exists(GOLDFISH_SETS):
+        with open(GOLDFISH_SETS, encoding="utf-8") as f:
+            return json.load(f)
+    ours = {}
+    with gzip.open(printings, "rt", encoding="utf-8") as f:
+        for c in map(json.loads, f):
+            ours.setdefault(fold(c["set_name"]), c["set"])
+    index = goldfish_get("/sets")
+    slugs = sorted({s for s in re.findall(r'href="/sets/([^"#?]+)"', index)})
+    codes = {}
+    for k, slug in enumerate(slugs):
+        page = goldfish_get(f"/sets/{slug}")
+        m = page and (re.search(r"data-react-props='([^']*)'", page) or re.search(r'data-react-props="([^"]*)"', page))
+        cards = json.loads(html.unescape(m.group(1))).get("cards", []) if m else []
+        mine = ours.get(fold(urllib.parse.unquote_plus(slug)))
+        if cards and mine:
+            codes[mine] = cards[0]["set"]
+        print(f"  set {k + 1}/{len(slugs)} {urllib.parse.unquote_plus(slug)}: "
+              f"{codes.get(mine, 'no match')}", flush=True)
+    with open(GOLDFISH_SETS, "w", encoding="utf-8") as f:
+        json.dump(codes, f, indent=0, sort_keys=True)
+    return codes
+
+
+def goldfish_variants(set_name, name):
+    """{(its set slug, collector number, foil): its card id} for every printing of a card, from one
+    of its price pages (for printings that share a name with others in their set)."""
+    page = goldfish_get(f"/price/{urllib.parse.quote_plus(set_name)}/{urllib.parse.quote_plus(name)}")
+    found = {}
+    for card_id, href in re.findall(r'data-card-id="([^"]*)"[^>]*href="(/price/[^"]*)"', page or ""):
+        m = re.match(r"/price/([^/]+)/([^/]+)/(.*)", href)
+        if m:
+            found[m.group(1), m.group(2), m.group(3).endswith("-foil")] = html.unescape(card_id)
+    return found
+
+
+def goldfish_history(card_id):
+    """{day: cents} of a card id's paper prices, every day it has one."""
+    q = urllib.parse.urlencode({"card_id": card_id, "selector": "#tab-paper", "type": "paper", "price_type": ""})
+    js = goldfish_get(f"/price_history_component?{q}", **{"X-Requested-With": "XMLHttpRequest",
+                                                          "Accept": "text/javascript, application/javascript, */*; q=0.01"})
+    return {d: round(float(p) * 100) for d, p in re.findall(r"(\d{4}-\d\d-\d\d), ([\d.]+)", js or "")}
+
+
+def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PRINTINGS_FILE):
+    """Fetch the daily history of every printing (and finish) at `least` cents or more on the last
+    day of ours, and every reserve list printing: the reserve list first, then the priciest. Each
+    is a line of `path` as it arrives ({"id", "finish", "card", "start", "cents": [a day each from
+    start, null for none]}, or "miss" when it has none that matches ours), so it can stop and go on."""
+    stop = time.time() + hours * 3600 if hours else None
+    hist, codes = load(), goldfish_sets(printings)
+    last = max(hist["days"])
+    done = set()
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            done = {(r["id"], r["finish"]) for r in map(json.loads, f)}
+    cards, in_set = {}, defaultdict(int)
+    with gzip.open(printings, "rt", encoding="utf-8") as f:
+        for c in map(json.loads, f):
+            if c.get("digital") or c["set"] not in codes:
+                continue
+            # Double-faced cards go by their front's name there; split cards by both halves'
+            name = c["name"] if c.get("layout") in ("split", "flip") else c["name"].split(" // ")[0]
+            cards[c["id"]] = (name, c["set_name"], c["set"], c["collector_number"], c.get("reserved", False))
+            in_set[c["set"], name] += 1
+    queue = []
+    for i, (name, set_name, s, number, reserved) in cards.items():
+        for finish in ("usd", "usd_foil"):
+            series = hist["series"].get(i, {}).get(finish)
+            now = at(series, last) if series else None
+            if now and (reserved or now >= least) and (i, finish) not in done:
+                queue.append((not reserved, -now, i, finish))
+    queue.sort()
+    print(f"{len(queue):,} printings to fetch ({len(done):,} already), about "
+          f"{len(queue) * GOLDFISH_DELAY / 3600:.0f} hours", flush=True)
+    variants = {}  # (set, name) -> goldfish_variants()
+    got = missed = 0
+    with open(path, "a", encoding="utf-8") as out:
+        for k, (_, minus_now, i, finish) in enumerate(queue):
+            if stop and time.time() > stop:
+                print("Out of time; run it again to go on.", flush=True)
+                break
+            name, set_name, s, number, _ = cards[i]
+            foil = finish == "usd_foil"
+            if in_set[s, name] == 1:
+                card_id = f"{name} [{codes[s]}]" + (" (F)" if foil else "")
+            else:  # one of several printings of the name in the set: its page says which is which
+                if (s, name) not in variants:
+                    variants[s, name] = goldfish_variants(set_name, name)
+                card_id = next((v for (_, n, f), v in variants[s, name].items()
+                                if n == number and f == foil and f"[{codes[s]}]" in v), None)
+            prices = goldfish_history(card_id) if card_id else {}
+            row = {"id": i, "finish": finish, "card": card_id}
+            # Its latest price should be about ours: otherwise it's another printing, or a mismatch
+            latest = prices[max(prices)] if prices else None
+            if not latest or not 0.5 <= latest / -minus_now <= 2:
+                row["miss"] = "none" if not latest else f"{latest} against our {-minus_now}"
+                missed += 1
+            else:
+                days = sorted(prices)
+                d0 = date.fromisoformat(days[0])
+                n = (date.fromisoformat(days[-1]) - d0).days + 1
+                cents = [None] * n
+                for d, c in prices.items():
+                    cents[(date.fromisoformat(d) - d0).days] = c
+                row.update(start=days[0], cents=cents)
+                got += 1
+            out.write(json.dumps(row, separators=(",", ":")) + "\n")
+            out.flush()
+            if k % 25 == 0:
+                print(f"  {k + 1:,}/{len(queue):,}: {got:,} histories, {missed:,} without one; "
+                      f"{name} [{s}]{' foil' if foil else ''}: {row.get('miss') or row['start']}", flush=True)
+    print(f"Fetched {got:,} histories ({missed:,} without one).", flush=True)
+
+
+
+def goldfish_series(path=GOLDFISH_FILE):
+    """{(printing, finish): (first day, [cents a day from it, None for none])} of the histories
+    goldfish_crawl fetched (days are days since EPOCH)."""
+    out = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for r in map(json.loads, f):
+                if r.get("cents"):
+                    out[r["id"], r["finish"]] = ((date.fromisoformat(r["start"]) - EPOCH).days, r["cents"])
+    return out
+
+
+def estimator(real, gf):
+    """A printing's estimated price on any day, from another guide's prices gf = (first day, [cents])
+    scaled to meet ours, real = {day: cents} on the days we have. The scale (ln(ours / theirs)) on
+    each of our days is the median of it and its neighbours' within 3 days, and in between a straight
+    line from one to the next. None for a day it has no price on, or if it has no day in common."""
+    d0, theirs = gf
+    on = lambda d: theirs[d - d0] if 0 <= d - d0 < len(theirs) else None
+    both = sorted((d, math.log(c / t)) for d, c in real.items() if (t := on(d)))
+    if not both:
+        return lambda d: None
+    at_days = [d for d, _ in both]
+    scale = []
+    for d, _ in both:
+        near = sorted(r for _, r in both[bisect.bisect_left(at_days, d - 3):bisect.bisect_right(at_days, d + 3)])
+        scale.append(near[len(near) // 2])
+
+    def est(d):
+        if not (t := on(d)):
+            return None
+        j = bisect.bisect_right(at_days, d)
+        if j in (0, len(at_days)):
+            r = scale[0] if j == 0 else scale[-1]
+        else:
+            r = scale[j - 1] + (scale[j] - scale[j - 1]) * (d - at_days[j - 1]) / (at_days[j] - at_days[j - 1])
+        return round(t * math.exp(r))
+    return est
+
+
+def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLDFISH_FILE):
     """Write site/prices/, what the Prices page and card details read (days are days since 1993-01-01,
     prices US cents, a printing's row is [card number, Scryfall id, set (in "sets"), finish (0 nonfoil,
     1 foil, 2 etched), price on the last day, then ...]):
-      days.json        the days with prices
-      movers-<w>.json  {"sets", "rows": [..., price w days before]}: the printings at MIN_MOVER or more
-                       on both days whose prices rose or fell the most in w days, the top TOP of each finish (nonfoil, or foil and
-                       etched) and band of price (BANDS, by the lower of the two) both ways, so the
-                       top of "$5 and up", say, is the top of its bands put together
+      days.json        the days with prices of ours
+      movers-<w>.json  {"sets", "rows": [..., price w days before], "bands", "cutoffs"}: the printings
+                       at MIN_MOVER or more on both days whose prices rose or fell the most in w
+                       days, the top TOP of each finish (nonfoil, or foil and etched) and band of
+                       price (BANDS, by the lower of the two) both ways. cutoffs[finish][band][rose]
+                       is the size of the change (|ln(now / then)|) a band's list stops at (0: it
+                       has them all), so the page can tell how far a list for any price is complete
       reserved.json    {"sets", "rows": [..., price 7, 30, 90 and 365 days before (-1: none)],
-                       "total": [[day, cents, cards]]}: every reserve list printing, and one of every
-                       reserve list card (its cheapest nonfoil printing) each day
-      p/<first 3 characters of the Scryfall id>.json  each printing's prices: {finish: [[day, cents]]}
-    A price on the Prices page is the median of the printing's last 3 days within a week, so one odd
-    day doesn't make it rise or fall."""
+                       "total": [[day, cents, cards, estimated]]}: every reserve list printing, and
+                       one of every reserve list card (its cheapest nonfoil printing) over time
+      p/<first 3 characters of the Scryfall id>.json  each printing's prices: {finish: [[day,
+                       cents or null]] where they changed on our days, finish + "_e": [[first day,
+                       days apart, cents, change in cents, ...]]}: estimated prices between ours
+                       (estimator()), weekly for the last 3 years and every 4 weeks before
+    A price on the Prices page is the median of the printing's last 3 days within a week (estimated
+    ones too), so one odd day doesn't make it rise or fall."""
     days = sorted(hist["days"])
     num = [(date.fromisoformat(d) - EPOCH).days for d in days]
+    last = num[-1]
+    gold = goldfish_series(goldfish)
     order = {c["oracle_id"]: n for n, c in enumerate(cards)}  # card numbers, in build_index.py's order
     info, sets, reserved = {}, {}, defaultdict(list)
     with gzip.open(printings, "rt", encoding="utf-8") as f:
@@ -338,25 +584,43 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE):
                 if c.get("reserved"):
                     reserved[oracle].append(c["id"])
 
-    def price(series, i):
-        if at(series, days[i]) is None:
+    def ours(series):  # {day: cents} on each of our days it has a price
+        out, k, c = {}, 0, None
+        for d, n in zip(days, num):
+            while k < len(series[0]) and series[0][k] <= d:
+                c = series[1][k]
+                k += 1
+            if c is not None:
+                out[n] = c
+        return out
+
+    prices = {}  # (printing, finish) -> (ours, estimator or None)
+    for i in info:
+        for finish, series in hist["series"][i].items():
+            if finish in US:
+                real = ours(series)
+                prices[i, finish] = (real, estimator(real, gold[i, finish]) if (i, finish) in gold else None)
+
+    def on(real, est, d):
+        c = real.get(d)
+        return c if c is not None or not est else est(d)
+
+    def price(real, est, target, reach=7):
+        """The median of a printing's last 3 prices within a week, from the last on or before
+        `target` (at most `reach` days before it)."""
+        first = next((d for d in range(target, target - reach - 1, -1) if on(real, est, d) is not None), None)
+        if first is None:
             return None
-        near = sorted(c for k in range(max(0, i - 2), i + 1)
-                      if num[i] - num[k] <= 7 and (c := at(series, days[k])) is not None)
+        near = sorted([c for d in range(first, first - 7, -1) if (c := on(real, est, d)) is not None][:3])
         return near[len(near) // 2]
 
-    def back(w):  # the last day on or before w days ago, if close enough to it
-        k = bisect.bisect_right(num, num[-1] - w) - 1
-        return k if k >= 0 and num[-1] - w - num[k] <= max(3, w // 10) else None
-
-    last, then = len(days) - 1, [back(w) for w in WINDOWS]
     on_list = {i for ids in reserved.values() for i in ids}
     rows = []  # every printing: [..., now, then 7, 30, 90 and 365 days before]
-    for i, (card, s) in info.items():
-        for finish, series in hist["series"][i].items():
-            if finish in US and (now := price(series, last)) is not None:
-                past = [-1 if k is None or (c := price(series, k)) is None else c for k in then]
-                rows.append([card, i, s, US.index(finish), now, *past])
+    for (i, finish), (real, est) in prices.items():
+        if (now := price(real, est, last)) is not None:
+            past = [price(real, est, last - w, max(7, w // 10)) for w in WINDOWS]
+            card, s = info[i]
+            rows.append([card, i, s, US.index(finish), now, *(-1 if c is None else c for c in past)])
     shutil.rmtree(out_dir, ignore_errors=True)
     write_json(os.path.join(out_dir, "days.json"), num)
     names = list(sets)
@@ -372,27 +636,60 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE):
         for r in rows:
             now, was = r[4], r[5 + k]
             if was > 0 and min(now, was) >= MIN_MOVER and abs(now - was) >= 25:
-                band = bisect.bisect_right(BANDS, min(now, was))
+                band = bisect.bisect_right(BANDS, min(now, was)) - 1
                 groups[min(r[3], 1), band, now > was].append(r)
-        top = [r for g in groups.values() for r in sorted(g, key=lambda r: -abs(math.log(r[4] / r[5 + k])))[:TOP]]
+        size = lambda r: abs(math.log(r[4] / r[5 + k]))
+        top, cutoffs = [], [[[0, 0] for _ in BANDS] for _ in range(2)]
+        for (finish, band, rose), g in groups.items():
+            g.sort(key=size, reverse=True)
+            top += g[:TOP]
+            if len(g) > TOP:
+                cutoffs[finish][band][rose] = round(size(g[TOP - 1]), 5)
         moved += len(top)
-        write_json(os.path.join(out_dir, f"movers-{w}.json"), with_sets([[*r[:5], r[5 + k]] for r in top]))
+        write_json(os.path.join(out_dir, f"movers-{w}.json"),
+                   {**with_sets([[*r[:5], r[5 + k]] for r in top]), "bands": BANDS, "cutoffs": cutoffs})
+
+    # One of every reserve list card: on each of our days, and weekly back as far as estimates go
+    starts = [gold[i, "usd"][0] for i in on_list if (i, "usd") in gold]
+    observed = set(num)
+    grid = sorted(observed | set(range(last, min(starts, default=last) - 1, -7)))
     total = []
-    for k, d in enumerate(days):
+    for d in grid:
         cheapest = [c for ids in reserved.values()
-                    if (c := min((p for i in ids if (p := at(hist["series"][i].get("usd", ([], [])), d))), default=None))]
-        if cheapest:
-            total.append([num[k], sum(cheapest), len(cheapest)])
+                    if (c := min((p for i in ids if (i, "usd") in prices and (p := on(*prices[i, "usd"], d)) is not None),
+                                 default=None)) is not None]
+        total.append([d, sum(cheapest), len(cheapest), int(d not in observed)])
+    most = max((t[2] for t in total), default=0)
+    total = [t for t in total if t[2] >= 0.9 * most]  # days missing a tenth of the cards would look like a fall
     write_json(os.path.join(out_dir, "reserved.json"),
                {**with_sets([r for r in rows if r[1] in on_list]), "total": total})
+
+    def runs(real, est, d0):  # estimated prices: [[first day, days apart, cents, change, ...]]
+        out = []
+        for start, end, step in ((d0, last - 3 * 365, 28), (max(d0, last - 3 * 365), last + 1, 7)):
+            if start >= end:
+                continue
+            values, prev = [], 0
+            for d in range(start, end, step):
+                c = None if any(real.get(e) is not None for e in range(d - 3, d + 4)) else est(d)
+                values.append(None if c is None else c - prev)
+                prev = prev if c is None else c
+            if any(v is not None for v in values):
+                out.append([start, step, *values])
+        return out
+
     shards = defaultdict(dict)
     for i in info:
-        shards[i[:3]][i] = {f: [[num[bisect.bisect_left(days, d)], c] for d, c in zip(*v)]
-                            for f, v in hist["series"][i].items() if f in US}
+        entry = {f: [[num[bisect.bisect_left(days, d)], c] for d, c in zip(*v)]
+                 for f, v in hist["series"][i].items() if f in US}
+        for f in US:
+            if (i, f) in prices and prices[i, f][1] and (r := runs(prices[i, f][0], prices[i, f][1], gold[i, f][0])):
+                entry[f + "_e"] = r
+        shards[i[:3]][i] = entry
     for k, shard in shards.items():
         write_json(os.path.join(out_dir, "p", f"{k}.json"), shard)
-    print(f"Wrote {out_dir}: {len(days)} days, {moved:,} rises and falls, "
-          f"{len(reserved)} reserve list cards, {len(info):,} printings' prices", flush=True)
+    print(f"Wrote {out_dir}: {len(days)} days, {moved:,} rises and falls, {len(reserved)} reserve list cards, "
+          f"{len(info):,} printings' prices ({sum(1 for _, e in prices.values() if e):,} with estimates between)", flush=True)
 
 
 def share(path=HISTORY):
@@ -423,8 +720,11 @@ def share(path=HISTORY):
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd not in ("snapshot", "backfill", "share", "site"):
+    if cmd not in ("snapshot", "backfill", "share", "site", "goldfish"):
         sys.exit(__doc__)
+    if cmd == "goldfish":
+        hours = sys.argv[sys.argv.index("--hours") + 1] if "--hours" in sys.argv else None
+        sys.exit(goldfish_crawl(float(hours) if hours else None))
     if cmd == "site":
         sys.exit(site_data(load(), by_popularity(load_cards())))
     if cmd == "snapshot":

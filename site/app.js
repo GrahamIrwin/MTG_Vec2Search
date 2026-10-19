@@ -1,6 +1,6 @@
 import {
   parseQuery, buildIndex, search, nameSearch, mainTerms, termsNeeded, decodePosting, parsePrice,
-  isBudget, BUDGET_USD, SORTS, sortResults, randomSearches,
+  isBudget, BUDGET_USD, SORTS, sortResults, randomSearches, filterFn,
 } from "./search.js";
 import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.js";
 import {
@@ -287,16 +287,16 @@ function withFlip(tile, img, { id, back }) {
 }
 
 // A card in a results gallery: image, name, price, a detail line and an optional bar (0 to 1)
-// extra: a tone for the detail ("up" or "down"), faint (too little to go on), a note under it and
-// a printing's own price (US cents) in place of the card's cheapest
-function cardTile(card, info, detail, bar, i, { tone, faint, note, price: own } = {}) {
+// extra: a tone for the detail ("up" or "down"), faint (too little to go on), a note under it,
+// a printing's own price (US cents) in place of the card's cheapest, and whether it's the foil
+function cardTile(card, info, detail, bar, i, { tone, faint, note, price: own, foil: isFoil } = {}) {
   const { name, id } = info;
   const price = own ?? index.columns.price[card];
   const img = el("img", { alt: name, loading: "lazy", decoding: "async" });
   img.onload = () => img.classList.add("loaded");
   img.src = imageUrl(id);
-  const tile = el("button", { className: "card", type: "button", onclick: () => openCard(id, card) },
-    el("span", { className: "card-art" }, img),
+  const tile = el("button", { className: "card", type: "button", onclick: () => openCard(id, card, isFoil) },
+    el("span", { className: "card-art" + (isFoil ? " foil-shimmer" : "") }, img),
     el("span", { className: "card-name", textContent: name }),
     el("span", { className: "card-meta" },
       el("span", { textContent: price >= 0 ? money.formatUsd(price / 100) : "No price" }),
@@ -434,7 +434,10 @@ async function showCardResults(card) {
 }
 
 // card: its number in the index, when known, for links to the commanders that play it
-async function openCard(id, card) {
+// foilFirst: show its foil price first (a foil printing's tile on the Prices page)
+let foilFirst = false;
+async function openCard(id, card, showFoil = false) {
+  foilFirst = showFoil;
   showCardActions(card);
   showCardResults(card);
   $("printings").replaceChildren();
@@ -481,7 +484,8 @@ function showPrinting(card) {
   $("modal-set").textContent = `${card.set_name} · ${card.rarity[0].toUpperCase() + card.rarity.slice(1)} · ${card.released_at.slice(0, 4)}`;
   $("scryfall-link").href = card.scryfall_uri;
   $("foil-label").hidden = !card.prices.usd_foil || !card.prices.usd;
-  foil.checked = !card.prices.usd && !!card.prices.usd_foil;
+  foil.checked = (!card.prices.usd || foilFirst) && !!card.prices.usd_foil;
+  foilFirst = false; // just for the printing it opened on
   updatePrice();
   markCurrent();
 }
@@ -2123,10 +2127,11 @@ async function showTrends() {
 
 // === Prices (build_prices.py makes the data in prices/) ===
 const PRICE_WINDOWS = [7, 30, 90, 365]; // WINDOWS in build_prices.py
-const PRICE_BANDS = [100, 500, 2000, 10000]; // US cents: MIN_MOVER and BANDS in build_prices.py
+const PRICE_BANDS = [1, 5, 20, 100]; // US dollars, shown as round amounts of the visitor's currency
 const FINISHES = ["", "foil", "etched"];
 const GAP_DAYS = 21; // longer stretches without prices are drawn dashed
-const HISTORY_RANGES = [[90, "3 months"], [365, "1 year"], [null, "All"]];
+const EST_GAP_DAYS = 35; // the same between estimates (every 4 weeks, more than 3 years back)
+const HISTORY_RANGES = [[90, "3 months"], [365, "1 year"], [1095, "3 years"], [null, "All"]];
 const pricesMessage = text => {
   $("prices-message").textContent = text;
   $("prices-message").hidden = !text;
@@ -2143,11 +2148,15 @@ function priceChange(now, was) {
 }
 let priceDays; // prices/days.json: the days with prices
 const getPriceDays = () => (priceDays ??= getJson("prices/days.json"));
-// The last day with prices on or before w days ago, if close enough to it (back() in build_prices.py)
-function priceDayBack(days, w) {
-  const target = days.at(-1) - w;
-  const day = days.findLast(d => d <= target);
-  return day !== undefined && target - day <= Math.max(3, Math.floor(w / 10)) ? day : null;
+// Estimated prices, [[first day, days apart, cents, change, ...]] (build_prices.py's runs()), as
+// [[day, cents, true]]
+function estimated(runs = []) {
+  const out = [];
+  for (const [start, step, ...changes] of runs) {
+    let c = 0;
+    changes.forEach((x, k) => x !== null && out.push([start + k * step, (c += x), true]));
+  }
+  return out;
 }
 // A series' price on each day with prices: series = [[day, cents or null]], where it changed
 function onDays(series, days) {
@@ -2165,10 +2174,26 @@ function onDays(series, days) {
 function pricePick(r, sets, was, w) {
   const [card, id, set, finish, now] = r;
   return {
-    card, id, type: typeOf(card), price: now,
+    card, id, type: typeOf(card), price: now, foil: finish > 0,
     detail: was > 0 ? priceChange(now, was) : "", tone: was > 0 && now > was ? "up" : was > 0 && now < was ? "down" : "",
     note: [sets[set], FINISHES[finish], was > 0 && `${dollars(was)} ${spanName(w)} ago`].filter(Boolean).join(" · "),
   };
+}
+// A round amount of the visitor's currency near `usd` dollars: 1, 2 or 5 times a power of ten
+function roundLocal(usd) {
+  const x = usd * (money.rate ?? 1);
+  const p = 10 ** Math.floor(Math.log10(x));
+  return [1, 2, 5, 10].map(m => m * p).reduce((a, b) => (Math.abs(Math.log(b / x)) < Math.abs(Math.log(a / x)) ? b : a));
+}
+// How big a change (|ln(now / then)|) a list of rises or falls is complete down to, for printings at
+// `cents` or more: each band of prices keeps only its biggest changes (movers-<w>.json's cutoffs)
+function completeTo(data, cents, finish, rose) {
+  const first = Math.max(0, data.bands.findLastIndex(b => b <= cents));
+  let cut = 0;
+  for (const g of finish ? [finish === "foil" ? 1 : 0] : [0, 1]) {
+    for (let b = first; b < data.bands.length; b++) cut = Math.max(cut, data.cutoffs[g][b][rose ? 1 : 0]);
+  }
+  return cut;
 }
 const chipRow = (box, options, current, pick) => box.replaceChildren(...options.map(([value, label, off]) =>
   el("button", { type: "button", ariaPressed: String(value === current), disabled: !!off, onclick: () => pick(value) }, label)));
@@ -2221,22 +2246,20 @@ function priceChart(box, points, label) {
         svgEl("text", { class: "tick", x: x(d), y: H - 6, "text-anchor": "middle" }, String(year)));
     }
   }
-  let line = "", gaps = "";
+  // Each step is a line of ours, a lighter one to or from an estimate, or dashed across a gap
+  const paths = { line: "", est: "", gap: "" };
   const dots = [];
-  points.forEach(([d, c], k) => {
-    const at = `${x(d).toFixed(1)},${y(c).toFixed(1)}`;
+  const far = (a, b) => b[0] - a[0] > (a[2] || b[2] ? EST_GAP_DAYS : GAP_DAYS);
+  const xy = ([d, c]) => `${x(d).toFixed(1)},${y(c).toFixed(1)}`;
+  points.forEach((p, k) => {
     const prev = points[k - 1], next = points[k + 1];
-    if (!prev) line += `M${at}`;
-    else if (d - prev[0] > GAP_DAYS) {
-      gaps += `M${x(prev[0]).toFixed(1)},${y(prev[1]).toFixed(1)}L${at}`;
-      line += `M${at}`;
-    } else line += `L${at}`;
-    // A day with no other close by would be no line at all: a dot instead
-    if ((!prev || d - prev[0] > GAP_DAYS) && (!next || next[0] - d > GAP_DAYS)) {
-      dots.push(svgEl("circle", { class: "dot", cx: x(d), cy: y(c), r: 3 }));
+    if (prev) paths[far(prev, p) ? "gap" : prev[2] || p[2] ? "est" : "line"] += `M${xy(prev)}L${xy(p)}`;
+    // A day of ours with no other close by would be no line at all: a dot instead
+    if (!p[2] && (!prev || far(prev, p) || prev[2]) && (!next || far(p, next) || next[2])) {
+      dots.push(svgEl("circle", { class: "dot", cx: x(p[0]), cy: y(p[1]), r: 3 }));
     }
   });
-  root.append(svgEl("path", { class: "gap", d: gaps }), svgEl("path", { class: "line", d: line }), ...dots);
+  root.append(...Object.entries(paths).map(([cls, d]) => svgEl("path", { class: cls, d })), ...dots);
   const cross = svgEl("line", { class: "cross", y1: T - 6, y2: H - B, visibility: "hidden" });
   const dot = svgEl("circle", { class: "dot", r: 4.5, visibility: "hidden" });
   const tip = el("span", { className: "tip", hidden: true });
@@ -2247,11 +2270,11 @@ function priceChart(box, points, label) {
     let k = points.findIndex(p => p[0] >= day);
     if (k < 0) k = points.length - 1;
     else if (k > 0 && day - points[k - 1][0] < points[k][0] - day) k--;
-    const [d, c] = points[k];
+    const [d, c, est] = points[k];
     for (const [node, attrs] of [[cross, { x1: x(d), x2: x(d) }], [dot, { cx: x(d), cy: y(c) }]]) {
       for (const [a, v] of Object.entries({ ...attrs, visibility: "visible" })) node.setAttribute(a, v);
     }
-    tip.textContent = `${dayName(d)} · ${c >= 100000 ? wholeDollars(c) : dollars(c)}`;
+    tip.textContent = `${dayName(d)} · ${est ? "about " : ""}${c >= 100000 ? wholeDollars(c) : dollars(c)}`;
     tip.style.left = `${Math.min(88, Math.max(12, (x(d) / W) * 100))}%`;
     tip.hidden = false;
   });
@@ -2270,9 +2293,9 @@ async function showHistory(id, finish) {
   try {
     const [days, shard] = await Promise.all([getPriceDays(), getJson(`prices/p/${id.slice(0, 3)}.json`)]);
     const prices = shard[id] ?? {};
-    const series = prices[finish] ?? prices.usd_etched ?? prices.usd_foil ?? prices.usd;
-    if (current?.id !== id || !series) return;
-    const all = onDays(series, days);
+    const key = [finish, "usd_etched", "usd_foil", "usd"].find(k => prices[k]);
+    if (current?.id !== id || !key) return;
+    const all = [...onDays(prices[key], days), ...estimated(prices[key + "_e"])].sort((a, b) => a[0] - b[0]);
     if (all.length < 2) return;
     const draw = () => {
       const points = historyRange ? all.filter(p => p[0] >= days.at(-1) - historyRange) : all;
@@ -2280,8 +2303,13 @@ async function showHistory(id, finish) {
       chipRow($("history-ranges"), HISTORY_RANGES.filter(([r]) => !r || all[0][0] < days.at(-1) - r / 2), historyRange,
         r => { historyRange = r; draw(); });
       priceChart($("history-chart"), points, `${current.name} price`);
+      const ours = points.filter(p => !p[2]).length;
       $("history-note").textContent = points.length < 2 ? "Not enough prices in this period."
-        : `${points.length} days with prices since ${dayName(points[0][0])}. Dashed lines cross stretches with none.`;
+        : `${ours} days of TCGplayer prices since ${dayName(points[0][0])}.`
+          + (ours < points.length ? " The lighter line is estimated between them, from another price guide's daily prices"
+            + " scaled to meet TCGplayer's." : "")
+          + (points.some((p, k) => k && p[0] - points[k - 1][0] > (p[2] || points[k - 1][2] ? EST_GAP_DAYS : GAP_DAYS))
+            ? " Dashed lines cross stretches with no prices." : "");
     };
     if (historyRange && all[0][0] >= days.at(-1) - historyRange / 2) historyRange = null;
     $("price-history").hidden = false;
@@ -2301,20 +2329,48 @@ async function showPrices() {
   index ??= buildIndex(meta, columns);
   const movers = {};
   const fromUrl = Number(params.get("w"));
-  let w = PRICE_WINDOWS.includes(fromUrl) && priceDayBack(days, fromUrl) !== null ? fromUrl : 30;
+  let w = PRICE_WINDOWS.includes(fromUrl) ? fromUrl : 30;
   let finish = ["nonfoil", "foil"].includes(params.get("finish")) ? params.get("finish") : "";
-  let band = PRICE_BANDS.find(b => b === Math.round(Number(params.get("min")) * 100)) ?? PRICE_BANDS[0];
+  // "And up" amounts, round in the visitor's currency; filtered on in US cents
+  const amounts = PRICE_BANDS.map(roundLocal);
+  const toCents = amount => Math.round((amount / (money.rate ?? 1)) * 100);
+  let band = Math.max(0, amounts.indexOf(Number(params.get("price"))));
+  const bandName = i => money.formatUsdWhole(amounts[i] / (money.rate ?? 1));
   let order = "rising";
-  const finishOk = r => !finish || (finish === "foil") === (r[3] > 0);
+
+  // Filters: like the card search's, on each printing's card (and the printing's own set)
+  const form = $("price-form");
+  for (const f of meta.formats) $("price-format").append(el("option", { value: f, textContent: f[0].toUpperCase() + f.slice(1) }));
+  for (const box of form.querySelectorAll('[name="c"]')) box.checked = params.getAll("c").includes(box.value);
+  for (const k of ["min", "max", "f"]) form.elements[k].value = params.get(k) ?? "";
+  const fromSet = meta.sets.find(([code]) => code === params.get("s"));
+  if (fromSet) $("price-set").value = setLabel(...fromSet);
+  $("price-filters").open = ["c", "min", "max", "f", "s"].some(k => params.has(k));
+  let cardOk, setName, filterParams;
+  const readFilters = () => {
+    const data = new FormData(form);
+    const num = k => (data.get(k) === "" || data.get(k) === null ? null : Number(data.get(k)));
+    const f = { colors: data.getAll("c"), format: data.get("f") ?? "", min: num("min"), max: num("max") };
+    const code = setCode($("price-set").value);
+    setName = code ? meta.sets.find(([c]) => c === code)[1] : null;
+    cardOk = filterFn(index, f);
+    filterParams = [...f.colors.map(c => ["c", c]), ...["min", "max"].filter(k => f[k] !== null).map(k => [k, f[k]]),
+      ...(f.format ? [["f", f.format]] : []), ...(code ? [["s", code]] : [])];
+    const active = f.colors.length + (f.min !== null || f.max !== null) + !!f.format + !!code;
+    $("price-filter-count").textContent = active;
+    $("price-filter-count").hidden = !active;
+  };
+  const rowOk = (r, sets) => (!finish || (finish === "foil") === (r[3] > 0)) && cardOk(r[0]) && (!setName || sets[r[2]] === setName);
 
   // The reserve list: one of every card over time, and each printing
   const { total } = reserved;
   const showList = () => {
     const k = PRICE_WINDOWS.indexOf(w);
     const was = r => r[5 + k];
-    const rows = reserved.rows.filter(finishOk);
+    const rows = reserved.rows.filter(r => rowOk(r, reserved.sets));
     const sorted = order === "priciest" ? rows.sort((a, b) => b[4] - a[4])
-      : rows.filter(r => Math.min(was(r), r[4]) >= PRICE_BANDS[0]).sort((a, b) => (order === "rising" ? -1 : 1) * (a[4] / was(a) - b[4] / was(b)));
+      : rows.filter(r => Math.min(was(r), r[4]) >= toCents(amounts[0]))
+        .sort((a, b) => (order === "rising" ? -1 : 1) * (a[4] / was(a) - b[4] / was(b)));
     chipRow($("reserved-sorts"), [["rising", "Rising"], ["falling", "Falling"], ["priciest", "Most expensive"]], order,
       o => { order = o; showList(); });
     showReserved(sorted.map(r => pricePick(r, reserved.sets, was(r), w)));
@@ -2322,13 +2378,15 @@ async function showPrices() {
 
   let shownFor;
   async function update() {
-    const extra = [["w", w], ...(finish ? [["finish", finish]] : []), ...(band !== PRICE_BANDS[0] ? [["min", band / 100]] : [])];
+    readFilters();
+    const extra = [["w", w], ...(finish ? [["finish", finish]] : []), ...(band ? [["price", amounts[band]]] : []), ...filterParams];
     history.replaceState(null, "", "?" + new URLSearchParams([["prices", ""], ...extra]));
-    chipRow($("price-windows"), PRICE_WINDOWS.map(x => [x, x === 365 ? "1 year" : `${x} days`, priceDayBack(days, x) === null]), w,
+    chipRow($("price-windows"), PRICE_WINDOWS.map(x => [x, x === 365 ? "1 year" : `${x} days`]), w,
       x => { w = x; update(); });
     chipRow($("price-finishes"), [["", "Any finish"], ["nonfoil", "Nonfoil"], ["foil", "Foil"]], finish, x => { finish = x; update(); });
-    chipRow($("price-bands"), PRICE_BANDS.map(b => [b, `${dollars(b)} and up`]), band, b => { band = b; update(); });
-    $("price-summary").textContent = `Prices on ${dayName(days.at(-1))} against ${dayName(priceDayBack(days, w))}`;
+    chipRow($("price-bands"), amounts.map((_, i) => [i, `${bandName(i)} and up`]), band,
+      i => { band = i; update(); });
+    $("price-summary").textContent = `Prices on ${dayName(days.at(-1))} against ${dayName(days.at(-1) - w)}`;
     $("reserved-lede").textContent = "Cards Wizards of the Coast has promised never to reprint. One of each "
       + `(${total.at(-1)[2]} cards, each at its cheapest nonfoil printing) costs ${wholeDollars(total.at(-1)[1])} today, `
       + `against ${wholeDollars(total[0][1])} on ${dayName(total[0][0])}.`;
@@ -2336,21 +2394,26 @@ async function showPrices() {
 
     const asked = shownFor = {};
     movers[w] ??= getJson(`prices/movers-${w}.json`);
-    const { sets, rows } = await movers[w];
+    const data = await movers[w];
     if (asked !== shownFor) return;
-    const keep = rows.filter(r => Math.min(r[4], r[5]) >= band && finishOk(r));
-    const ratio = r => r[4] / r[5];
-    const picks = list => list.map(r => pricePick(r, sets, r[5], w));
-    const what = `${finish ? finish + " " : ""}printings at ${dollars(band)} or more then and now`;
+    const cents = toCents(amounts[band]);
+    const size = r => Math.abs(Math.log(r[4] / r[5]));
+    const keep = data.rows.filter(r => Math.min(r[4], r[5]) >= cents && rowOk(r, data.sets));
+    // Each list stops where some band's biggest changes run out, so it's never missing one
+    const [upTo, downTo] = [true, false].map(rose => completeTo(data, cents, finish, rose));
+    const picks = list => list.map(r => pricePick(r, data.sets, r[5], w));
+    const what = `${finish ? finish + " " : ""}printings at ${bandName(band)} or more then and now`;
     $("price-rising-lede").textContent = `The ${what} whose price rose the most in ${spanName(w)}.`;
     $("price-falling-lede").textContent = `The ${what} whose price fell the most in ${spanName(w)}.`;
-    showPriceRising(picks(keep.filter(r => r[4] > r[5]).sort((a, b) => ratio(b) - ratio(a))));
-    showPriceFalling(picks(keep.filter(r => r[4] < r[5]).sort((a, b) => ratio(a) - ratio(b))));
+    showPriceRising(picks(keep.filter(r => r[4] > r[5] && size(r) >= upTo).sort((a, b) => size(b) - size(a))));
+    showPriceFalling(picks(keep.filter(r => r[4] < r[5] && size(r) >= downTo).sort((a, b) => size(b) - size(a))));
   }
+  form.addEventListener("input", update);
+  form.addEventListener("submit", e => e.preventDefault());
   await update();
   pricesMessage("");
   $("prices-page").hidden = false;
-  priceChart($("reserved-chart"), total.map(([d, c]) => [d, c]), "One of every reserve list card");
+  priceChart($("reserved-chart"), total.map(([d, c, , est]) => [d, c, !!est]), "One of every reserve list card");
 }
 
 // === A card's page: the commanders whose decks play it, by what those decks are known for ===

@@ -347,6 +347,7 @@
       animation: foil 2.4s infinite linear;
     }
     @keyframes foil { from { transform: translate(-60%, -60%); } to { transform: translate(60%, 60%); } }
+    @media (prefers-reduced-motion: reduce) { .foil-shimmer::after { animation: none; } }
 
     #terms { width: min(1040px, calc(100% - 32px)); }
     #terms h2 { font-size: 26px; text-align: center; }
@@ -569,6 +570,7 @@
     .price-chart .grid { stroke: var(--rule); stroke-width: 1; }
     .price-chart .tick { fill: var(--ink-faint); font-size: 12px; font-family: inherit; font-variant-numeric: tabular-nums; }
     .price-chart .line { fill: none; stroke: var(--link); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .price-chart .est { fill: none; stroke: var(--link); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; opacity: .45; }
     .price-chart .gap { fill: none; stroke: var(--link); stroke-width: 2; stroke-dasharray: 2 5; stroke-linecap: round; opacity: .7; }
     .price-chart .cross { stroke: var(--ink-faint); stroke-width: 1; }
     .price-chart .dot { fill: var(--link); stroke: var(--paper); stroke-width: 2; }
@@ -1099,6 +1101,45 @@
             <div class="chips type-filter" id="price-finishes" role="group" aria-label="Finish"></div>
             <div class="chips type-filter" id="price-bands" role="group" aria-label="Price"></div>
           </div>
+          <form class="filters-form" id="price-form">
+            <details class="filters" id="price-filters">
+              <summary><span class="label">Filters</span><span class="badge" id="price-filter-count" hidden></span></summary>
+              <div class="filter-body">
+                <fieldset>
+                  <legend class="label">Color identity <span class="legend-note">— cards of exactly these colors</span></legend>
+                  <div class="pips">
+                    <label class="pip pip-w" title="White"><input type="checkbox" name="c" value="W" aria-label="White"><span aria-hidden="true">W</span></label>
+                    <label class="pip pip-u" title="Blue"><input type="checkbox" name="c" value="U" aria-label="Blue"><span aria-hidden="true">U</span></label>
+                    <label class="pip pip-b" title="Black"><input type="checkbox" name="c" value="B" aria-label="Black"><span aria-hidden="true">B</span></label>
+                    <label class="pip pip-r" title="Red"><input type="checkbox" name="c" value="R" aria-label="Red"><span aria-hidden="true">R</span></label>
+                    <label class="pip pip-g" title="Green"><input type="checkbox" name="c" value="G" aria-label="Green"><span aria-hidden="true">G</span></label>
+                    <label class="pip pip-c" title="Colorless"><input type="checkbox" name="c" value="C" aria-label="Colorless"><span aria-hidden="true">C</span></label>
+                  </div>
+                </fieldset>
+                <div class="field-row">
+                  <div class="field">
+                    <span class="label" id="price-mv-label">Mana value</span>
+                    <span class="range" role="group" aria-labelledby="price-mv-label">
+                      <input type="number" name="min" min="0" max="20" inputmode="numeric" placeholder="min" aria-label="Minimum mana value">
+                      to
+                      <input type="number" name="max" min="0" max="20" inputmode="numeric" placeholder="max" aria-label="Maximum mana value">
+                    </span>
+                  </div>
+                  <label class="field">
+                    <span class="label">Format</span>
+                    <select name="f" id="price-format"><option value="">Any format</option></select>
+                  </label>
+                  <label class="field">
+                    <span class="label">Set <span class="legend-note">— the printing's</span></span>
+                    <input id="price-set" list="sets" placeholder="Any set" autocomplete="off">
+                  </label>
+                </div>
+                <div class="filter-actions">
+                  <a href="?prices" id="clear-price-filters">Clear filters</a>
+                </div>
+              </div>
+            </details>
+          </form>
           <p class="muted trend-summary" id="price-summary" role="status"></p>
 
           <details class="panel" open>
@@ -1124,7 +1165,7 @@
             <div class="gallery" id="reserved"></div>
             <div class="more-wrap"><button id="more-reserved" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
-          <p class="muted deck-lede price-source">Prices are TCGplayer's, through <a href="https://scryfall.com">Scryfall</a> and <a href="https://mtgjson.com">MTGJSON</a>, in US dollars converted to yours. Each is the median of its last 3 days, so one odd sale doesn't make a card rise or fall.</p>
+          <p class="muted deck-lede price-source">Prices are TCGplayer's, through <a href="https://scryfall.com">Scryfall</a> and <a href="https://mtgjson.com">MTGJSON</a>, in US dollars converted to yours. Each is the median of its last 3 days, so one odd sale doesn't make a card rise or fall. Prices aren't split by condition, so a card that rarely sells can swing with which copies sold.</p>
         </div>
       </section>
       <section class="deck-view" id="tournaments-view" hidden>

@@ -12,3 +12,4 @@ __pycache__/
 # Wrangler (Cloudflare) local state
 .wrangler/
 site/prices/
+goldfish.jsonl
