@@ -523,8 +523,10 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
             else:  # one of several printings of the name in the set: its page says which is which
                 if (s, name) not in variants:
                     variants[s, name] = goldfish_variants(slug_for(set_name), name)
-                card_id = next((v for (_, n, f), v in variants[s, name].items()
-                                if n == number and f == foil and f"[{codes[s]}]" in v), None)
+                # By its collector number, or else without the mark after it (Seventh Edition's
+                # foils are 325★ at Scryfall, 325 there); a wrong one fails the price check below
+                card_id = next((v for num in (number, number.rstrip("★†zsp")) for (_, n, f), v in variants[s, name].items()
+                                if n == num and f == foil and f"[{codes[s]}]" in v), None)
             prices = goldfish_history(card_id) if card_id else {}
             row = {"id": i, "finish": finish, "card": card_id}
             # Its latest price should be about ours: otherwise it's another printing. Within a factor
