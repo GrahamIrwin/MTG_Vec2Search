@@ -426,15 +426,21 @@ def goldfish_sets(printings=PRINTINGS_FILE):
     return codes
 
 
-def goldfish_variants(set_name, name):
+def goldfish_variants(slug, name):
     """{(its set slug, collector number, foil): its card id} for every printing of a card, from one
-    of its price pages (for printings that share a name with others in their set)."""
-    page = goldfish_get(f"/price/{urllib.parse.quote_plus(set_name)}/{urllib.parse.quote_plus(name)}")
+    of its price pages, found by its set's name there (`slug`, "Kamigawa+Neon+Dynasty") and the
+    card's without punctuation (for printings that share a name with others in their set). Where
+    more than one shares a number (a prerelease stamp's), the plain one."""
+    if not slug:
+        return {}
+    plain = urllib.parse.quote_plus(re.sub(r"[^\w\s-]", "", name))
+    page = goldfish_get(f"/price/{slug}/{plain}")
     found = {}
     for card_id, href in re.findall(r'data-card-id="([^"]*)"[^>]*href="(/price/[^"]*)"', page or ""):
         m = re.match(r"/price/([^/]+)/([^/]+)/(.*)", href)
-        if m:
-            found[m.group(1), m.group(2), m.group(3).endswith("-foil")] = html.unescape(card_id)
+        key = m and (m.group(1), m.group(2), m.group(3).endswith("-foil"))
+        if key and (key not in found or "<" not in card_id):
+            found[key] = html.unescape(card_id)
     return found
 
 
@@ -473,6 +479,10 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
     start, null for none]}, or "miss" when it has none that matches ours), so it can stop and go on."""
     stop = time.time() + hours * 3600 if hours else None
     hist, codes = load(), goldfish_sets(printings)
+    # Its card pages go by its sets' names: each of ours by name, or else the one that holds it
+    slugs = {fold(urllib.parse.unquote_plus(x)): x for x in set(re.findall(r'href="/sets/([^"#?]+)"', goldfish_get("/sets")))}
+    slug_for = lambda set_name: slugs.get(fold(set_name)) or next(
+        (x for k, x in slugs.items() if fold(set_name) in k or k in fold(set_name)), None)
     last = max(hist["days"])
     done = {(r["id"], r["finish"]) for r in goldfish_rows(path)}
     if os.path.exists(path):  # a line cut off by stopping it mid-write: gone before adding more
@@ -512,7 +522,7 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
                 card_id = f"{name} [{codes[s]}]" + (" (F)" if foil else "")
             else:  # one of several printings of the name in the set: its page says which is which
                 if (s, name) not in variants:
-                    variants[s, name] = goldfish_variants(set_name, name)
+                    variants[s, name] = goldfish_variants(slug_for(set_name), name)
                 card_id = next((v for (_, n, f), v in variants[s, name].items()
                                 if n == number and f == foil and f"[{codes[s]}]" in v), None)
             prices = goldfish_history(card_id) if card_id else {}
