@@ -43,6 +43,7 @@ jobs:
       # Prices tab and card details' price charts are missing; everything else deploys
       - run: |
           gh release download price-history --pattern prices.jsonl.gz
+          gh release download price-history --pattern goldfish.jsonl.gz || echo "No estimates between our days yet"
           python3 build_prices.py site
         continue-on-error: true
         env:

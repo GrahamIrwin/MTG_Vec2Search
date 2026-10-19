@@ -13,3 +13,4 @@ __pycache__/
 .wrangler/
 site/prices/
 goldfish.jsonl
+goldfish.jsonl.gz

@@ -257,19 +257,27 @@ time, a few KB after that).
    says so.
 
 7. **Prices** (`?prices`) shows the printings whose prices rose and fell the most over 7, 30 or
-   90 days or a year, and the reserve list, from the price history below. Filters for the finish
-   (nonfoil, or foil and etched) and a price ("$5 and up": at least that on both days, so a 10-cent
-   card doesn't top the list going to $5) go in the address bar (`?prices&w=90&finish=foil&min=20`).
+   90 days or a year, and the reserve list, from the price history below. The finish (nonfoil, or
+   foil and etched), a price ("$5 and up": at least that on both days, so a 10-cent card doesn't
+   top the list going to $5) and **Filters** like the card search's (color identity, mana value,
+   format, and the printing's set) go in the address bar (`?prices&w=90&finish=foil&price=20&c=G`).
+   The prices to pick are round amounts of the visitor's currency (C$1, C$5, C$20, C$100), each
+   the nearest 1, 2 or 5 times a power of ten to US$1, $5, $20 and $100. Foil printings' tiles
+   shimmer like the foil in a card's details, which open on the foil price.
    - `build_prices.py site` writes `site/prices/`. A printing's price there is the median of its
      last 3 days within a week, so one odd day doesn't make it rise or fall. `movers-<days>.json`
-     keeps the 250 biggest rises and falls of each finish and price band ($1, $5, $20, $100), so
-     the top of "$5 and up" is the top of its bands put together (about 240 KB a period).
+     keeps the 150 biggest rises and falls of each finish and band of prices (from 50 cents to
+     $200 and up, 9 bands), and the size of change each band's list stops at. The page cuts a list
+     where the first of its bands runs out, so a list for any amount is never missing a printing
+     (about 300 KB a period).
    - **Reserve list**: one of every card on it (its cheapest nonfoil printing) over time, and each
      printing, rising, falling or most expensive.
    - A card's details chart its printing's price (nonfoil or foil, as picked) over 3 months, a
-     year or all of it, from `prices/p/<first 3 characters of its Scryfall id>.json` (4,096 files
-     of about 20 KB). Lines across more than 3 weeks without prices are dashed: the backfill is
-     single days before mid-2026.
+     year, 3 years or all of it, from `prices/p/<first 3 characters of its Scryfall id>.json`
+     (4,096 files). Between our days, a lighter line is estimated (below); lines across
+     stretches with no prices at all are dashed.
+   - Prices aren't split by condition, so a card that rarely sells (Tabernacle) can swing with
+     which copies sold; the page says so.
 
 ## Updating card data
 
@@ -322,8 +330,23 @@ and euros (Cardmarket). The Prices tab and card details read it (see **Prices** 
   MTGJSON 4's `AllPrintings` (a day each, back to November 2020), then MTGJSON's current 90 days.
   Run it again any time: it only fetches files it hasn't imported (or found cut off).
   `--no-upload` keeps it local.
-- That came to 261 days, from November 2020, for about 108,000 printings (52 MB). Where Scryfall
-  and MTGJSON both have a week, their prices match (the same median, 97% of US prices within 10%).
+  It also reads two Hugging Face datasets: MTGJSON's 90 days as of September 2026 (every day from
+  June 22, 2026), and Scryfall's `default_cards` uploaded now and then from December 2025 to March
+  2026 (a day each, the day it was uploaded). Those are Parquet files, so they need `pyarrow`
+  (`pip install pyarrow`); nothing else does.
+- Where Scryfall and MTGJSON both have a week, their prices match (the same median, 97% of US
+  prices within 10%).
+- **Estimates between our days**: `python build_prices.py goldfish --hours 24` fetches another
+  price guide's daily history (back to 2010) of every printing at 50 cents or more and the whole
+  reserve list, the reserve list first, then the priciest, one request every 2 seconds, into
+  `goldfish.jsonl` (a line per printing and finish as it arrives: stop and run it again any time).
+  It finds each printing by the guide's set codes (`goldfish_sets.json`, from its set pages, by
+  name or else by code) and, for a name printed more than once in a set, the card's page. A
+  history whose latest price isn't near ours (within a factor of 2, or 5 when the printing is
+  sure) is taken for another printing and skipped. Its prices are its own measure, 0 to 20% off
+  TCGplayer's depending on the year, so they're never stored as ours: `site` scales them to meet
+  ours on each of our days (the ratio a straight line from one of our days to the next) and uses
+  them only between, marked as estimates.
 - Only changes are stored: each printing's prices are lists of `[day, cents]`, a point only where
   the price changed since the day before (null when it stopped having one). The first line lists
   the days and where each came from. A day with none of a price at all (MTGJSON has a few days

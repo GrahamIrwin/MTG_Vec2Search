@@ -392,29 +392,36 @@ def fold(name):
 
 
 def goldfish_sets(printings=PRINTINGS_FILE):
-    """{Scryfall set code: its set code}, matched by set name, read from each of its set pages
-    (cached in GOLDFISH_SETS: about 350 pages)."""
+    """{Scryfall set code: its set code}, matched by set name, or else by set code ("Planechase 2012
+    Edition" is PC2 both places), from its set pages. GOLDFISH_SETS keeps them and the pages it
+    read ("_read"), so each is read once: new sets are read as they come."""
+    codes = {}
     if os.path.exists(GOLDFISH_SETS):
         with open(GOLDFISH_SETS, encoding="utf-8") as f:
-            return json.load(f)
-    ours = {}
+            codes = json.load(f)
+    read = set(codes.pop("_read", []))
+    ours, our_codes = {}, set()
     with gzip.open(printings, "rt", encoding="utf-8") as f:
         for c in map(json.loads, f):
             ours.setdefault(fold(c["set_name"]), c["set"])
-    index = goldfish_get("/sets")
-    slugs = sorted({s for s in re.findall(r'href="/sets/([^"#?]+)"', index)})
-    codes = {}
-    for k, slug in enumerate(slugs):
+            our_codes.add(c["set"])
+    name = lambda slug: urllib.parse.unquote_plus(slug)
+    slugs = sorted(set(re.findall(r'href="/sets/([^"#?]+)"', goldfish_get("/sets"))))
+    if not read and codes:  # kept before it kept the pages it read: the ones matched by name were
+        read = {slug for slug in slugs if ours.get(fold(name(slug))) in codes}
+    todo = [slug for slug in slugs if slug not in read]
+    for k, slug in enumerate(todo):
         page = goldfish_get(f"/sets/{slug}")
         m = page and (re.search(r"data-react-props='([^']*)'", page) or re.search(r'data-react-props="([^"]*)"', page))
         cards = json.loads(html.unescape(m.group(1))).get("cards", []) if m else []
-        mine = ours.get(fold(urllib.parse.unquote_plus(slug)))
-        if cards and mine:
-            codes[mine] = cards[0]["set"]
-        print(f"  set {k + 1}/{len(slugs)} {urllib.parse.unquote_plus(slug)}: "
-              f"{codes.get(mine, 'no match')}", flush=True)
+        theirs = cards[0]["set"] if cards else None
+        mine = ours.get(fold(name(slug))) or (theirs.lower() if theirs and theirs.lower() in our_codes else None)
+        if theirs and mine and mine not in codes:
+            codes[mine] = theirs
+        read.add(slug)
+        print(f"  set {k + 1}/{len(todo)} {name(slug)} ({theirs}): {mine or 'no match'}", flush=True)
     with open(GOLDFISH_SETS, "w", encoding="utf-8") as f:
-        json.dump(codes, f, indent=0, sort_keys=True)
+        json.dump({**codes, "_read": sorted(read)}, f, indent=0, sort_keys=True)
     return codes
 
 
@@ -438,6 +445,26 @@ def goldfish_history(card_id):
     return {d: round(float(p) * 100) for d, p in re.findall(r"(\d{4}-\d\d-\d\d), ([\d.]+)", js or "")}
 
 
+def goldfish_rows(path=GOLDFISH_FILE):
+    """goldfish_crawl's lines, less a last one cut off by stopping it mid-write. Read from the
+    release's gzipped copy (path + ".gz") when there's no file of them here (the deploy)."""
+    if not os.path.exists(path) and os.path.exists(path + ".gz"):
+        with gzip.open(path + ".gz", "rt", encoding="utf-8") as f:
+            return [json.loads(line) for line in f]
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    rows = []
+    for k, line in enumerate(lines):
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            if k < len(lines) - 1:
+                raise
+    return rows
+
+
 def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PRINTINGS_FILE):
     """Fetch the daily history of every printing (and finish) at `least` cents or more on the last
     day of ours, and every reserve list printing: the reserve list first, then the priciest. Each
@@ -446,10 +473,12 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
     stop = time.time() + hours * 3600 if hours else None
     hist, codes = load(), goldfish_sets(printings)
     last = max(hist["days"])
-    done = set()
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            done = {(r["id"], r["finish"]) for r in map(json.loads, f)}
+    done = {(r["id"], r["finish"]) for r in goldfish_rows(path)}
+    if os.path.exists(path):  # a line cut off by stopping it mid-write: gone before adding more
+        with open(path, "rb+") as f:
+            data = f.read()
+            if data and not data.endswith(b"\n"):
+                f.truncate(data.rfind(b"\n") + 1)
     cards, in_set = {}, defaultdict(int)
     with gzip.open(printings, "rt", encoding="utf-8") as f:
         for c in map(json.loads, f):
@@ -487,9 +516,12 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
                                 if n == number and f == foil and f"[{codes[s]}]" in v), None)
             prices = goldfish_history(card_id) if card_id else {}
             row = {"id": i, "finish": finish, "card": card_id}
-            # Its latest price should be about ours: otherwise it's another printing, or a mismatch
+            # Its latest price should be about ours: otherwise it's another printing. Within a factor
+            # of 2 for one of a name's printings in a set; a sure one only within 5, as cards that
+            # rarely sell (Alpha's) can be priced very differently. The estimates are scaled anyway
             latest = prices[max(prices)] if prices else None
-            if not latest or not 0.5 <= latest / -minus_now <= 2:
+            within = 2 if in_set[s, name] > 1 else 5
+            if not latest or not 1 / within <= latest / -minus_now <= within:
                 row["miss"] = "none" if not latest else f"{latest} against our {-minus_now}"
                 missed += 1
             else:
@@ -513,13 +545,8 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
 def goldfish_series(path=GOLDFISH_FILE):
     """{(printing, finish): (first day, [cents a day from it, None for none])} of the histories
     goldfish_crawl fetched (days are days since EPOCH)."""
-    out = {}
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            for r in map(json.loads, f):
-                if r.get("cents"):
-                    out[r["id"], r["finish"]] = ((date.fromisoformat(r["start"]) - EPOCH).days, r["cents"])
-    return out
+    return {(r["id"], r["finish"]): ((date.fromisoformat(r["start"]) - EPOCH).days, r["cents"])
+            for r in goldfish_rows(path) if r.get("cents")}
 
 
 def estimator(real, gf):
@@ -692,9 +719,10 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
           f"{len(info):,} printings' prices ({sum(1 for _, e in prices.values() if e):,} with estimates between)", flush=True)
 
 
-def share(path=HISTORY):
+def share(path=HISTORY, goldfish=GOLDFISH_FILE):
     """Upload the history to the release, after merging in the days the release's copy has that this
-    one doesn't (another run's), so nothing there is lost. Returns whether it uploaded."""
+    one doesn't (another run's), so nothing there is lost; and goldfish_crawl's histories, gzipped,
+    with the printings the release's copy has that these don't. Returns whether it uploaded."""
     print(f"\nSharing with the {RELEASE} release...", flush=True)
     try:
         listed = subprocess.run(["gh", "release", "view", RELEASE, "--json", "assets", "-q", ".assets[].name"],
@@ -708,9 +736,26 @@ def share(path=HISTORY):
                     raise RuntimeError("couldn't download the release to merge with")
                 print(f"Merged in {merge(hist, load(os.path.join(tmp, path)))} days from the release", flush=True)
             save(hist, path)
-        if subprocess.run(["gh", "release", "upload", RELEASE, path, "--clobber"]).returncode:
+        files = [path]
+        if os.path.exists(goldfish):
+            rows = goldfish_rows(goldfish)
+            if goldfish + ".gz" in listed.stdout.split():
+                with tempfile.TemporaryDirectory() as tmp:
+                    if subprocess.run(["gh", "release", "download", RELEASE, "--dir", tmp,
+                                       "--pattern", goldfish + ".gz"]).returncode:
+                        raise RuntimeError("couldn't download the release to merge with")
+                    have = {(r["id"], r["finish"]) for r in rows}
+                    theirs = [r for r in goldfish_rows(os.path.join(tmp, goldfish)) if (r["id"], r["finish"]) not in have]
+                rows += theirs
+                with open(goldfish, "a", encoding="utf-8") as f:
+                    f.writelines(json.dumps(r, separators=(",", ":")) + "\n" for r in theirs)
+            with gzip.open(goldfish + ".gz", "wt", encoding="utf-8") as f:
+                f.writelines(json.dumps(r, separators=(",", ":")) + "\n" for r in rows)
+            files.append(goldfish + ".gz")
+        if subprocess.run(["gh", "release", "upload", RELEASE, *files, "--clobber"]).returncode:
             raise RuntimeError("the upload failed")
-        print(f"Uploaded {len(hist['days'])} days.", flush=True)
+        print(f"Uploaded {len(hist['days'])} days" + (f" and {len(rows):,} histories" if len(files) > 1 else "") + ".",
+              flush=True)
         return True
     except (OSError, RuntimeError) as e:  # OSError: gh isn't installed
         print(f"Couldn't share it ({e}). Everything is saved here; to try again:\n"
