@@ -5,12 +5,14 @@ is never replaced.
     python build_prices.py snapshot    # add the day's prices from default_cards.jsonl.gz (the daily crawl does this)
     python build_prices.py backfill    # add every older day we can find: the Wayback Machine's copies of
                                        # Scryfall's bulk files and MTGJSON's price files, and MTGJSON's last 90 days
-    python build_prices.py share       # merge with the release and upload (snapshot and backfill do this)
+    python build_prices.py share       # merge with the release and upload (snapshot and backfill do this
+                                       # unless given --no-upload)
 
 The file's first line is {"days": {day: where its prices came from}, "sources": [files imported]}.
 Then a line per printing (Scryfall id), with a series per price: [[day, cents], ...], a point only
 where the price changed since the day before it in "days" (null when it stopped having one). A
-printing's price on a day in "days" is its series' last point on or before that day.
+printing's price on a day in "days" is its series' last point on or before that day. A day without
+any of a price (a source that missed Cardmarket's that day, say) keeps every printing's one before.
 """
 import bisect
 import bz2
@@ -90,14 +92,17 @@ def put(series, day, c):
 
 def add_day(hist, day, source, snap):
     """Add a day's prices, snap = {printing: {field: cents}}; a printing or price it lacks had none
-    that day. Days can come in any order. Returns whether the day was new."""
+    that day, unless no printing has that price: then the source didn't collect it that day (MTGJSON
+    has days without Cardmarket's), and each printing keeps the one before. Days can come in any
+    order. Returns whether the day was new."""
     if day in hist["days"]:
         return False
     after = min((d for d in hist["days"] if d > day), default=None)
     hist["days"][day] = source
+    collected = {f for v in snap.values() for f in v}
     for i in set(hist["series"]) | set(snap):
         s, new = hist["series"].setdefault(i, {}), snap.get(i, {})
-        for field in set(s) | set(new):
+        for field in (set(s) | set(new)) & collected:
             series = s.setdefault(field, ([], []))
             c = new.get(field)
             if c == at(series, day):  # the price it already carried
@@ -159,6 +164,30 @@ def mtgjson_days(data, ids):
                 for day, price in (retail.get(finish) or {}).items():
                     days[day].setdefault(i, {})[field] = round(price * 100)
     return days
+
+
+def mtgjson_csv(text):
+    """MTGJSON's cardPrices.csv as the AllPrices data it has the same prices as."""
+    data = {}
+    for r in csv.DictReader(io.StringIO(text)):
+        if r["gameAvailability"] == "paper" and r["providerListing"] == "retail":
+            provider = data.setdefault(r["uuid"], {"paper": {}})["paper"].setdefault(r["priceProvider"], {"retail": {}})
+            provider["retail"].setdefault(r["cardFinish"], {})[r["date"]] = float(r["price"])
+    return data
+
+
+def mtgjson4_days(printings):
+    """{day: {printing: {field: cents}}} from MTGJSON 4's AllPrintings: TCGplayer's prices. A few
+    printings kept a price from weeks before, so only the day nearly all have counts."""
+    days = defaultdict(dict)
+    for s in printings.get("data", printings).values():
+        for c in s.get("cards", []):
+            for key, field in (("paper", "usd"), ("paperFoil", "usd_foil")):
+                for day, price in ((c.get("prices") or {}).get(key) or {}).items():
+                    if c.get("scryfallId") and price:
+                        days[day].setdefault(c["scryfallId"], {})[field] = round(price * 100)
+    most = max(days, key=lambda d: len(days[d]), default=None)
+    return {most: days[most]} if most else {}
 
 
 def get(url, tries=4):
@@ -227,11 +256,14 @@ def backfill():
     files = [(t, u, "scryfall") for t, u in archived("data.scryfall.io/default-cards/*", 10_000_000)
              + archived("data.scryfall.io/all-cards/*", 10_000_000)]
     files += [(t, u, "mtgjson") for t, u in archived("mtgjson.com/api/v5/AllPrices*", 1_000_000)
-              if u.endswith((".json", ".json.gz", ".json.xz", ".json.bz2", ".json.zip"))]
+              + archived("mtgjson.com/api/v5/csv/cardPrices.csv*", 1_000_000)
+              if u.endswith((".json", ".csv")) or re.search(r"\.(json|csv)\.(gz|xz|bz2|zip)$", u)]
+    # MTGJSON 4's AllPrintings had each printing's TCGplayer prices in it
+    files += [(t, u, "mtgjson4") for t, u in archived("mtgjson.com/json/AllPrintings.json*", 10_000_000)]
     files.sort(key=lambda f: (f[0][:8], "all-cards" in f[1], f[0]))
     for t, url, kind in files + [(today, f"{MTGJSON}/AllPrices.json.gz", "today")]:
-        key = f"{t[:8]}/{url.split('.json')[0]}"  # the same file in another compression is the same days
-        if key in hist["sources"]:
+        key = f"{t[:8]}/{url.split('.json')[0].split('.csv')[0]}"  # in another compression it's the same days
+        if key in hist["sources"] or f"truncated: {t}/{url}" in hist["sources"]:
             continue
         made = re.search(r"-(\d{4})(\d\d)(\d\d)\d{6}\.json", url)  # default-cards-20240506090530.json
         day = "-".join(made.groups()) if kind == "scryfall" else None
@@ -243,17 +275,26 @@ def backfill():
             if kind == "scryfall":
                 add_day(hist, day, "scryfall", scryfall_snapshot(cards_in(text)))
             else:
-                if ids is None:
-                    got = unpack(get(f"{MTGJSON}/csv/cardIdentifiers.csv.gz"), "ids.csv.gz")
-                    ids = {r["uuid"]: r["scryfallId"] for r in csv.DictReader(io.StringIO(got)) if r["scryfallId"]}
-                days = mtgjson_days(json.loads(text)["data"], ids)
+                if kind == "mtgjson4":
+                    days = mtgjson4_days(json.loads(text))
+                else:
+                    if ids is None:
+                        got = unpack(get(f"{MTGJSON}/csv/cardIdentifiers.csv.gz"), "ids.csv.gz")
+                        ids = {r["uuid"]: r["scryfallId"] for r in csv.DictReader(io.StringIO(got)) if r["scryfallId"]}
+                    data = mtgjson_csv(text) if ".csv" in url else json.loads(text)["data"]
+                    days = mtgjson_days(data, ids)
                 del text
                 added = [d for d in sorted(days) if add_day(hist, d, "mtgjson", days[d])]
                 print(f"  {len(added)} new days of {len(days)}" + (f": {added[0]} to {added[-1]}" if added else ""),
                       flush=True)
-        except (OSError, ValueError, EOFError, zipfile.BadZipFile) as e:  # a truncated copy
+        except OSError as e:  # tried again next time
             print(f"  skipped: {e}", flush=True)
-            continue  # another compression of it may work
+            continue
+        except (ValueError, EOFError, zipfile.BadZipFile) as e:  # a truncated copy: never tried again
+            print(f"  skipped: {e}", flush=True)
+            hist["sources"].append(f"truncated: {t}/{url}")  # (another compression of it may work)
+            save(hist)
+            continue
         hist["sources"].append(key)
         save(hist)
         time.sleep(5)  # the Wayback Machine is free; go easy on it
@@ -294,4 +335,7 @@ if __name__ == "__main__":
         snapshot()
     elif cmd == "backfill":
         backfill()
-    sys.exit(0 if share() else 1)
+    if "--no-upload" in sys.argv:
+        print("Not uploaded (--no-upload). To upload: python build_prices.py share")
+    else:
+        sys.exit(0 if share() else 1)

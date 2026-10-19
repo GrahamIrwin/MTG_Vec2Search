@@ -301,12 +301,19 @@ and euros (Cardmarket). The site doesn't use it yet.
 - **Crawl decks** adds the day's prices from Scryfall's `default_cards` every day
   (`build_prices.py snapshot`), dated by when Scryfall made the file.
 - `python build_prices.py backfill` adds every older day it can find: the Wayback Machine's copies of
-  Scryfall's bulk files (a day each, back to 2022) and of MTGJSON's `AllPrices` (90 days each),
-  then MTGJSON's current 90 days. Run it again any time: it only fetches files it hasn't imported.
+  Scryfall's bulk files (a day each, 2023 on; older ones are cut off or have no prices), of
+  MTGJSON's `AllPrices` (90 days each, from late 2021 and early 2023), its `cardPrices.csv` and
+  MTGJSON 4's `AllPrintings` (a day each, back to November 2020), then MTGJSON's current 90 days.
+  Run it again any time: it only fetches files it hasn't imported (or found cut off).
+  `--no-upload` keeps it local.
+- That came to 261 days, from November 2020, for about 108,000 printings (52 MB). Where Scryfall
+  and MTGJSON both have a week, their prices match (the same median, 97% of US prices within 10%).
 - Only changes are stored: each printing's prices are lists of `[day, cents]`, a point only where
   the price changed since the day before (null when it stopped having one). The first line lists
-  the days and where each came from. A day already in it is never replaced, and both commands merge
-  with the release's copy before uploading, like the deck corpus.
+  the days and where each came from. A day with none of a price at all (MTGJSON has a few days
+  without Cardmarket's, or TCGplayer's) keeps every printing's price from the day before. A day
+  already in it is never replaced, and both commands merge with the release's copy before
+  uploading, like the deck corpus.
 
 ## The deck link Worker
 
