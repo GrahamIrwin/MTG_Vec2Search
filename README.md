@@ -376,7 +376,8 @@ and euros (Cardmarket). The Prices tab and card details read it (see **Prices** 
 - **Estimates between our days**: `python build_prices.py goldfish --hours 24` fetches another
   price guide's daily history (back to 2010) of every printing at 50 cents or more and the whole
   reserve list, the reserve list first, then the priciest, one request every 2 seconds, into
-  `goldfish.jsonl` (a line per printing and finish as it arrives: stop and run it again any time).
+  `goldfish.jsonl` (a line per printing and finish as it arrives: stop and run it again any time;
+  `python build_prices.py goldfish --stop` stops a crawl running elsewhere, or Ctrl+C it).
   It finds each printing by the guide's set codes (`goldfish_sets.json`, from its set pages, by
   name or else by code) and, for a name printed more than once in a set, the card's page. A
   history whose latest price isn't near ours (within a factor of 2, or 5 when the printing is

@@ -14,3 +14,4 @@ __pycache__/
 site/prices/
 goldfish.jsonl
 goldfish.jsonl.gz
+goldfish.stop

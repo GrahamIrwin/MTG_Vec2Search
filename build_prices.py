@@ -11,6 +11,7 @@ is never replaced.
     python build_prices.py site        # write site/prices/ (after build_index.py: it uses its card numbers)
     python build_prices.py goldfish --hours 24   # fetch daily histories to fill the days between ours
                                                  # (resumable: stop and run it again any time)
+    python build_prices.py goldfish --stop       # stop a crawl that's running (or Ctrl+C it)
 
 The file's first line is {"days": {day: where its prices came from}, "sources": [files imported]}.
 Then a line per printing (Scryfall id), with a series per price: [[day, cents], ...], a point only
@@ -370,6 +371,7 @@ def backfill():
 GOLDFISH = "https://www.mtggoldfish.com"
 GOLDFISH_FILE = "goldfish.jsonl"
 GOLDFISH_SETS = "goldfish_sets.json"  # Scryfall set code -> its set code, from its set pages
+GOLDFISH_STOP = "goldfish.stop"  # there: the crawl stops after the printing it's on (goldfish --stop)
 GOLDFISH_DELAY = 2.0  # seconds between requests
 GOLDFISH_HEADERS = {"User-Agent": "MTG_Vec2Search/1.0 (+https://github.com/GrahamIrwin/MTG_Vec2Search)"}
 _goldfish_next = 0.0
@@ -525,6 +527,10 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
         for k, (_, minus_now, i, finish) in enumerate(queue):
             if stop and time.time() > stop:
                 print("Out of time; run it again to go on.", flush=True)
+                break
+            if os.path.exists(GOLDFISH_STOP):
+                os.remove(GOLDFISH_STOP)
+                print("Stopped (goldfish --stop); run it again to go on.", flush=True)
                 break
             name, set_name, s, number, _ = cards[i]
             foil = finish == "usd_foil"
@@ -916,8 +922,16 @@ if __name__ == "__main__":
     if cmd not in ("snapshot", "backfill", "share", "site", "goldfish"):
         sys.exit(__doc__)
     if cmd == "goldfish":
+        if "--stop" in sys.argv:  # tells a crawl that's running to stop
+            open(GOLDFISH_STOP, "w").close()
+            sys.exit("A running crawl stops after the printing it's on (within a few seconds).")
+        if os.path.exists(GOLDFISH_STOP):
+            os.remove(GOLDFISH_STOP)  # left by a --stop with no crawl running
         hours = sys.argv[sys.argv.index("--hours") + 1] if "--hours" in sys.argv else None
-        sys.exit(goldfish_crawl(float(hours) if hours else None))
+        try:
+            sys.exit(goldfish_crawl(float(hours) if hours else None))
+        except KeyboardInterrupt:  # each printing is saved as it arrives: nothing's lost
+            sys.exit("Stopped; run it again to go on.")
     if cmd == "site":
         sys.exit(site_data(load(), by_popularity(load_cards()), tags=load_oracle_tags()))
     if cmd == "snapshot":
