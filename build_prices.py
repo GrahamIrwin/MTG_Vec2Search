@@ -366,7 +366,7 @@ _goldfish_next = 0.0
 
 def goldfish_get(path, **headers):
     """GET a page of its site, at most one request per GOLDFISH_DELAY, waiting out errors that pass
-    (429, 5xx). Returns the text, or None when it isn't there (404)."""
+    (429, 5xx). Returns the text, or None when it isn't there (404 and the like)."""
     global _goldfish_next
     for k in range(6):
         time.sleep(max(0.0, _goldfish_next - time.time()))
@@ -376,10 +376,9 @@ def goldfish_get(path, **headers):
             with urllib.request.urlopen(req, timeout=60) as r:
                 return r.read().decode("utf-8")
         except urllib.error.HTTPError as e:
-            if e.code == 404:
+            if e.code not in (429, 500, 502, 503, 504):  # 404, a page that redirects in a loop (301): not there
+                print(f"  {path}: {e.code}", flush=True)
                 return None
-            if e.code not in (429, 500, 502, 503, 504):
-                raise
             print(f"  {e}; waiting {60 * (k + 1)}s", flush=True)
             time.sleep(60 * (k + 1))
         except (OSError, http.client.HTTPException) as e:
