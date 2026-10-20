@@ -641,8 +641,16 @@ async function findSimilar(key) {
   const parsed = parseDecklist(deck.list, lookup);
   // The commander: as marked in the list, or else the most-played commander among its cards
   let commanders = parsed.commanders;
-  const guessed = !commanders.length && decks.commanders.find(([k]) => !k.includes("-") && parsed.cards.has(+k));
-  if (guessed) commanders = [+guessed[0]];
+  // None marked: the cards at the bottom (Moxfield's exports put the commanders there), if they're
+  // a commander with decks; or else a guess: the most played pair of partners, or commander, in it
+  if (!commanders.length && files.has([...parsed.possible].sort((a, b) => a - b).join("-"))) {
+    commanders = parsed.possible;
+    for (const c of commanders) parsed.cards.add(c);
+  }
+  const has = k => k.split("-").every(c => parsed.cards.has(+c));
+  const guessed = !commanders.length && (decks.commanders.find(([k]) => k.includes("-") && has(k))
+    ?? decks.commanders.find(([k]) => !k.includes("-") && has(k)));
+  if (guessed) commanders = guessed[0].split("-").map(Number);
   const mine = [...parsed.cards].filter(c => !BASIC.test(names[c]) && !commanders.includes(c));
   if (!mine.length) return deckMessage("Couldn't find any card names in that list. Paste one card per line, like “1 Sol Ring”.");
 

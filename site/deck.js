@@ -21,18 +21,32 @@ export function nameLookup(names) {
   return lookup;
 }
 
-// Returns { cards: Set of card numbers, commanders: [card numbers], unknown: [lines] }
+// Returns { cards: Set of card numbers, commanders: [card numbers], possible: [card numbers], unknown: [lines] }.
+// A commander is marked (*CMDR*, an Archidekt [Commander] category or a Commander section), wherever
+// it is, a sideboard included. With none marked, `possible` are the cards at the bottom that may be
+// the commanders (findSimilar takes them if they are): Moxfield's MTGO export puts them in the
+// sideboard, plain text after a blank line, 1 or 2 of them
 export function parseDecklist(text, lookup) {
   const cards = new Set();
   const commanders = [];
   const unknown = [];
+  const sideboard = [];
+  let group = []; // the cards since the last blank line or section header
+  let groups = 0; // groups of cards before it
   let section = "deck";
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
+    if (!line) {
+      if (group.length) groups++;
+      group = [];
+      continue;
+    }
+    if (line.startsWith("#")) continue;
     const header = line.match(SECTION);
     if (header) {
       section = header[1].toLowerCase();
+      if (group.length) groups++;
+      group = [];
       continue;
     }
     const m = line.match(LINE);
@@ -44,13 +58,23 @@ export function parseDecklist(text, lookup) {
       continue;
     }
     const category = tags.split(/[,{]/)[0].trim();
-    if (OUT_OF_DECK.test(section) || /^(sideboard|maybeboard|considering)$/.test(category)) continue;
     if (section.startsWith("commander") || /\*cmdr\*/i.test(line) || category === "commander") {
       if (!commanders.includes(card)) commanders.push(card);
+      cards.add(card);
+      continue;
+    }
+    if (OUT_OF_DECK.test(section) || /^(sideboard|maybeboard|considering)$/.test(category)) {
+      if (section === "sideboard" || category === "sideboard") sideboard.push(card);
+      continue;
     }
     cards.add(card);
+    group.push(card);
   }
-  return { cards, commanders, unknown };
+  const fewAtTheEnd = list => list.length >= 1 && list.length <= 2;
+  const possible = commanders.length ? []
+    : fewAtTheEnd(sideboard) ? sideboard
+    : groups && fewAtTheEnd(group) ? group : [];
+  return { cards, commanders, possible, unknown };
 }
 
 // === Similar decks ===

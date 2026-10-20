@@ -36,6 +36,22 @@ test("Archidekt categories and *CMDR* markers pick the commander; side boards ar
   assert.deepEqual([...marked.cards].sort(), [0, 6]);
 });
 
+test("commanders at the bottom: marked ones count wherever they are; unmarked ones are possible", () => {
+  // Moxfield's MTGO export: the commanders in the sideboard, marked or not
+  const marked = parse("1 Sol Ring\n1 Island\n\nSIDEBOARD:\n1 Krenko, Mob Boss *CMDR*");
+  assert.deepEqual(marked.commanders, [6]);
+  assert.deepEqual([...marked.cards].sort(), [0, 3, 6]);
+  const sideboard = parse("1 Sol Ring\n1 Island\n\nSIDEBOARD:\n1 Krenko, Mob Boss\n1 Atraxa, Praetors' Voice");
+  assert.deepEqual(sideboard.commanders, []);
+  assert.deepEqual(sideboard.possible, [6, 1]);
+  assert.ok(!sideboard.cards.has(6), "the page adds them if they're a commander with decks");
+  // Plain text: after a blank line, at the end
+  assert.deepEqual(parse("1 Sol Ring\n1 Island\n\n1 Krenko, Mob Boss").possible, [6]);
+  assert.deepEqual(parse("1 Sol Ring\n1 Island\n1 Krenko, Mob Boss").possible, [], "no blank line: nothing to go on");
+  assert.deepEqual(parse("1 Sol Ring\n\n1 Island\n1 Krenko, Mob Boss\n1 Swords to Plowshares").possible, [], "3 at the end: not commanders");
+  assert.deepEqual(parse("1 Krenko, Mob Boss *CMDR*\n1 Sol Ring\n\n1 Island").possible, [], "one's marked");
+});
+
 // Five decks over cards 10..16; card 10 is in every deck, so it carries no weight
 const gaps = ps => ps.map((p, i) => p - (ps[i - 1] ?? 0));
 const CARDS = [10, 11, 12, 13, 14, 15, 16];
