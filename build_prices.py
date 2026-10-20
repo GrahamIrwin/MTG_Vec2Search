@@ -567,7 +567,12 @@ def estimator(real, gf):
     each of our days is the median of it and its neighbours' within 3 days, and in between a straight
     line from one to the next. None for a day it has no price on, or if it has no day in common."""
     d0, theirs = gf
-    on = lambda d: theirs[d - d0] if 0 <= d - d0 < len(theirs) else None
+
+    def on(d):  # theirs: the median of the 5 days around, so a day of a glitch (a price doubled) is gone
+        if not (0 <= d - d0 < len(theirs)) or theirs[d - d0] is None:
+            return None
+        near = sorted(c for c in theirs[max(0, d - d0 - 2):d - d0 + 3] if c is not None)
+        return near[len(near) // 2]
     both = sorted((d, math.log(c / t)) for d, c in real.items() if (t := on(d)))
     if not both:
         return lambda d: None
@@ -611,6 +616,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     ones too), so one odd day doesn't make it rise or fall."""
     days = sorted(hist["days"])
     num = [(date.fromisoformat(d) - EPOCH).days for d in days]
+    number = dict(zip(days, num))
     last = num[-1]
     gold = goldfish_series(goldfish)
     order = {c["oracle_id"]: n for n, c in enumerate(cards)}  # card numbers, in build_index.py's order
@@ -688,16 +694,39 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
         write_json(os.path.join(out_dir, f"movers-{w}.json"),
                    {**with_sets([[*r[:5], r[5 + k]] for r in top]), "bands": BANDS, "cutoffs": cutoffs})
 
-    # One of every reserve list card: on each of our days, and weekly back as far as estimates go
-    starts = [gold[i, "usd"][0] for i in on_list if (i, "usd") in gold]
+    # One of every reserve list card, each its cheapest nonfoil printing: on each of our days, and
+    # between them, weekly as far back as estimates go, the day-to-day changes of a set of printings
+    # that all have estimates (each card's cheapest of those) scaled to meet ours (as estimator()).
+    # The cheapest printing of some (Collectors' Edition's) has none, so they can't be summed as is
     observed = set(num)
-    grid = sorted(observed | set(range(last, min(starts, default=last) - 1, -7)))
-    total = []
-    for d in grid:
-        cheapest = [c for ids in reserved.values()
-                    if (c := min((p for i in ids if (i, "usd") in prices and (p := on(*prices[i, "usd"], d)) is not None),
-                                 default=None)) is not None]
-        total.append([d, sum(cheapest), len(cheapest), int(d not in observed)])
+    ours_total = {}
+    for d in num:
+        each = [c for ids in reserved.values()
+                if (c := min((p for i in ids if (i, "usd") in prices and (p := prices[i, "usd"][0].get(d)) is not None),
+                             default=None)) is not None]
+        ours_total[d] = (sum(each), len(each))
+    picked = [min(have, key=lambda i: price(*prices[i, "usd"], last) or math.inf)
+              for ids in reserved.values() if (have := [i for i in ids if (i, "usd") in prices and prices[i, "usd"][1]])]
+    total = [[d, c, n, 0] for d, (c, n) in ours_total.items()]
+    if picked:
+        first = max(gold[i, "usd"][0] for i in picked)
+        # Each printing's last price, for up to 60 days (its estimates have holes); worked out weekly
+        # and on our days, the only days shown, and the week's kept for the days between
+        sums, seen = [], {}
+        for d in range(first, last + 1):
+            if (d - first) % 7 and d not in observed:
+                sums.append(sums[-1])
+                continue
+            for i in picked:
+                if (c := on(*prices[i, "usd"], d)) is not None:
+                    seen[i] = (d, c)
+            each = [c for i in picked if (e := seen.get(i)) and d - e[0] <= 60 for c in [e[1]]]
+            sums.append(sum(each) if len(each) == len(picked) else None)
+        est = estimator({d: c for d, (c, _) in ours_total.items()}, (first, sums))
+        cards = max((n for _, n in ours_total.values()), default=0)
+        total += [[d, c, cards, 1] for d in range(last, first - 1, -7)
+                  if not any(e in observed for e in range(d - 3, d + 4)) and (c := est(d)) is not None]
+    total.sort()
     most = max((t[2] for t in total), default=0)
     total = [t for t in total if t[2] >= 0.9 * most]  # days missing a tenth of the cards would look like a fall
     write_json(os.path.join(out_dir, "reserved.json"),
@@ -719,7 +748,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
 
     shards = defaultdict(dict)
     for i in info:
-        entry = {f: [[num[bisect.bisect_left(days, d)], c] for d, c in zip(*v)]
+        entry = {f: [[number[d], c] for d, c in zip(*v)]
                  for f, v in hist["series"][i].items() if f in US}
         for f in US:
             if (i, f) in prices and prices[i, f][1] and (r := runs(prices[i, f][0], prices[i, f][1], gold[i, f][0])):

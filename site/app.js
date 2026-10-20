@@ -251,7 +251,12 @@ async function render() {
 const chunks = new Map();
 async function cardInfo(card) {
   const k = Math.floor(card / CHUNK);
-  if (!chunks.has(k)) chunks.set(k, getJson(`index/c/${k}.json`));
+  if (!chunks.has(k)) {
+    chunks.set(k, getJson(`index/c/${k}.json`).catch(err => {
+      chunks.delete(k); // a failed fetch is tried again next time, not kept
+      throw err;
+    }));
+  }
   const [name, id, back] = (await chunks.get(k))[card % CHUNK];
   return { name, id, back: !!back };
 }
@@ -2144,7 +2149,9 @@ const spanName = w => (w === 365 ? "a year" : `${w} days`);
 // "+38%", "−4.5%": a change in price, to a tenth of a percent when it's under 10%
 function priceChange(now, was) {
   const x = (now / was - 1) * 100;
-  return (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x).toFixed(Math.abs(x) < 9.95 ? 1 : 0) + "%";
+  const digits = Math.abs(x) < 9.95 ? 1 : 0;
+  return (x > 0 ? "+" : x < 0 ? "−" : "")
+    + Math.abs(x).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }) + "%";
 }
 let priceDays; // prices/days.json: the days with prices
 const getPriceDays = () => (priceDays ??= getJson("prices/days.json"));
@@ -2238,10 +2245,12 @@ function priceChart(box, points, label) {
     svgEl("text", { class: "tick", x: W - R, y: H - 6, "text-anchor": "end" }, dayName(x1)));
   // Over more than a year and a half, each new year too, where it fits between the ends
   if (x1 - x0 > 540) {
+    let shown = -Infinity; // where the last year's label went: one at most every 48px
     for (let year = new Date(Date.UTC(1993, 0, 1) + x0 * 864e5).getUTCFullYear() + 1; ; year++) {
       const d = (Date.UTC(year, 0, 1) - Date.UTC(1993, 0, 1)) / 864e5;
       if (x(d) > W - R - 110) break;
-      if (x(d) - L < 110) continue;
+      if (x(d) - L < 110 || x(d) - shown < 48) continue;
+      shown = x(d);
       root.append(svgEl("line", { class: "grid", x1: x(d), x2: x(d), y1: H - B, y2: H - B + 5 }),
         svgEl("text", { class: "tick", x: x(d), y: H - 6, "text-anchor": "middle" }, String(year)));
     }
@@ -2303,15 +2312,25 @@ async function showHistory(id, finish) {
       chipRow($("history-ranges"), HISTORY_RANGES.filter(([r]) => !r || all[0][0] < days.at(-1) - r / 2), historyRange,
         r => { historyRange = r; draw(); });
       priceChart($("history-chart"), points, `${current.name} price`);
-      const ours = points.filter(p => !p[2]).length;
+      const ours = points.filter(p => !p[2]);
       $("history-note").textContent = points.length < 2 ? "Not enough prices in this period."
-        : `${ours} days of TCGplayer prices since ${dayName(points[0][0])}.`
-          + (ours < points.length ? " The lighter line is estimated between them, from another price guide's daily prices"
+        : (ours.length ? `${ours.length} days of TCGplayer prices since ${dayName(ours[0][0])}.` : "No TCGplayer prices in this period.")
+          + (ours.length < points.length ? " The lighter line is estimated between them, from another price guide's daily prices"
             + " scaled to meet TCGplayer's." : "")
           + (points.some((p, k) => k && p[0] - points[k - 1][0] > (p[2] || points[k - 1][2] ? EST_GAP_DAYS : GAP_DAYS))
             ? " Dashed lines cross stretches with no prices." : "");
     };
     if (historyRange && all[0][0] >= days.at(-1) - historyRange / 2) historyRange = null;
+    // How much it changed: over a month, a year and as far back as it goes (2 years or more)
+    const latest = all.at(-1);
+    const before = w => all.findLast(p => p[0] <= latest[0] - w && latest[0] - w - p[0] <= Math.max(7, w / 10));
+    const spans = [[30, "in 30 days"], [365, "in a year"]].map(([w, label]) => [before(w), label])
+      .concat(latest[0] - all[0][0] > 730 ? [[all[0], `since ${year(all[0][0])}`]] : [])
+      .filter(([p]) => p && p[1] > 0);
+    $("history-change").replaceChildren(...spans.flatMap(([p, label], k) => [k ? " · " : "",
+      el("span", { className: latest[1] > p[1] ? "up" : latest[1] < p[1] ? "down" : "", textContent: priceChange(latest[1], p[1]) }),
+      ` ${label}`]));
+    $("history-change").hidden = !spans.length;
     $("price-history").hidden = false;
     draw();
   } catch (err) {
@@ -2410,6 +2429,36 @@ async function showPrices() {
   }
   form.addEventListener("input", update);
   form.addEventListener("submit", e => e.preventDefault());
+
+  // Look up a card by name: the most played that match first, those starting with it before
+  const LOOKUP_SHOWN = 12;
+  let names;
+  const lookup = async () => {
+    const typed = $("price-lookup").value.trim(), q = typed.toLowerCase();
+    $("price-lookup-note").textContent = "";
+    $("price-lookup-results").hidden = true;
+    if (q.length < 2) return;
+    try { names ??= await getJson("index/names.json"); } catch { $("price-lookup-note").textContent = "Couldn't load the card names. Please try again."; return; }
+    if ($("price-lookup").value.trim().toLowerCase() !== q) return; // typed on meanwhile
+    const found = [];
+    names.forEach((name, card) => name.toLowerCase().includes(q) && found.push(card));
+    found.sort((a, b) => !names[a].toLowerCase().startsWith(q) - !names[b].toLowerCase().startsWith(q) || a - b);
+    if (!found.length) {
+      $("price-lookup-note").textContent = `No card is named like “${typed}”.`;
+      return;
+    }
+    const price = card => index.columns.price[card];
+    $("price-lookup-results").replaceChildren(el("h3", { className: "sub-heading" }, `Cards: ${found.length.toLocaleString()}`),
+      el("ul", { className: "found-list" }, ...found.slice(0, LOOKUP_SHOWN).map(card => el("li", {}, cardButton(card, names), " ",
+        el("small", { textContent: price(card) >= 0 ? `from ${dollars(price(card))}` : "no price" })))),
+      found.length > LOOKUP_SHOWN ? el("p", { className: "muted", textContent: `And ${(found.length - LOOKUP_SHOWN).toLocaleString()} more: type more of the name.` }) : "");
+    $("price-lookup-results").hidden = false;
+  };
+  $("price-lookup").oninput = lookup;
+  $("price-lookup").onfocus = () => getJson("index/names.json").then(n => (names ??= n)).catch(() => {});
+  $("price-lookup").onkeydown = async e => { // Enter: the first one found
+    if (e.key === "Enter") $("price-lookup-results").querySelector("button")?.click();
+  };
   await update();
   pricesMessage("");
   $("prices-page").hidden = false;

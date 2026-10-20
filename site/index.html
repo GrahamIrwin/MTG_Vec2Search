@@ -564,6 +564,8 @@
     .price-history { margin: -4px 0 18px; }
     .price-history .chips button { font-size: 14px; padding: 2px 10px; }
     #history-note { margin: 4px 0 0; font-size: 14px; }
+    .history-change { margin: 0 0 8px; font-size: 15px; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+    .history-change .up, .history-change .down { font-weight: bold; }
     .price-chart { position: relative; margin-top: 8px; touch-action: pan-y; }
     .price-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
     .price-chart.wide { max-width: 900px; margin: 12px auto 4px; }
@@ -1096,6 +1098,12 @@
       <section class="deck-view" id="prices-view" hidden>
         <p class="message" id="prices-message" hidden></p>
         <div id="prices-page" hidden>
+          <div class="pilot-search">
+            <input type="search" id="price-lookup" class="filter-box" autocomplete="off"
+                   placeholder="Look up a card: its price over time, every printing" aria-label="Look up a card's prices">
+            <p class="muted deck-lede" id="price-lookup-note"></p>
+            <div class="search-results" id="price-lookup-results" hidden></div>
+          </div>
           <div class="chips type-filter trend-windows" id="price-windows" role="group" aria-label="Period"></div>
           <div class="price-filters">
             <div class="chips type-filter" id="price-finishes" role="group" aria-label="Finish"></div>
@@ -1350,6 +1358,7 @@
         <label class="switch" id="foil-label" hidden><input type="checkbox" id="foil"> Foil</label>
       </div>
       <div class="price-history" id="price-history" hidden>
+        <p class="history-change" id="history-change"></p>
         <div class="chips type-filter" id="history-ranges" role="group" aria-label="Period"></div>
         <div class="price-chart" id="history-chart"></div>
         <p class="muted" id="history-note"></p>
