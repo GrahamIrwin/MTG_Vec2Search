@@ -278,6 +278,14 @@ time, a few KB after that).
      stretches with no prices at all are dashed.
    - Prices aren't split by condition, so a card that rarely sells (Tabernacle) can swing with
      which copies sold; the page says so.
+   - **Look up a card** at the top finds cards by name (most played first, names starting with
+     what's typed before the rest) and opens one's details, with its price history.
+   - Over the chart, how much its price changed in 30 days, a year, and since its first price
+     (when that's 2 years back or more).
+   - **Deck recommendations** also say what a deck is worth: its cards at their cheapest
+     printings now, up or down how much in 30 days and a year (over the cards priced then), and
+     the ones that moved most in 30 days, from `prices/cards.json` (each card's cheapest price now,
+     30 and 365 days before, by card number).
 
 ## Updating card data
 

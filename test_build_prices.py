@@ -78,6 +78,7 @@ with tempfile.TemporaryDirectory() as tmp:
     moved = read("movers-30.json")
     assert sorted([moved["sets"][r[2]], *r[3:]] for r in moved["rows"]) == [["Set rl", 0, 9000, 10000], ["Set up", 0, 400, 200]], moved
     assert moved["cutoffs"][0][2] == [0, 0], "a band with fewer than TOP is complete"
+    assert read("cards.json") == {"now": [9000, 25], "30": [10000, 50], "365": [-1, -1]}, read("cards.json")  # its cheapest
     reserved = read("reserved.json")
     assert [r[1] for r in reserved["rows"]] == ["rl"] and reserved["total"][-1][1:] == [9000, 1, 0], reserved
     assert read("p", "up.json")["up"]["usd_foil"] == [[(date(2026, 9, 1) - date(1993, 1, 1)).days, 900]]

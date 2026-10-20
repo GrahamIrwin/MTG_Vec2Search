@@ -599,6 +599,8 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     prices US cents, a printing's row is [card number, Scryfall id, set (in "sets"), finish (0 nonfoil,
     1 foil, 2 etched), price on the last day, then ...]):
       days.json        the days with prices of ours
+      cards.json       {"now", "30", "365": [cents by card number, -1: none]}: each card's cheapest
+                       printing's price (any finish) now, and 30 and 365 days before
       movers-<w>.json  {"sets", "rows": [..., price w days before], "bands", "cutoffs"}: the printings
                        at MIN_MOVER or more on both days whose prices rose or fell the most in w
                        days, the top TOP of each finish (nonfoil, or foil and etched) and band of
@@ -668,6 +670,15 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
             rows.append([card, i, s, US.index(finish), now, *(-1 if c is None else c for c in past)])
     shutil.rmtree(out_dir, ignore_errors=True)
     write_json(os.path.join(out_dir, "days.json"), num)
+    # Each card's cheapest printing (any finish) now, and 30 and 365 days before, by card number
+    cheapest = {}
+    for r in rows:
+        now, then = cheapest.get(r[0], (math.inf, [math.inf] * len(WINDOWS)))
+        cheapest[r[0]] = (min(now, r[4]), [min(t, c) if c > 0 else t for t, c in zip(then, r[5:])])
+    by_card = lambda pick: [(lambda c: -1 if c == math.inf else c)(pick(cheapest[n])) if n in cheapest else -1
+                            for n in range(len(cards))]
+    write_json(os.path.join(out_dir, "cards.json"), {"now": by_card(lambda x: x[0]),
+                **{str(w): by_card(lambda x, k=k: x[1][k]) for k, w in enumerate(WINDOWS) if w in (30, 365)}})
     names = list(sets)
 
     def with_sets(chosen):  # just the sets they're from

@@ -676,6 +676,10 @@ async function findSimilar(key) {
       textContent: `${parsed.unknown.length} unrecognized ${parsed.unknown.length === 1 ? "line" : "lines"}` }));
   }
   $("deck-summary").replaceChildren(...summary);
+  showDeckValue([...mine, ...commanders]).catch(err => {
+    console.error(err); // no prices built: the page goes without
+    $("deck-value-panel").hidden = true;
+  });
 
   // Cards to add, within the deck's color identity, filterable by type
   const { identity } = index.columns;
@@ -2131,6 +2135,44 @@ async function showTrends() {
 }
 
 // === Prices (build_prices.py makes the data in prices/) ===
+// A deck's worth: its cards at their cheapest printings now, against 30 days and a year ago, and
+// the cards that moved most in 30 days (prices/cards.json)
+let cardPrices;
+const showDeckMovers = typedGallery($("deck-movers-types"), $("deck-movers"), $("more-deck-movers"));
+async function showDeckValue(deck) {
+  cardPrices ??= getJson("prices/cards.json").catch(err => { cardPrices = null; throw err; });
+  const p = await cardPrices;
+  const priced = deck.filter(c => p.now[c] >= 0);
+  if (!priced.length) {
+    $("deck-value-panel").hidden = true;
+    return;
+  }
+  const worth = cards => cards.reduce((sum, c) => sum + p.now[c], 0);
+  // A change over the cards priced both then and now
+  const change = w => {
+    const both = priced.filter(c => p[w][c] >= 0);
+    const now = worth(both), then = both.reduce((sum, c) => sum + p[w][c], 0);
+    const diff = now - then;
+    return both.length && el("span", {},
+      `${diff >= 0 ? "up" : "down"} ${wholeDollars(Math.abs(diff))} (`,
+      el("span", { className: diff > 0 ? "up" : diff < 0 ? "down" : "", textContent: priceChange(now, then) }),
+      `) ${w === "30" ? "in 30 days" : "in a year"}` + (both.length < priced.length ? ` (the ${both.length} cards with a price then)` : ""));
+  };
+  const parts = ["30", "365"].map(change).filter(Boolean);
+  $("deck-value-lede").replaceChildren(
+    `At each card's cheapest printing, the ${priced.length} cards with a price are worth ${wholeDollars(worth(priced))}`
+      + (priced.length < deck.length ? ` (${deck.length - priced.length} have none)` : ""),
+    ...(parts.length ? [": ", ...parts.flatMap((x, k) => [k ? " and " : "", x])] : []),
+    ". The cards whose prices moved most in 30 days:");
+  const size = c => Math.abs(Math.log(p.now[c] / p["30"][c]));
+  const moved = priced.filter(c => p["30"][c] > 0 && p.now[c] !== p["30"][c]).sort((a, b) => size(b) - size(a));
+  $("deck-value-panel").hidden = false;
+  await showDeckMovers(moved.map(c => ({
+    card: c, type: typeOf(c), price: p.now[c], detail: priceChange(p.now[c], p["30"][c]),
+    tone: p.now[c] > p["30"][c] ? "up" : "down", note: `${dollars(p["30"][c])} 30 days ago`,
+  })));
+}
+
 const PRICE_WINDOWS = [7, 30, 90, 365]; // WINDOWS in build_prices.py
 const PRICE_BANDS = [1, 5, 20, 100]; // US dollars, shown as round amounts of the visitor's currency
 const FINISHES = ["", "foil", "etched"];
