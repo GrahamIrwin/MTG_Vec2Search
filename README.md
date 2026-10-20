@@ -261,6 +261,10 @@ time, a few KB after that).
    foil and etched), a price ("$5 and up": at least that on both days, so a 10-cent card doesn't
    top the list going to $5) and **Filters** like the card search's (color identity, mana value,
    format, and the printing's set) go in the address bar (`?prices&w=90&finish=foil&price=20&c=G`).
+   The page shows one section at a time, picked under the card lookup (`view=` in the address bar):
+   Rising & falling, Spec buys, Buyouts, Tournament spikes, Reprints, Reserve list and Watchlist,
+   each with only the controls that apply to it, a line on what it is, and the details under "How
+   these are worked out".
    The prices to pick are round amounts of the visitor's currency (C$1, C$5, C$20, C$100), each
    the nearest 1, 2 or 5 times a power of ten to US$1, $5, $20 and $100. Foil printings' tiles
    shimmer like the foil in a card's details, which open on the foil price.
