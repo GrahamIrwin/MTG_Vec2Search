@@ -106,6 +106,10 @@ time, a few KB after that).
    decks and recommending them back. Card overlap alone did best (about 39% of
    hidden cards in the top 20, against 31% for "most played with this
    commander"), so that's all the browser computes.
+   **Pages are laid out the same way** (`showSections()` in `site/app.js`): what a page is about at
+   the top, then what narrows it (a commander's build and bracket), then one row of buttons for its
+   sections, shown one at a time (`view=` in the address bar), each with a line on what it is and
+   the details under "How these are worked out" at the bottom.
 4. **Commanders** (`?commanders`) lists every commander with decks, which
    Trends' filters narrow down; partners show both cards, overlapped, the one
    behind coming forward when pointed at. Each one's

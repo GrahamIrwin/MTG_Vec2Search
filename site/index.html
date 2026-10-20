@@ -558,11 +558,20 @@
     .trend-windows { justify-content: center; margin-bottom: 14px; }
     .trend-summary { text-align: center; margin: 14px 0 0; }
     .price-filters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px; }
-    .price-views { justify-content: center; margin: 4px 0 18px; }
-    .price-views button { font-size: 16px; }
-    .price-how { max-width: 760px; margin: 30px auto 0; font-size: 15px; color: var(--ink-soft); }
-    .price-how summary { cursor: pointer; text-align: center; }
-    .price-how p { margin: 10px 0 0; }
+    /* A page's sections, one at a time (showSections in app.js), and how they're worked out */
+    .section-views { justify-content: center; margin: 4px 0 18px; }
+    .section-views button { font-size: 16px; }
+    .section-views.sub { justify-content: flex-start; margin: 18px 0 4px; }
+    .section-views.sub button { font-size: 15px; }
+    .section-how { max-width: 760px; margin: 30px auto 0; font-size: 15px; color: var(--ink-soft); }
+    .section-how summary { cursor: pointer; text-align: center; }
+    .section-how p { margin: 10px 0 0; }
+    .section-how p:empty { display: none; }
+    /* What a page's sections are narrowed to: a label, then its choices */
+    .scope-rows { display: grid; gap: 8px; margin: 18px 0 16px; }
+    .scope-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .scope-row > .label { min-width: 64px; }
+    .scope-note { margin: 0; font-size: 15px; }
     #reserved-sorts { margin: 18px 0 10px; }
     #reserved-printings { justify-content: center; margin: 12px 0 0; }
     .watch-button { font-size: 15px; padding: 3px 12px; }
@@ -906,118 +915,150 @@
               <a href="?deck" class="btn-quiet">Compare your deck with these</a>
             </div>
           </div>
-          <details class="panel" open id="results-panel" hidden>
-            <summary><h2 class="deck-heading">Tournament results</h2></summary>
-            <p class="muted deck-lede" id="results-lede"></p>
-            <div class="chips type-filter" id="results-windows" role="group" aria-label="Period"></div>
-            <div class="result-stats" id="results-stats"></div>
-            <div id="pilots-section" hidden>
-              <h3 class="sub-heading">Pilots</h3>
-              <p class="muted deck-lede" id="pilots-lede"></p>
-              <div class="term-items" id="pilots"></div>
+          <div class="scope-rows">
+            <div class="scope-row" id="builds-row">
+              <span class="label">Build</span>
+              <div class="chips type-filter" id="builds" role="group" aria-label="Build"></div>
             </div>
-            <h3 class="sub-heading">Test a card or a package</h3>
-            <p class="muted deck-lede">Add one card, or several that go together, to compare the decks that play all of
-              them with the decks that play none, over the period above.</p>
-            <div class="package-pick">
-              <input type="search" id="package-input" class="filter-box" list="package-cards" autocomplete="off"
-                     placeholder="Add a card" aria-label="Add a card to test">
-              <datalist id="package-cards"></datalist>
-              <div class="term-items" id="package-chips"></div>
-            </div>
-            <div class="result-stats" id="package-result" hidden></div>
-            <p class="muted deck-lede" id="package-note"></p>
-            <h3 class="sub-heading">Cards that win more</h3>
-            <p class="muted deck-lede" id="wins-more-lede"></p>
-            <div class="chips type-filter" id="wins-more-types" role="group" aria-label="Card type"></div>
-            <div class="gallery" id="wins-more"></div>
-            <div class="more-wrap"><button id="more-wins-more" class="btn-quiet" type="button" hidden>Show more</button></div>
-            <h3 class="sub-heading">New cards in tournaments</h3>
-            <p class="muted deck-lede" id="results-new-lede"></p>
-            <div class="chips type-filter" id="results-new-types" role="group" aria-label="Card type"></div>
-            <div class="gallery" id="results-new"></div>
-            <div class="more-wrap"><button id="more-results-new" class="btn-quiet" type="button" hidden>Show more</button></div>
-            <h3 class="sub-heading">Cards that win less</h3>
-            <p class="muted deck-lede" id="wins-less-lede"></p>
-            <div class="chips type-filter" id="wins-less-types" role="group" aria-label="Card type"></div>
-            <div class="gallery" id="wins-less"></div>
-            <div class="more-wrap"><button id="more-wins-less" class="btn-quiet" type="button" hidden>Show more</button></div>
-            <h3 class="sub-heading">Best recent finishes</h3>
-            <p class="muted deck-lede" id="finishes-lede"></p>
-            <ol class="deck-list finish-list" id="finishes"></ol>
-            <div class="more-wrap"><button id="more-finishes" class="btn-quiet" type="button" hidden>Show more</button></div>
-            <p class="muted source-note">Tournament results from <a href="https://edhtop16.com" target="_blank" rel="noopener">edhtop16</a>,
-              whose decklists and standings come from <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a>.
-              <a id="results-source" target="_blank" rel="noopener">See this commander on edhtop16 ↗</a></p>
-          </details>
-          <details class="panel" open>
-            <summary><h2 class="deck-heading">Builds</h2></summary>
-            <p class="muted deck-lede" id="builds-lede"></p>
-            <div class="chips type-filter" id="builds" role="group" aria-label="Build"></div>
-            <div id="bracket-filter" hidden>
-              <h3 class="sub-heading">Bracket</h3>
-              <p class="muted deck-lede" id="brackets-lede"></p>
+            <div class="scope-row" id="bracket-filter" hidden>
+              <span class="label">Bracket</span>
               <div class="chips type-filter" id="brackets" role="group" aria-label="Bracket"></div>
             </div>
-          </details>
-          <details class="panel" open>
-            <summary><h2 class="deck-heading">Combos &amp; packages</h2></summary>
-            <div class="chips type-filter" id="combo-tabs" role="group" aria-label="Show"></div>
-            <div id="combos-tab">
-              <p class="muted deck-lede" id="combos-lede"></p>
-              <ol class="combo-list" id="combos"></ol>
-              <div class="more-wrap"><button id="more-combos" class="btn-quiet" type="button" hidden>Show more</button></div>
-            </div>
-            <div id="packages-tab" hidden>
-              <p class="muted deck-lede" id="packages-lede"></p>
-              <ol class="combo-list" id="packages"></ol>
-              <div class="more-wrap"><button id="more-packages" class="btn-quiet" type="button" hidden>Show more</button></div>
-            </div>
-          </details>
-          <details class="panel" open id="commander-trends">
-            <summary><h2 class="deck-heading">Trends</h2></summary>
-            <p class="muted deck-lede" id="commander-trends-lede"></p>
-            <div class="chips type-filter" id="commander-windows" role="group" aria-label="Period"></div>
-            <h3 class="sub-heading">Rising</h3>
-            <p class="muted deck-lede">Cards the newer decks play more often than these decks do overall.</p>
-            <div class="chips type-filter" id="rising-types" role="group" aria-label="Card type"></div>
-            <div class="gallery" id="rising"></div>
-            <div class="more-wrap"><button id="more-rising" class="btn-quiet" type="button" hidden>Show more</button></div>
-            <h3 class="sub-heading">New cards</h3>
-            <p class="muted deck-lede">Cards from the last few months these decks have picked up.</p>
-            <div class="chips type-filter" id="new-types" role="group" aria-label="Card type"></div>
-            <div class="gallery" id="new-cards"></div>
-            <div class="more-wrap"><button id="more-new" class="btn-quiet" type="button" hidden>Show more</button></div>
-          </details>
-          <details class="panel" open>
-            <summary><h2 class="deck-heading">Signature cards</h2></summary>
-            <p class="muted deck-lede" id="signature-lede"></p>
-            <div class="chips type-filter" id="signature-types" role="group" aria-label="Card type"></div>
-            <div class="gallery" id="signature"></div>
-            <div class="more-wrap"><button id="more-signature" class="btn-quiet" type="button" hidden>Show more</button></div>
-          </details>
-          <details class="panel" open>
-            <summary><h2 class="deck-heading">Most played</h2></summary>
-            <p class="muted deck-lede">Every card these decks play, most played first.</p>
-            <div class="chips type-filter" id="played-types" role="group" aria-label="Card type"></div>
-            <div class="gallery" id="played"></div>
-            <div class="more-wrap"><button id="more-played" class="btn-quiet" type="button" hidden>Show more</button></div>
-          </details>
-          <details class="panel">
-            <summary><h2 class="deck-heading">Average deck</h2></summary>
-            <p class="muted deck-lede" id="average-lede"></p>
-            <div id="average"></div>
-            <div class="average-export">
-              <button id="copy-average" class="btn-quiet" type="button">Copy list</button>
-              <button id="download-average" class="btn-quiet" type="button">Download .txt</button>
-              <span class="muted">One card per line, ready to paste into Moxfield, Archidekt or Deck recommendations.</span>
-            </div>
-          </details>
-          <details class="panel" open>
-            <summary><h2 class="deck-heading">Decklists</h2></summary>
-            <p class="muted deck-lede">Newest first. Open one to see its cards.</p>
-            <ol class="deck-list plain" id="lists"></ol>
-            <div class="more-wrap"><button id="more-lists" class="btn-quiet" type="button" hidden>Show more decks</button></div>
+            <p class="muted scope-note" id="builds-lede"></p>
+          </div>
+          <div class="chips type-filter section-views" id="commander-views" role="group" aria-label="Show"></div>
+
+          <div data-view="cards">
+            <details class="panel" open>
+              <summary><h2 class="deck-heading">Signature cards</h2></summary>
+              <p class="muted deck-lede" id="signature-lede"></p>
+              <div class="chips type-filter" id="signature-types" role="group" aria-label="Card type"></div>
+              <div class="gallery" id="signature"></div>
+              <div class="more-wrap"><button id="more-signature" class="btn-quiet" type="button" hidden>Show more</button></div>
+            </details>
+            <details class="panel" open>
+              <summary><h2 class="deck-heading">Most played</h2></summary>
+              <p class="muted deck-lede">Every card these decks play, most played first.</p>
+              <div class="chips type-filter" id="played-types" role="group" aria-label="Card type"></div>
+              <div class="gallery" id="played"></div>
+              <div class="more-wrap"><button id="more-played" class="btn-quiet" type="button" hidden>Show more</button></div>
+            </details>
+          </div>
+
+          <div data-view="trends">
+            <details class="panel" open id="commander-trends">
+              <summary><h2 class="deck-heading">Trends</h2></summary>
+              <p class="muted deck-lede" id="commander-trends-lede"></p>
+              <div class="chips type-filter" id="commander-windows" role="group" aria-label="Period"></div>
+              <h3 class="sub-heading">Rising</h3>
+              <p class="muted deck-lede">Played more by the newer decks.</p>
+              <div class="chips type-filter" id="rising-types" role="group" aria-label="Card type"></div>
+              <div class="gallery" id="rising"></div>
+              <div class="more-wrap"><button id="more-rising" class="btn-quiet" type="button" hidden>Show more</button></div>
+              <h3 class="sub-heading">New cards</h3>
+              <p class="muted deck-lede">Cards from the last few months these decks picked up.</p>
+              <div class="chips type-filter" id="new-types" role="group" aria-label="Card type"></div>
+              <div class="gallery" id="new-cards"></div>
+              <div class="more-wrap"><button id="more-new" class="btn-quiet" type="button" hidden>Show more</button></div>
+            </details>
+          </div>
+
+          <div data-view="tournaments">
+            <details class="panel" open id="results-panel" hidden>
+              <summary><h2 class="deck-heading">Tournament results</h2></summary>
+              <p class="muted deck-lede" id="results-lede"></p>
+              <div class="chips type-filter" id="results-windows" role="group" aria-label="Period"></div>
+              <div class="result-stats" id="results-stats"></div>
+              <div class="chips type-filter section-views sub" id="results-parts" role="group" aria-label="Show"></div>
+              <div data-part="cards">
+                <h3 class="sub-heading">Cards that win more</h3>
+                <p class="muted deck-lede" id="wins-more-lede"></p>
+                <div class="chips type-filter" id="wins-more-types" role="group" aria-label="Card type"></div>
+                <div class="gallery" id="wins-more"></div>
+                <div class="more-wrap"><button id="more-wins-more" class="btn-quiet" type="button" hidden>Show more</button></div>
+                <h3 class="sub-heading">New cards in tournaments</h3>
+                <p class="muted deck-lede" id="results-new-lede"></p>
+                <div class="chips type-filter" id="results-new-types" role="group" aria-label="Card type"></div>
+                <div class="gallery" id="results-new"></div>
+                <div class="more-wrap"><button id="more-results-new" class="btn-quiet" type="button" hidden>Show more</button></div>
+                <h3 class="sub-heading">Cards that win less</h3>
+                <p class="muted deck-lede" id="wins-less-lede"></p>
+                <div class="chips type-filter" id="wins-less-types" role="group" aria-label="Card type"></div>
+                <div class="gallery" id="wins-less"></div>
+                <div class="more-wrap"><button id="more-wins-less" class="btn-quiet" type="button" hidden>Show more</button></div>
+              </div>
+              <div data-part="finishes">
+                <p class="muted deck-lede" id="finishes-lede"></p>
+                <ol class="deck-list finish-list" id="finishes"></ol>
+                <div class="more-wrap"><button id="more-finishes" class="btn-quiet" type="button" hidden>Show more</button></div>
+              </div>
+              <div data-part="pilots">
+                <div id="pilots-section" hidden>
+                  <p class="muted deck-lede" id="pilots-lede"></p>
+                  <div class="term-items" id="pilots"></div>
+                </div>
+              </div>
+              <div data-part="test">
+                <p class="muted deck-lede">Add a card, or several that go together: the decks that play all of them
+                  against the decks that play none, over the period above.</p>
+                <div class="package-pick">
+                  <input type="search" id="package-input" class="filter-box" list="package-cards" autocomplete="off"
+                         placeholder="Add a card" aria-label="Add a card to test">
+                  <datalist id="package-cards"></datalist>
+                  <div class="term-items" id="package-chips"></div>
+                </div>
+                <div class="result-stats" id="package-result" hidden></div>
+                <p class="muted deck-lede" id="package-note"></p>
+              </div>
+            </details>
+          </div>
+
+          <div data-view="combos">
+            <details class="panel" open>
+              <summary><h2 class="deck-heading">Combos &amp; packages</h2></summary>
+              <div class="chips type-filter" id="combo-tabs" role="group" aria-label="Show"></div>
+              <div id="combos-tab">
+                <p class="muted deck-lede" id="combos-lede"></p>
+                <ol class="combo-list" id="combos"></ol>
+                <div class="more-wrap"><button id="more-combos" class="btn-quiet" type="button" hidden>Show more</button></div>
+              </div>
+              <div id="packages-tab" hidden>
+                <p class="muted deck-lede" id="packages-lede"></p>
+                <ol class="combo-list" id="packages"></ol>
+                <div class="more-wrap"><button id="more-packages" class="btn-quiet" type="button" hidden>Show more</button></div>
+              </div>
+            </details>
+          </div>
+
+          <div data-view="average">
+            <details class="panel" open>
+              <summary><h2 class="deck-heading">Average deck</h2></summary>
+              <p class="muted deck-lede" id="average-lede"></p>
+              <div class="average-export">
+                <button id="copy-average" class="btn-quiet" type="button">Copy list</button>
+                <button id="download-average" class="btn-quiet" type="button">Download .txt</button>
+                <span class="muted">Ready to paste into Moxfield, Archidekt or Deck recommendations.</span>
+              </div>
+              <div id="average"></div>
+            </details>
+          </div>
+
+          <div data-view="decklists">
+            <details class="panel" open>
+              <summary><h2 class="deck-heading">Decklists</h2></summary>
+              <p class="muted deck-lede">Newest first. Open one to see its cards.</p>
+              <ol class="deck-list plain" id="lists"></ol>
+              <div class="more-wrap"><button id="more-lists" class="btn-quiet" type="button" hidden>Show more decks</button></div>
+            </details>
+          </div>
+
+          <details class="section-how">
+            <summary>How these are worked out</summary>
+            <p id="commander-how"></p>
+            <p id="commander-builds-how"></p>
+            <p id="commander-source" hidden>Tournament results from <a href="https://edhtop16.com" target="_blank" rel="noopener">edhtop16</a>,
+              whose decklists and standings come from <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a>.
+              <a id="results-source" target="_blank" rel="noopener">See this commander on edhtop16 ↗</a></p>
           </details>
         </div>
       </section>
@@ -1121,7 +1162,7 @@
             <p class="muted deck-lede" id="price-lookup-note"></p>
             <div class="search-results" id="price-lookup-results" hidden></div>
           </div>
-          <div class="chips type-filter price-views" id="price-views" role="group" aria-label="Show"></div>
+          <div class="chips type-filter section-views" id="price-views" role="group" aria-label="Show"></div>
           <div class="price-view" data-view="watch">
           <p class="message" id="watch-empty" hidden>Nothing here yet: open a card and press ☆ Watch its price.</p>
           <details class="panel" open id="watch-panel" hidden>
@@ -1245,7 +1286,7 @@
             <div class="more-wrap"><button id="more-reserved" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
           </div>
-          <details class="price-how">
+          <details class="section-how">
             <summary>How these are worked out</summary>
             <p id="price-how"></p>
             <p>Prices are TCGplayer's, through <a href="https://scryfall.com">Scryfall</a> and <a href="https://mtgjson.com">MTGJSON</a>,

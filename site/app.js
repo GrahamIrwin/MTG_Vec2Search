@@ -840,6 +840,16 @@ const commanderMessage = text => {
 const commanderLink = key => "?" + new URLSearchParams({ commander: key });
 
 // Changes some of the URL's parameters (null: leaves it out), so a view is a link to share
+// A page's sections, one at a time: `views` ([[name, label]]) as buttons in `box`, and in `root`
+// each one's elements (data-<attr>="name") shown only for it, and controls some of them share
+// (data-<attr>s="name name ...") only for those. pick(name): another was picked
+function showSections(root, box, views, current, pick, attr = "view") {
+  for (const e of root.querySelectorAll(`[data-${attr}]`)) e.hidden = e.dataset[attr] !== current;
+  for (const e of root.querySelectorAll(`[data-${attr}s]`)) e.hidden = !e.dataset[`${attr}s`].split(" ").includes(current);
+  box.replaceChildren(...views.map(([name, label]) => el("button", {
+    type: "button", ariaPressed: String(name === current), onclick: () => pick(name) }, label)));
+}
+
 function setParams(changes) {
   const url = new URLSearchParams(location.search);
   for (const [k, v] of Object.entries(changes)) v === null ? url.delete(k) : url.set(k, v);
@@ -1084,10 +1094,9 @@ async function showCommander(key) {
     };
   });
   const groups = [{ name: "All decks", members: shard.decks.map((_, d) => d), all: true }, ...builds];
-  $("builds-lede").textContent = builds.length
-    ? `${lead} decks fall into ${builds.length} builds by the cards they play, each named for the kind of card (Scryfall Tagger tag) it plays more of than the rest. Pick one to see its cards and decks.`
-    : `There aren't enough ${lead} decks, or they're too alike, to tell builds apart.`;
-  $("builds").hidden = !builds.length;
+  $("builds-lede").textContent = builds.length ? "" : `Too few ${lead} decks, or too alike, to tell builds apart.`;
+  $("builds-lede").hidden = !!builds.length;
+  $("builds-row").hidden = !builds.length;
   // The build's decks of one bracket (the one its builder gave it), or all of them. The URL holds
   // both (the build by name), so a view of a commander is a link to share.
   let build = groups.find(g => g.name === params.get("build")) ?? groups[0];
@@ -1114,8 +1123,11 @@ async function showCommander(key) {
     if (!ofBracket(build.members, bracket).length) bracket = 0;
     setParams({ build: build.all ? null : build.name, bracket: bracket || null });
     const given = build.members.length - ofBracket(build.members, 0).length;
-    $("brackets-lede").textContent = `The bracket each deck's builder gave it. ${percent(given / build.members.length)} of these decks have one.`
-      + (bracket === 5 && tournament ? ` Bracket 5 cards also show how their decks did in tournaments in the last ${tournament.period}.` : "");
+    $("commander-builds-how").textContent = (builds.length
+      ? `Builds: ${lead} decks split into ${builds.length} by the cards they play (lands left out: they mostly show a budget), `
+        + "each named for the kind of card (Scryfall Tagger tag) it plays more of than the rest. " : "")
+      + `Brackets are the ones each deck's builder gave it: ${percent(given / build.members.length)} of these decks have one.`
+      + (bracket === 5 && tournament ? ` With bracket 5, cards also show how their decks did in tournaments in the last ${tournament.period}.` : "");
     $("brackets").replaceChildren(...BRACKETS.map((label, b) => {
       const k = b ? ofBracket(build.members, b).length : build.members.length;
       return el("button", { type: "button", ariaPressed: String(b === bracket), disabled: !k,
@@ -1138,9 +1150,9 @@ async function showCommander(key) {
     // Signature cards: what sets these decks apart from other commanders' decks (all of them),
     // or from the commander's other decks (a build)
     $("signature-lede").textContent = all
-      ? `What ${lead} decks play far more often than other commanders' decks do.`
-      : `What these decks play far more often than other ${lead} decks do.`
-        + (g.tags ? ` They lean on: ${g.tags.map(t => tagLabel(t).toLowerCase()).join(", ") || "no tag in particular"}.` : "");
+      ? "What these decks play far more than other commanders' decks."
+      : `What this build plays far more than other ${lead} decks`
+        + (g.tags?.length ? `: ${g.tags.map(t => tagLabel(t).toLowerCase()).join(", ")}.` : ".");
     showSignature((all ? (shard.signature ?? entry[2]).map(c => shard.position.get(c)).filter(p => p !== undefined)
       : distinctive(shard, g.members, { n: SIGNATURE_SHOWN, ignore: lands })).slice(0, SIGNATURE_SHOWN).map(tile));
 
@@ -1155,8 +1167,7 @@ async function showCommander(key) {
     const kinds = colors.length ? colors.map(c => BASIC_OF[c]) : ["Wastes"];
     const basicCounts = kinds.map((b, i) => [names.indexOf(b), Math.floor(basics / kinds.length) + (i < basics % kinds.length)])
       .filter(([, k]) => k);
-    $("average-lede").textContent = `${average.spells.length} spells and ${average.lands.length + basics} lands`
-      + ` (${basics} of them basic), as many of each as these decks play on average, picking the cards they play most.`;
+    $("average-lede").textContent = `${average.spells.length} spells and ${average.lands.length + basics} lands (${basics} basic).`;
     const picks = [...average.spells, ...average.lands].map(p => ({ card: shard.cards[p], detail: detail(p), bar: share(p), ...cedh(shard.cards[p]) }))
       .concat(basicCounts.map(([card, k]) => ({ card, detail: `× ${k}`, bar: null, copies: k })));
     const byType = new Map();
@@ -1216,7 +1227,7 @@ async function showCommander(key) {
     const m = g.members.length, these = g.all ? `${lead} decks` : "these decks";
     const combos = groupCombos(comboDecks(shard, g.members, c => leaders.includes(c)).filter(c => c.decks && c.decks >= 0.01 * m));
     $("combos-lede").textContent = combos.length
-      ? `Combos from Commander Spellbook that at least 1% of ${these} play every card of, most played first. Combos that differ in one card are shown as one, with each choice's decks.`
+      ? `Combos in 1% of ${these} or more, most played first.`
       : `None of Commander Spellbook's combos is in 1% of ${these}.`;
     showRows($("combos"), $("more-combos"), combos.map(group => comboRow(group, k => `${percent(k / m)} of ${these} (${k.toLocaleString()})`)), testPackage);
     shard.sets ??= shard.decks.map(d => new Set(d.cards));
@@ -1225,7 +1236,7 @@ async function showCommander(key) {
       return { cards, combos, decks: g.members.reduce((k, d) => k + ps.every(p => shard.sets[d].has(p)), 0) };
     }).filter(p => p.decks >= Math.max(3, 0.03 * m)).sort((a, b) => b.decks - a.decks);
     $("packages-lede").textContent = counted.length
-      ? `Cards ${these} play together far more often than chance would have it, combo pieces among them. They're compared among decks of the same build, as tuned and with as many Game Changers, so cards don't go together just for being in the same kind of deck. Staples every kind of deck plays (Force of Will and Force of Negation) and ${lead}'s precon are left out.`
+      ? `Cards ${these} play together far more often than chance would have it.`
       : `No cards that ${these} play together far more often than chance would have it.`;
     showRows($("packages"), $("more-packages"), counted.map(p => ({
       cards: joined(p.cards.map(c => miniCard(c))),
@@ -1270,6 +1281,40 @@ async function showCommander(key) {
       .sort((a, b) => counts[b] - counts[a] || a - b)
       .map(p => pick(p, played(counts[p], counts[p] / g.members.length), counts[p] / g.members.length)));
   }
+
+  // The page's sections, one at a time (in the URL); a link into the tournament results opens on them
+  const views = [["cards", "Cards"], ["trends", "Trends"], ...(results ? [["tournaments", "Tournaments"]] : []),
+    ["combos", "Combos & packages"], ["average", "Average deck"], ["decklists", "Decklists"]];
+  let view = views.some(([v]) => v === params.get("view")) ? params.get("view")
+    : results && (params.has("results") || params.has("package")) ? "tournaments" : "cards";
+  const how = {
+    cards: "Signature cards: what these decks play far more often than other commanders' decks do (or, for a build, "
+      + `than ${lead}'s other decks). Most played: every card, by the share of these decks that play it.`,
+    trends: "Rising: cards the decks made in the period play more often than these decks do overall, from a few decks up "
+      + "counting for more (1% to 4% beats 60% to 66%). New cards: first printed in the last few months.",
+    tournaments: "cEDH tournaments of 16 players or more. Points are 5 for a win and 1 for a draw. Each card's decks are "
+      + "measured against the commander's other decks, so the commander's own strength doesn't count: ▲ and ▼ are how "
+      + "many points higher or lower their win rate is, allowing for how few decks play it. It's the decks that won, so a "
+      + "card can stand for a style of build. Faded: too few decks to be sure yet. Pilots: who played its decks, and how "
+      + "it does without the ones who won the most.",
+    combos: "Combos from Commander Spellbook that these decks play every card of; combos that differ in one card are "
+      + "shown as one, with each choice's decks. Packages: cards these decks play together far more often than chance, "
+      + "compared among decks of the same build, as tuned and with as many Game Changers, so cards don't go together "
+      + `just for being in the same kind of deck. Staples every deck plays and ${lead}'s precon are left out.`,
+    average: "As many spells and nonbasic lands as these decks play on average, picking the cards they play most, then "
+      + "basic lands, split evenly between the colors, to make 100 cards.",
+    decklists: "Public decks from Moxfield and Archidekt, newest first, with their cards.",
+  };
+  const showViews = () => {
+    showSections($("commander-page"), $("commander-views"), views, view, v => {
+      view = v;
+      setParams({ view: v === "cards" ? null : v });
+      showViews();
+    });
+    $("commander-how").textContent = how[view];
+    $("commander-source").hidden = view !== "tournaments";
+  };
+  showViews();
 
   // Tournament results; picking bracket 5 also notes each card's on its tile
   tournament = null;
@@ -1361,6 +1406,12 @@ function showResults(key, results, names, released, onPeriod) {
   let w = results.windows.indexOf(Number(params.get("results")));
   if (w < 0) w = first;
   const period = () => periodName(results.windows[w]);
+  // Its parts, one at a time: a link with a package to test opens on that
+  let part = params.has("package") ? "test" : "cards";
+  const showParts = () => showSections($("results-panel"), $("results-parts"),
+    [["cards", "Cards"], ["finishes", "Best finishes"], ["pilots", "Pilots"], ["test", "Test a package"]], part,
+    p => { part = p; showParts(); }, "part");
+  showParts();
 
   // A package of cards to test (one or more; in the URL): the decks one by one, fetched the first time
   let pkg = (params.get("package") ?? "").split(".").filter(Boolean).map(Number).filter(c => names[c] !== undefined);
@@ -1440,8 +1491,7 @@ function showResults(key, results, names, released, onPeriod) {
     const vs = (x, field) => (Math.abs(x - field) < SAME ? "About the same as" : points(x - field) + " vs")
       + ` ${percent1(field)} for all decks`;
     const tone = d => (Math.abs(d) < SAME ? "" : d > 0 ? "up" : "down");
-    $("results-lede").textContent = `How ${lead} decks did in cEDH tournaments of 16 players or more. Points are 5 for a win and 1 for a draw. `
-      + "Each card's decks are measured against the commander's other decks, so the commander's own strength doesn't count.";
+    $("results-lede").textContent = `${lead} decks in cEDH tournaments of 16 players or more.`;
     $("results-stats").replaceChildren(
       statTile("Tournament decks", decks.toLocaleString(), `in the last ${period()}, ${games.toLocaleString()} games`),
       statTile("Points per game", ppg.toFixed(2), vsPoints(ppg, fieldPpg), pointsTone(ppg, fieldPpg)),
@@ -1458,11 +1508,10 @@ function showResults(key, results, names, released, onPeriod) {
     $("pilots-section").hidden = !pilots.length;
     const best = [...pilots].sort((a, b) => b.wins - a.wins).slice(0, TOP_PILOTS);
     const bestGames = best.reduce((k, p) => k + p.games, 0), bestWins = best.reduce((k, p) => k + p.wins, 0);
-    $("pilots-lede").textContent = `${pilots.length.toLocaleString()} ${pilots.length === 1 ? "pilot" : "pilots"} in the last ${period()}, most decks first.`
+    $("pilots-lede").textContent = `${pilots.length.toLocaleString()} ${pilots.length === 1 ? "pilot" : "pilots"}, most decks first.`
       + (pilots.length > TOP_PILOTS && games > bestGames
-        ? ` Its ${TOP_PILOTS} pilots with the most wins (${best.map(p => p.name).join(" and ")}) have ${bestWins.toLocaleString()} of its ${wins.toLocaleString()} wins.`
-          + ` Without them its win rate is ${percent1((wins - bestWins) / (games - bestGames))}, against ${percent1(rate)} with them`
-          + ` and ${percent1(fieldRate)} for all decks.`
+        ? ` Without its ${TOP_PILOTS} with the most wins (${best.map(p => p.name).join(" and ")}), its win rate is `
+          + `${percent1((wins - bestWins) / (games - bestGames))} (${percent1(rate)} with them, ${percent1(fieldRate)} for all decks).`
         : "");
     const pilotChip = p => el("a", {
       className: "term", href: pilotLink(p.id), title: `${p.decks} ${p.decks === 1 ? "deck" : "decks"}, ${p.wins} wins in ${p.games} games`,
@@ -1478,18 +1527,17 @@ function showResults(key, results, names, released, onPeriod) {
     const few = !usable(w) ? `There are too few ${lead} decks in the last ${period()} to compare cards. Try a longer period.` : "";
     const more = cards.filter(x => x.lift > 0 && x.evidence >= SIGNAL).sort((a, b) => b.lift - a.lift);
     $("wins-more-lede").textContent = few || (more.length
-      ? "Decks with these have a higher win rate than the commander's other decks. ▲ is how many points higher, allowing for how few decks play a card. "
-        + "It's the decks that won: a card can stand for a style of build. Open a card for the full numbers."
+      ? "Decks with these win more than the commander's other decks. Open a card for the numbers."
       : `No card clearly raises the win rate of these ${decks.toLocaleString()} decks.`);
     showWinsMore(more.map(tile));
     const fresh = cards.filter(x => isNew(released, x.card)).sort((a, b) => b.lift - a.lift);
     $("results-new-lede").textContent = few || (fresh.length
-      ? `Cards from the last few months that at least ${MIN_RESULT_DECKS} of these decks play, best results first. Faded: too few decks to be sure yet.`
+      ? `New cards in ${MIN_RESULT_DECKS} or more of these decks, best results first.`
       : `No new card is in ${MIN_RESULT_DECKS} or more of these decks yet.`);
     showResultsNew(fresh.map(tile));
     const less = cards.filter(x => x.lift < 0 && x.evidence <= -SIGNAL).sort((a, b) => a.lift - b.lift);
     $("wins-less-lede").textContent = few || (less.length
-      ? "Decks with these have a lower win rate than the commander's other decks: worth a second look before you play them."
+      ? "Decks with these win less: worth a second look."
       : "No card clearly lowers the win rate of these decks.");
     showWinsLess(less.map(tile));
 
@@ -1497,7 +1545,7 @@ function showResults(key, results, names, released, onPeriod) {
     const since = new Date(Date.now() - results.windows[w] * 864e5).toISOString().slice(0, 10);
     const finishes = results.top.filter(f => f[0] >= since);
     $("finishes-lede").textContent = finishes.length
-      ? `${finishes.length.toLocaleString()} top ${TOP_FINISH} finishes in the last ${period()}, newest first, each with its decklist. Records are won–lost–drawn.`
+      ? `${finishes.length.toLocaleString()} top ${TOP_FINISH} finishes, newest first. Records are won–lost–drawn.`
       : `No top ${TOP_FINISH} finishes in the last ${period()}.`;
     let shown = 0;
     $("finishes").replaceChildren();
@@ -2659,12 +2707,10 @@ async function showPrices() {
   };
 
   const showViews = () => {
-    for (const v of document.querySelectorAll("#prices-page .price-view")) v.hidden = v.dataset.view !== view;
-    for (const c of document.querySelectorAll("#prices-page [data-views]")) c.hidden = !c.dataset.views.split(" ").includes(view);
     $("price-how").textContent = priceHow(view);
     const watched = (shared ?? readWatch()).length;
-    chipRow($("price-views"), PRICE_VIEWS.map(([v, label]) => [v, v === "watch" && watched ? `${label} (${watched})` : label]),
-      view, v => {
+    showSections($("prices-page"), $("price-views"),
+      PRICE_VIEWS.map(([v, label]) => [v, v === "watch" && watched ? `${label} (${watched})` : label]), view, v => {
         view = v;
         update();
         if (view === "reserve") drawTotal(); // drawn at the size it's shown at
