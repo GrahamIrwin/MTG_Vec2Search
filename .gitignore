@@ -16,3 +16,4 @@ goldfish.jsonl
 goldfish.jsonl.gz
 goldfish.stop
 goldfish.[0-9]*.jsonl
+goldfish_run.log
