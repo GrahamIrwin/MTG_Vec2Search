@@ -674,7 +674,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     last = num[-1]
     gold = goldfish_series(goldfish)
     order = {c["oracle_id"]: n for n, c in enumerate(cards)}  # card numbers, in build_index.py's order
-    info, sets, reserved, unplayable, released, finishes = {}, {}, defaultdict(list), set(), defaultdict(list), {}
+    info, sets, reserved, unplayable, released, finishes, plain = {}, {}, defaultdict(list), set(), defaultdict(list), {}, {}
     with gzip.open(printings, "rt", encoding="utf-8") as f:
         for c in map(json.loads, f):
             oracle = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
@@ -683,6 +683,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
                 # Just the finishes it comes in: 7th to 9th Edition's foils are printings of their own
                 # (325★), but MTGJSON gives the nonfoil one TCGplayer's foil price too (one product)
                 finishes[c["id"]] = {US[k] for k, f in enumerate(("nonfoil", "foil", "etched")) if f in c.get("finishes", [])}
+                plain[c["id"]] = c.get("collector_number", "").isdigit()
                 if c.get("released_at") and c.get("set_type") != "memorabilia" and not c.get("digital"):
                     released[oracle].append(((date.fromisoformat(c["released_at"]) - EPOCH).days, c["id"]))
                 if c.get("reserved"):
@@ -728,6 +729,11 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
             past = [price(real, est, last - w, max(7, w // 10)) for w in WINDOWS]
             card, s = info[i]
             rows.append([card, i, s, US.index(finish), now, *(-1 if c is None else c for c in past)])
+    # Printings of a card in a set with the very same prices are one TCGplayer product (Odyssey's
+    # Cephalid Looter #72 and #72†): one of them, the plain collector number's
+    rows.sort(key=lambda r: not plain[r[1]])
+    seen = set()
+    rows = [r for r in rows if (key := (r[0], r[2], r[3], *r[4:])) not in seen and not seen.add(key)]
     shutil.rmtree(out_dir, ignore_errors=True)
     write_json(os.path.join(out_dir, "days.json"), num)
     # Reprints: cards with a printing out in the last REPRINT_DAYS and others REPRINT_OLDER days
