@@ -282,6 +282,24 @@ time, a few KB after that).
      what's typed before the rest) and opens one's details, with its price history.
    - Over the chart, how much its price changed in 30 days, a year, and since its first price
      (when that's 2 years back or more).
+   - **Reserve list** has a button for every printing or just the tournament-legal ones (not
+     Collectors' Edition's, 30th Anniversary's, gold-bordered or oversized: Scryfall's
+     `memorabilia` sets), each with its own total over time (`rl=legal` in the address bar).
+   - **Spec buys and buyouts**: cards new Commander decks play far more than usual (1.5 times their
+     share of all decks, in 0.3% of the last 30 days' decks or more) whose price barely moved (under
+     10%), and cards whose price rose 30% or more while new decks play them no more than usual
+     (a buyout, speculation, or another format), from Trends' data and `prices/cards.json`.
+   - **Tournament spikes**: cards in 1.5 times their year's share of cEDH tournament decks over
+     the last 90 days (30 decks or more), with their 90-day price change.
+   - **Reprinted lately**: cards with a new paper printing out in the last 120 days, and how the
+     older printing that was cheapest 45 days before it came out has moved since
+     (`prices/reprints.json`), the biggest falls first.
+   - **Watchlist**: ☆ in a card's details watches that printing and finish (kept in the browser);
+     the Prices tab lists them with their 30-day and 1-year changes, and copies a link to the list
+     (`?prices&watch=<card>.<printing>.<0 nonfoil, 1 foil>,…`) that opens it for someone else.
+   - **Cheaper cards that do the same thing**, in a card's details, for cards at $5 or more: the
+     same main type, within its color identity, half its price or less, with most of its Scryfall
+     Tagger tags (each weighted by how rare it is), from `prices/alts/<n>.json`.
    - **Deck recommendations** also say what a deck is worth: its cards at their cheapest
      printings now, up or down how much in 30 days and a year (over the cards priced then), and
      the ones that moved most in 30 days, from `prices/cards.json` (each card's cheapest price now,

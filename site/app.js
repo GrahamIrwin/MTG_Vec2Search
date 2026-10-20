@@ -441,8 +441,11 @@ async function showCardResults(card) {
 // card: its number in the index, when known, for links to the commanders that play it
 // foilFirst: show its foil price first (a foil printing's tile on the Prices page)
 let foilFirst = false;
+let openedCard = null; // its number in the index, when known
 async function openCard(id, card, showFoil = false) {
   foilFirst = showFoil;
+  openedCard = card ?? null;
+  showAlternatives(openedCard);
   showCardActions(card);
   showCardResults(card);
   $("printings").replaceChildren();
@@ -507,6 +510,7 @@ function updatePrice() {
     : money.formatUsd(+usd) + (foil.checked ? " foil" : "")
       + (money.currency !== "USD" && money.rate ? `  ·  US$${usd}` : "");
   showHistory(current.id, foil.checked ? "usd_foil" : "usd");
+  showWatchButton();
 }
 
 // === Deck recommendations (deck.js does the math, build_decks.py makes the data) ===
@@ -2134,6 +2138,60 @@ async function showTrends() {
   $("trends-page").hidden = false;
 }
 
+// Cheaper cards that do the same thing (prices/alts/<block>.json, from build_prices.py's
+// alternatives()), under a card's prices in its details
+const ALT_BLOCK = 256; // ALT_BLOCK in build_prices.py
+const altBlocks = new Map();
+async function showAlternatives(card) {
+  $("card-alts").hidden = true;
+  if (card === null || !index) return;
+  const k = Math.floor(card / ALT_BLOCK);
+  if (!altBlocks.has(k)) altBlocks.set(k, getJson(`prices/alts/${k}.json`).catch(() => ({}))); // none for that block: {}
+  const alts = (await altBlocks.get(k))[card % ALT_BLOCK];
+  if (!alts || openedCard !== card) return;
+  const infos = await Promise.all(alts.map(cardInfo));
+  if (openedCard !== card) return;
+  $("alts").replaceChildren(...alts.map((alt, i) => el("li", {},
+    el("button", { type: "button", className: "term", textContent: infos[i].name, onclick: () => openCard(infos[i].id, alt) }), " ",
+    el("small", { textContent: index.columns.price[alt] >= 0 ? `from ${money.formatUsd(index.columns.price[alt] / 100)}` : "" }))));
+  $("card-alts").hidden = false;
+}
+
+// === Watchlist: printings to keep an eye on, kept in this browser, and shared as a link ===
+// An entry: { card (its number), id (the printing's Scryfall id), finish ("usd" or "usd_foil"), set }
+const WATCH_KEY = "watchlist";
+function readWatch() {
+  try { return JSON.parse(localStorage.getItem(WATCH_KEY)) ?? []; } catch { return []; }
+}
+function writeWatch(list) {
+  try { localStorage.setItem(WATCH_KEY, JSON.stringify(list)); } catch {}
+}
+const watching = (list, id, finish) => list.findIndex(w => w.id === id && w.finish === finish);
+// In a link: card.id.finish (0 nonfoil, 1 foil), comma-separated
+const WATCH_FINISHES = ["usd", "usd_foil"];
+const watchParam = list => list.map(w => `${w.card ?? ""}.${w.id}.${WATCH_FINISHES.indexOf(w.finish)}`).join(",");
+const fromWatchParam = text => text.split(",").map(x => x.split(".")).filter(x => x.length === 3)
+  .map(([card, id, f]) => ({ card: card === "" ? null : Number(card), id, finish: WATCH_FINISHES[Number(f)] ?? "usd" }));
+let onWatchChange = () => {}; // the Prices page redraws its list
+function showWatchButton() {
+  const finish = foil.checked ? "usd_foil" : "usd";
+  const on = watching(readWatch(), current.id, finish) >= 0;
+  const button = $("watch-button");
+  button.textContent = on ? "★ Watching" : "☆ Watch its price";
+  button.ariaPressed = String(on);
+  button.title = on ? "On your watchlist (the Prices tab): click to take it off" : "Add this printing to your watchlist, on the Prices tab";
+  button.hidden = openedCard === null; // its tile on the Prices page needs the card's number
+  button.onclick = () => {
+    const list = readWatch();
+    const k = watching(list, current.id, finish);
+    if (k >= 0) list.splice(k, 1);
+    else list.push({ card: openedCard, id: current.id, finish, set: current.set_name });
+    writeWatch(list);
+    showWatchButton();
+    onWatchChange();
+  };
+}
+
 // === Prices (build_prices.py makes the data in prices/) ===
 // A deck's worth: its cards at their cheapest printings now, against 30 days and a year ago, and
 // the cards that moved most in 30 days (prices/cards.json)
@@ -2383,6 +2441,21 @@ async function showHistory(id, finish) {
 const showPriceRising = typedGallery($("price-rising-types"), $("price-rising"), $("more-price-rising"));
 const showPriceFalling = typedGallery($("price-falling-types"), $("price-falling"), $("more-price-falling"));
 const showReserved = typedGallery($("reserved-types"), $("reserved"), $("more-reserved"));
+const showWatched = typedGallery($("watch-types"), $("watch"), $("more-watch"));
+const showSpikes = typedGallery($("spikes-types"), $("spikes"), $("more-spikes"));
+const SPIKE_DECKS = 30; // at least this many tournament decks in the last 90 days play a spike
+const SPIKE_PLAYED = 1.5; // and that many times its share of the year's
+const showReprints = typedGallery($("reprints-types"), $("reprints"), $("more-reprints"));
+const REPRINT_DAYS = 120, REPRINT_BEFORE = 45; // the same in build_prices.py
+const showSpecBuys = typedGallery($("spec-buys-types"), $("spec-buys"), $("more-spec-buys"));
+const showBuyouts = typedGallery($("buyouts-types"), $("buyouts"), $("more-buyouts"));
+// Spec buys and buyouts: Commander play (the share of the decks made in the last 30 days against
+// the share of all decks) against each card's cheapest price, now and 30 days ago (prices/cards.json)
+const SPEC_SHARE = 0.003; // at least this share of new decks play a spec buy (fewer is mostly noise)
+const SPEC_PLAYED = 1.5; // and that many times its usual share of decks
+const SPEC_FLAT = 0.1; // while its price moved less than this
+const BUYOUT_RISE = 0.3; // a buyout's price rose this much
+const BUYOUT_PLAYED = 1.15; // while its share of new decks is no more than this many times its usual
 async function showPrices() {
   const [meta, columns, rate, days, reserved] = await Promise.all([getMeta(), getJson("index/columns.json"),
     usdRate(currency), getPriceDays(), getJson("prices/reserved.json")]);
@@ -2398,6 +2471,9 @@ async function showPrices() {
   let band = Math.max(0, amounts.indexOf(Number(params.get("price"))));
   const bandName = i => money.formatUsdWhole(amounts[i] / (money.rate ?? 1));
   let order = "rising";
+  // The reserve list: every printing, or just the ones to play with (not Collectors' Edition's,
+  // 30th Anniversary's, gold-bordered or oversized)
+  let playable = params.get("rl") === "legal";
 
   // Filters: like the card search's, on each printing's card (and the printing's own set)
   const form = $("price-form");
@@ -2424,11 +2500,13 @@ async function showPrices() {
   const rowOk = (r, sets) => (!finish || (finish === "foil") === (r[3] > 0)) && cardOk(r[0]) && (!setName || sets[r[2]] === setName);
 
   // The reserve list: one of every card over time, and each printing
-  const { total } = reserved;
+  const totalOf = () => (playable ? reserved.playable : reserved.total);
+  const drawTotal = () => priceChart($("reserved-chart"), totalOf().map(([d, c, , est]) => [d, c, !!est]),
+    "One of every reserve list card");
   const showList = () => {
     const k = PRICE_WINDOWS.indexOf(w);
     const was = r => r[5 + k];
-    const rows = reserved.rows.filter(r => rowOk(r, reserved.sets));
+    const rows = reserved.rows.filter(r => rowOk(r, reserved.sets) && (!playable || r.at(-1)));
     const sorted = order === "priciest" ? rows.sort((a, b) => b[4] - a[4])
       : rows.filter(r => Math.min(was(r), r[4]) >= toCents(amounts[0]))
         .sort((a, b) => (order === "rising" ? -1 : 1) * (a[4] / was(a) - b[4] / was(b)));
@@ -2437,10 +2515,145 @@ async function showPrices() {
     showReserved(sorted.map(r => pricePick(r, reserved.sets, was(r), w)));
   };
 
+  // The watchlist: yours, or one from a link (watch=...)
+  const shared = params.has("watch") ? fromWatchParam(params.get("watch")) : null;
+  const showWatchlist = async () => {
+    const list = (shared ?? readWatch()).filter(w => Number.isInteger(w.card));
+    $("watch-panel").hidden = !list.length;
+    if (!list.length) return;
+    const shards = {};
+    const series = await Promise.all(list.map(async w => {
+      const shard = await (shards[w.id.slice(0, 3)] ??= getJson(`prices/p/${w.id.slice(0, 3)}.json`).catch(() => ({})));
+      const prices = shard[w.id] ?? {};
+      return [...onDays(prices[w.finish] ?? [], days), ...estimated(prices[w.finish + "_e"])].sort((a, b) => a[0] - b[0]);
+    }));
+    const at = (points, back) => points.findLast(p => p[0] <= points.at(-1)[0] - back);
+    $("watch-heading").textContent = shared ? "A shared watchlist" : "Your watchlist";
+    $("watch-lede").textContent = shared
+      ? `${list.length} ${list.length === 1 ? "printing" : "printings"} someone shared. Open one to see its prices over time.`
+      : `${list.length} ${list.length === 1 ? "printing" : "printings"} you're watching (in this browser). `
+        + "Open one to see its prices over time, or to stop watching it.";
+    $("watch-keep").hidden = !shared;
+    $("watch-keep").onclick = () => {
+      const mine = readWatch();
+      for (const w of shared) if (watching(mine, w.id, w.finish) < 0) mine.push(w);
+      writeWatch(mine);
+      $("watch-keep").textContent = "Added to your watchlist";
+      $("watch-keep").disabled = true;
+    };
+    $("watch-share").onclick = async () => {
+      const link = `${location.origin}${location.pathname}?prices&watch=${watchParam(list)}`;
+      try {
+        await navigator.clipboard.writeText(link);
+        $("watch-share").textContent = "Link copied";
+      } catch {
+        prompt("A link to this list:", link);
+      }
+    };
+    await showWatched(list.map((w, k) => {
+      const points = series[k];
+      if (!points.length) return { card: w.card, id: w.id, type: typeOf(w.card), detail: "no price", note: w.set ?? "" };
+      const now = points.at(-1)[1], month = at(points, 30), year = at(points, 365);
+      return {
+        card: w.card, id: w.id, type: typeOf(w.card), price: now, foil: w.finish !== "usd",
+        detail: month ? priceChange(now, month[1]) : "", tone: month && now > month[1] ? "up" : month && now < month[1] ? "down" : "",
+        note: [w.set, w.finish !== "usd" && "foil", year && `${priceChange(now, year[1])} in a year`].filter(Boolean).join(" · "),
+      };
+    }));
+  };
+  onWatchChange = () => showWatchlist().catch(err => console.error(err));
+  onWatchChange();
+
+  // Spec buys and buyouts, once Trends' data is in (fetched after the rest of the page)
+  let spec = null;
+  const showSpec = () => {
+    if (!spec) return;
+    const { trends, p, k } = spec;
+    const { popular, recent } = trendingCards([trends.everything], k);
+    const floor = toCents(amounts[band]);
+    const ok = c => cardOk(c) && Math.min(p.now[c], p["30"][c]) >= floor;
+    const ratio = c => p.now[c] / p["30"][c];
+    const played = new Map(popular.map(x => [x.card, x]));
+    const deckShare = x => `in ${percent1(x.share)} of new decks (${x.decks.toLocaleString()}), ${percent1(x.was)} of all`;
+    const buys = popular.filter(x => x.share >= SPEC_SHARE && x.share >= SPEC_PLAYED * x.was && ok(x.card)
+      && Math.abs(ratio(x.card) - 1) < SPEC_FLAT).sort((a, b) => b.share / b.was - a.share / a.was);
+    const outs = [];
+    p.now.forEach((now, c) => {
+      const x = played.get(c);
+      if (ok(c) && ratio(c) >= 1 + BUYOUT_RISE && (!x || x.share < BUYOUT_PLAYED * x.was)) outs.push(c);
+    });
+    outs.sort((a, b) => ratio(b) - ratio(a));
+    $("spec-lede").textContent = `Commander play: the share of the ${recent.toLocaleString()} decks made in the last 30 days `
+      + `against the share of all decks. Prices: each card's cheapest printing, at ${bandName(band)} or more 30 days ago and now.`;
+    $("spec-buys-lede").textContent = `Played in at least ${percent1(SPEC_SHARE)} of new decks and ${SPEC_PLAYED} times its usual share, `
+      + `while its price moved less than ${percent(SPEC_FLAT)}: more decks want it, and the price hasn't caught up (yet).`;
+    $("buyouts-lede").textContent = `Price up ${percent(BUYOUT_RISE)} or more in 30 days, while new decks play it no more than usual: `
+      + "a buyout, speculation, or demand from another format.";
+    showSpecBuys(buys.map(x => ({ card: x.card, type: typeOf(x.card), price: p.now[x.card],
+      detail: `${(x.share / x.was).toFixed(1)}× played`, tone: "up",
+      note: `${deckShare(x)} · price ${priceChange(p.now[x.card], p["30"][x.card])} in 30 days` })));
+    showBuyouts(outs.map(c => ({ card: c, type: typeOf(c), price: p.now[c],
+      detail: priceChange(p.now[c], p["30"][c]), tone: "up",
+      note: `${dollars(p["30"][c])} 30 days ago · ` + (played.has(c) ? deckShare(played.get(c)) : "in no new Commander decks") })));
+    $("spec-panel").hidden = false;
+  };
+
+  // Tournament spikes: cards in far more of the last 90 days' cEDH tournament decks than of the
+  // year's (decks/results/index.json), and how their cheapest price moved in those 90 days
+  let spikes = null;
+  const showSpikeList = () => {
+    if (!spikes) return;
+    const { results, p } = spikes;
+    const [q, y] = [90, 365].map(d => results.windows.indexOf(d));
+    const floor = toCents(amounts[band]);
+    const list = results.cards.map((card, k) => {
+      const st = results.stats[k];
+      const decks = st[q * 4], yearDecks = st[y * 4];
+      const share = decks / results.field[q][0], was = yearDecks / results.field[y][0];
+      return { card, decks, share, was };
+    }).filter(x => x.decks >= SPIKE_DECKS && x.share >= SPIKE_PLAYED * x.was && cardOk(x.card) && p.now[x.card] >= floor)
+      .sort((a, b) => b.share / b.was - a.share / a.was);
+    $("spikes-lede").textContent = `Cards in at least ${SPIKE_DECKS} of the last 90 days' ${results.field[q][0].toLocaleString()} `
+      + `cEDH tournament decks, and ${SPIKE_PLAYED} times their share of the year's, with how their cheapest price moved in `
+      + "those 90 days. Winning players pick up new cards first, so prices can follow.";
+    showSpikes(list.map(x => {
+      const now = p.now[x.card], then = p["90"][x.card];
+      return {
+        card: x.card, type: typeOf(x.card), price: now, detail: `${(x.share / x.was).toFixed(1)}× played`, tone: "up",
+        note: `in ${percent1(x.share)} of tournament decks in 90 days (${x.decks.toLocaleString()}), ${percent1(x.was)} in a year`
+          + (then > 0 ? ` · price ${priceChange(now, then)} in 90 days` : ""),
+      };
+    }));
+    $("spikes-panel").hidden = !list.length;
+  };
+
+  // Reprints: how the older printing moved since a reprint was coming (prices/reprints.json)
+  let reprints = null;
+  const showReprintList = () => {
+    if (!reprints) return;
+    const floor = toCents(amounts[band]);
+    const rows = reprints.rows.filter(r => cardOk(r[0]) && (!setName || reprints.sets[r[3]] === setName || reprints.sets[r[2]] === setName)
+      && Math.min(r[5], r[6]) >= floor);
+    rows.sort((a, b) => a[6] / a[5] - b[6] / b[5]);
+    $("reprints-lede").textContent = `Cards with a new printing out in the last ${REPRINT_DAYS} days: how the older printing that was `
+      + `cheapest ${REPRINT_BEFORE} days before it came out has moved since, at ${bandName(band)} or more. The biggest falls first.`;
+    showReprints(rows.map(([card, id, oldSet, newSet, out, was, now, fresh]) => ({
+      card, id, type: typeOf(card), price: now, detail: priceChange(now, was),
+      tone: now > was ? "up" : now < was ? "down" : "",
+      note: `${reprints.sets[oldSet]}: ${dollars(was)} before ${reprints.sets[newSet]} (${dayName(out)})`
+        + (fresh >= 0 ? ` · the new one ${dollars(fresh)}` : ""),
+    })));
+    $("reprints-panel").hidden = !rows.length && !setName;
+  };
+
   let shownFor;
   async function update() {
     readFilters();
-    const extra = [["w", w], ...(finish ? [["finish", finish]] : []), ...(band ? [["price", amounts[band]]] : []), ...filterParams];
+    showSpec();
+    showSpikeList();
+    showReprintList();
+    const extra = [["w", w], ...(finish ? [["finish", finish]] : []), ...(band ? [["price", amounts[band]]] : []),
+      ...(playable ? [["rl", "legal"]] : []), ...filterParams];
     history.replaceState(null, "", "?" + new URLSearchParams([["prices", ""], ...extra]));
     chipRow($("price-windows"), PRICE_WINDOWS.map(x => [x, x === 365 ? "1 year" : `${x} days`]), w,
       x => { w = x; update(); });
@@ -2448,9 +2661,15 @@ async function showPrices() {
     chipRow($("price-bands"), amounts.map((_, i) => [i, `${bandName(i)} and up`]), band,
       i => { band = i; update(); });
     $("price-summary").textContent = `Prices on ${dayName(days.at(-1))} against ${dayName(days.at(-1) - w)}`;
+    const total = totalOf();
     $("reserved-lede").textContent = "Cards Wizards of the Coast has promised never to reprint. One of each "
-      + `(${total.at(-1)[2]} cards, each at its cheapest nonfoil printing) costs ${wholeDollars(total.at(-1)[1])} today, `
-      + `against ${wholeDollars(total[0][1])} on ${dayName(total[0][0])}.`;
+      + `(${total.at(-1)[2]} cards, each at its cheapest nonfoil printing${playable ? " you can play with" : ""}) `
+      + `costs ${wholeDollars(total.at(-1)[1])} today, against ${wholeDollars(total[0][1])} on ${dayName(total[0][0])}.`;
+    chipRow($("reserved-printings"), [[false, "All printings"], [true, "Tournament-legal only"]], playable, x => {
+      playable = x;
+      update();
+      drawTotal();
+    });
     showList();
 
     const asked = shownFor = {};
@@ -2504,7 +2723,21 @@ async function showPrices() {
   await update();
   pricesMessage("");
   $("prices-page").hidden = false;
-  priceChart($("reserved-chart"), total.map(([d, c, , est]) => [d, c, !!est]), "One of every reserve list card");
+  getJson("prices/reprints.json").then(data => {
+    reprints = data;
+    showReprintList();
+  }).catch(err => console.error(err));
+  cardPrices ??= getJson("prices/cards.json").catch(err => { cardPrices = null; throw err; });
+  Promise.all([loadDeckData(), loadTrends(), cardPrices]).then(([{ decks }, trends, p]) => {
+    spec = { trends, p, k: 1 + decks.windows.indexOf(30) };
+    showSpec();
+  }).catch(err => console.error(err)); // no deck data: the page goes without
+  Promise.all([getResultsIndex(), cardPrices]).then(([results, p]) => {
+    if (!results) return;
+    spikes = { results, p };
+    showSpikeList();
+  }).catch(err => console.error(err));
+  drawTotal();
 }
 
 // === A card's page: the commanders whose decks play it, by what those decks are known for ===

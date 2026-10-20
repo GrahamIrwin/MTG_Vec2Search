@@ -78,9 +78,10 @@ with tempfile.TemporaryDirectory() as tmp:
     moved = read("movers-30.json")
     assert sorted([moved["sets"][r[2]], *r[3:]] for r in moved["rows"]) == [["Set rl", 0, 9000, 10000], ["Set up", 0, 400, 200]], moved
     assert moved["cutoffs"][0][2] == [0, 0], "a band with fewer than TOP is complete"
-    assert read("cards.json") == {"now": [9000, 25], "30": [10000, 50], "365": [-1, -1]}, read("cards.json")  # its cheapest
+    assert read("cards.json") == {"now": [9000, 25], "30": [10000, 50], "90": [-1, -1], "365": [-1, -1]}, read("cards.json")  # its cheapest
     reserved = read("reserved.json")
-    assert [r[1] for r in reserved["rows"]] == ["rl"] and reserved["total"][-1][1:] == [9000, 1, 0], reserved
+    assert [r[1] for r in reserved["rows"]] == ["rl"] and reserved["rows"][0][-1] == 1 and reserved["total"][-1][1:] == [9000, 1, 0], reserved
+    assert reserved["playable"] == reserved["total"], "nothing in it is not to play with"
     assert read("p", "up.json")["up"]["usd_foil"] == [[(date(2026, 9, 1) - date(1993, 1, 1)).days, 900]]
 
 # Estimates between our days: the other guide's prices, scaled to meet ours. Theirs are 10% over
@@ -91,4 +92,14 @@ est = estimator({0: 100, 10: 100}, theirs)
 assert est(0) == 100 and est(10) == 100 and est(-5) == 100, [est(d) for d in (0, 10, -5)]
 assert abs(est(5) - 115 / (1.1 ** 0.5 * 1.2 ** 0.5)) <= 1 and est(11) is None and est(12) == 200
 assert estimator({0: 100}, (50, [1, 2]))(51) is None, "no day in common: no estimates"
+
+# Cheaper alternatives: the same type, within its colors, half its price or less, most of its tags
+from build_prices import alternatives
+cards = [{"oracle_id": o, "type_line": t, "color_identity": c} for o, t, c in [
+    ("a", "Artifact", []), ("b", "Artifact", []), ("c", "Creature", []), ("d", "Artifact", ["G"]),
+    ("e", "Artifact", []), ("f", "Artifact", [])] + [(f"x{k}", "Land", []) for k in range(20)]]
+tags = {"ramp": ({"a", "b", "c", "d", "e"}, []), "rock": ({"a", "b", "c", "d"}, []),
+        "odd": ({"a", "f", *(f"x{k}" for k in range(10))}, [])}  # a common tag: f is little like a
+assert alternatives(cards, tags, {0: 1000, 1: 300, 2: 100, 3: 100, 4: 900, 5: 100}) == {0: [1], 4: [1]}, \
+    "for a: b, not c (a creature), d (green), e (too pricey) or f (too little alike); for e too: b"
 print("ok")

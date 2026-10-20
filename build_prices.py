@@ -40,10 +40,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 
-from build_index import HEADERS, PRINTINGS_FILE, SCRYFALL_BULK_LIST_URL, by_popularity, fetch, load_cards, write_json
+from build_index import (HEADERS, PRINTINGS_FILE, SCRYFALL_BULK_LIST_URL, by_popularity, fetch, load_cards,
+                         load_oracle_tags, write_json)
 
 HISTORY = "prices.jsonl.gz"
 RELEASE = "price-history"
@@ -63,6 +64,16 @@ US = ("usd", "usd_foil", "usd_etched")  # the site shows US prices, in the visit
 MIN_MOVER = 50
 BANDS = (50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000)  # cents: where each band of prices starts
 TOP = 150  # rises and falls kept per finish and band
+ALT_FROM = 500  # cents: a card this pricey gets cheaper alternatives
+ALT_SHARE = 0.5  # at most this share of its price
+ALT_SHOWN = 6
+ALT_LEAST = 0.35  # an alternative has at least this much of the card's tags (weighted, as alternatives())
+ALT_TAG_MOST = 1500  # tags on more cards than this say too little to find alternatives by
+ALT_BLOCK = 256  # cards per prices/alts/ file
+CARD_TYPES = ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land"]
+REPRINT_DAYS = 120  # a printing this new is a reprint, when its card has printings older than
+REPRINT_OLDER = 180  # this many days before it
+REPRINT_BEFORE = 45  # an older printing's price before a reprint: this many days before it came out
 
 
 def load(path=HISTORY):
@@ -594,22 +605,63 @@ def estimator(real, gf):
     return est
 
 
-def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLDFISH_FILE):
+def alternatives(cards, tags, prices):
+    """{card number: [cheaper cards that do the same thing]}, for cards at ALT_FROM cents or more:
+    cards with the same main type, within its color identity, at ALT_SHARE of its price or less,
+    that have most of its Scryfall Tagger tags, each weighted by how rare it is (ln(cards / cards
+    with it)), the most first. prices: {card number: cheapest now, cents}."""
+    number = {c["oracle_id"]: n for n, c in enumerate(cards)}
+    of = defaultdict(set)  # card -> its tags
+    have = {}  # tag -> its cards
+    for slug, (ids, _) in tags.items():
+        held = {number[i] for i in ids if i in number}
+        if held:
+            have[slug] = held
+            for n in held:
+                of[n].add(slug)
+    weight = {t: math.log(len(cards) / len(held)) for t, held in have.items()}
+    kind = [next((t for t in CARD_TYPES if t in c.get("type_line", "")), "") for c in cards]
+    colors = [set(c.get("color_identity", [])) for c in cards]
+    found = {}
+    for n, price in prices.items():
+        if price < ALT_FROM or not of[n]:
+            continue
+        mine = sum(weight[t] for t in of[n])
+        score = Counter()
+        for t in of[n]:
+            if len(have[t]) <= ALT_TAG_MOST:
+                for m in have[t]:
+                    score[m] += weight[t]
+        best = [m for m, w in score.most_common() if m != n and w >= ALT_LEAST * mine and kind[m] == kind[n]
+                and colors[m] <= colors[n] and 0 <= prices.get(m, -1) <= ALT_SHARE * price][:ALT_SHOWN]
+        if best:
+            found[n] = best
+    return found
+
+
+def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLDFISH_FILE, tags=None):
     """Write site/prices/, what the Prices page and card details read (days are days since 1993-01-01,
     prices US cents, a printing's row is [card number, Scryfall id, set (in "sets"), finish (0 nonfoil,
     1 foil, 2 etched), price on the last day, then ...]):
       days.json        the days with prices of ours
-      cards.json       {"now", "30", "365": [cents by card number, -1: none]}: each card's cheapest
-                       printing's price (any finish) now, and 30 and 365 days before
+      cards.json       {"now", "30", "90", "365": [cents by card number, -1: none]}: each card's
+                       cheapest printing's price (any finish) now, and 30, 90 and 365 days before
+      alts/<n>.json    {card number - ALT_BLOCK * n: [cheaper cards that do the same thing]} for card
+                       numbers from ALT_BLOCK * n, as alternatives()
+      reprints.json    {"sets", "rows": [[card number, an older printing, its set, the new one's set,
+                       the day it came out, the older one's price REPRINT_BEFORE days before, now, the
+                       new one's (its cheapest finish, -1: none)]]}: cards reprinted lately
       movers-<w>.json  {"sets", "rows": [..., price w days before], "bands", "cutoffs"}: the printings
                        at MIN_MOVER or more on both days whose prices rose or fell the most in w
                        days, the top TOP of each finish (nonfoil, or foil and etched) and band of
                        price (BANDS, by the lower of the two) both ways. cutoffs[finish][band][rose]
                        is the size of the change (|ln(now / then)|) a band's list stops at (0: it
                        has them all), so the page can tell how far a list for any price is complete
-      reserved.json    {"sets", "rows": [..., price 7, 30, 90 and 365 days before (-1: none)],
-                       "total": [[day, cents, cards, estimated]]}: every reserve list printing, and
-                       one of every reserve list card (its cheapest nonfoil printing) over time
+      reserved.json    {"sets", "rows": [..., price 7, 30, 90 and 365 days before (-1: none), 1 if it's
+                       to play with], "total" and "playable": [[day, cents, cards, estimated]]}: every
+                       reserve list printing, and one of every reserve list card (its cheapest
+                       nonfoil printing) over time, of all printings or just the ones to play with
+                       (not Collectors' Edition's, 30th Anniversary's, gold-bordered or oversized)
       p/<first 3 characters of the Scryfall id>.json  each printing's prices: {finish: [[day,
                        cents or null]] where they changed on our days, finish + "_e": [[first day,
                        days apart, cents, change in cents, ...]]}: estimated prices between ours
@@ -622,14 +674,19 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     last = num[-1]
     gold = goldfish_series(goldfish)
     order = {c["oracle_id"]: n for n, c in enumerate(cards)}  # card numbers, in build_index.py's order
-    info, sets, reserved = {}, {}, defaultdict(list)
+    info, sets, reserved, unplayable, released = {}, {}, defaultdict(list), set(), defaultdict(list)
     with gzip.open(printings, "rt", encoding="utf-8") as f:
         for c in map(json.loads, f):
             oracle = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
             if oracle in order and c["id"] in hist["series"]:
                 info[c["id"]] = (order[oracle], sets.setdefault(c["set_name"], len(sets)))
+                if c.get("released_at") and c.get("set_type") != "memorabilia" and not c.get("digital"):
+                    released[oracle].append(((date.fromisoformat(c["released_at"]) - EPOCH).days, c["id"]))
                 if c.get("reserved"):
                     reserved[oracle].append(c["id"])
+                    # Collectors' Edition, 30th Anniversary, gold borders, oversized: not to play with
+                    if c.get("set_type") == "memorabilia" or c.get("border_color") == "gold":
+                        unplayable.add(c["id"])
 
     def ours(series):  # {day: cents} on each of our days it has a price
         out, k, c = {}, 0, None
@@ -670,7 +727,26 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
             rows.append([card, i, s, US.index(finish), now, *(-1 if c is None else c for c in past)])
     shutil.rmtree(out_dir, ignore_errors=True)
     write_json(os.path.join(out_dir, "days.json"), num)
-    # Each card's cheapest printing (any finish) now, and 30 and 365 days before, by card number
+    # Reprints: cards with a printing out in the last REPRINT_DAYS and others REPRINT_OLDER days
+    # older, and how the older printing that was cheapest REPRINT_BEFORE days before it moved since
+    reprints = []
+    for oracle, printed in released.items():
+        new = [(d, i) for d, i in printed if last - REPRINT_DAYS <= d <= last]
+        if not new:
+            continue
+        out, newest = min(new)
+        before = out - REPRINT_BEFORE
+        older = [(c, i) for d, i in printed if d <= out - REPRINT_OLDER and (i, "usd") in prices
+                 and (c := price(*prices[i, "usd"], before, 14)) is not None]
+        if not older:
+            continue
+        was, old = min(older)
+        now = price(*prices[old, "usd"], last)
+        fresh = min((c for f in US if (newest, f) in prices and (c := price(*prices[newest, f], last)) is not None), default=-1)
+        if now is not None and min(was, now) >= MIN_MOVER:
+            reprints.append([info[old][0], old, info[old][1], info[newest][1], out, was, now, fresh])
+    write_json(os.path.join(out_dir, "reprints.json"), {"sets": list(sets), "rows": reprints})
+    # Each card's cheapest printing (any finish) now, and 30, 90 and 365 days before, by card number
     cheapest = {}
     for r in rows:
         now, then = cheapest.get(r[0], (math.inf, [math.inf] * len(WINDOWS)))
@@ -678,7 +754,13 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     by_card = lambda pick: [(lambda c: -1 if c == math.inf else c)(pick(cheapest[n])) if n in cheapest else -1
                             for n in range(len(cards))]
     write_json(os.path.join(out_dir, "cards.json"), {"now": by_card(lambda x: x[0]),
-                **{str(w): by_card(lambda x, k=k: x[1][k]) for k, w in enumerate(WINDOWS) if w in (30, 365)}})
+                **{str(w): by_card(lambda x, k=k: x[1][k]) for k, w in enumerate(WINDOWS) if w in (30, 90, 365)}})
+    if tags:
+        alts = alternatives(cards, tags, {n: now for n, (now, _) in cheapest.items()})
+        for k in range(0, len(cards), ALT_BLOCK):
+            block = {n - k: alts[n] for n in range(k, min(k + ALT_BLOCK, len(cards))) if n in alts}
+            if block:
+                write_json(os.path.join(out_dir, "alts", f"{k // ALT_BLOCK}.json"), block)
     names = list(sets)
 
     def with_sets(chosen):  # just the sets they're from
@@ -708,40 +790,45 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     # One of every reserve list card, each its cheapest nonfoil printing: on each of our days, and
     # between them, weekly as far back as estimates go, the day-to-day changes of a set of printings
     # that all have estimates (each card's cheapest of those) scaled to meet ours (as estimator()).
-    # The cheapest printing of some (Collectors' Edition's) has none, so they can't be summed as is
+    # The cheapest printing of some (Collectors' Edition's) has none, so they can't be summed as is.
+    # Of every printing, or just the ones to play with (counts)
     observed = set(num)
-    ours_total = {}
-    for d in num:
-        each = [c for ids in reserved.values()
-                if (c := min((p for i in ids if (i, "usd") in prices and (p := prices[i, "usd"][0].get(d)) is not None),
-                             default=None)) is not None]
-        ours_total[d] = (sum(each), len(each))
-    picked = [min(have, key=lambda i: price(*prices[i, "usd"], last) or math.inf)
-              for ids in reserved.values() if (have := [i for i in ids if (i, "usd") in prices and prices[i, "usd"][1]])]
-    total = [[d, c, n, 0] for d, (c, n) in ours_total.items()]
-    if picked:
-        first = max(gold[i, "usd"][0] for i in picked)
-        # Each printing's last price, for up to 60 days (its estimates have holes); worked out weekly
-        # and on our days, the only days shown, and the week's kept for the days between
-        sums, seen = [], {}
-        for d in range(first, last + 1):
-            if (d - first) % 7 and d not in observed:
-                sums.append(sums[-1])
-                continue
-            for i in picked:
-                if (c := on(*prices[i, "usd"], d)) is not None:
-                    seen[i] = (d, c)
-            each = [c for i in picked if (e := seen.get(i)) and d - e[0] <= 60 for c in [e[1]]]
-            sums.append(sum(each) if len(each) == len(picked) else None)
-        est = estimator({d: c for d, (c, _) in ours_total.items()}, (first, sums))
-        cards = max((n for _, n in ours_total.values()), default=0)
-        total += [[d, c, cards, 1] for d in range(last, first - 1, -7)
-                  if not any(e in observed for e in range(d - 3, d + 4)) and (c := est(d)) is not None]
-    total.sort()
-    most = max((t[2] for t in total), default=0)
-    total = [t for t in total if t[2] >= 0.9 * most]  # days missing a tenth of the cards would look like a fall
+
+    def reserve_total(counts):
+        ours_total = {}
+        for d in num:
+            each = [c for ids in reserved.values()
+                    if (c := min((p for i in ids if counts(i) and (i, "usd") in prices
+                                  and (p := prices[i, "usd"][0].get(d)) is not None), default=None)) is not None]
+            ours_total[d] = (sum(each), len(each))
+        picked = [min(have, key=lambda i: price(*prices[i, "usd"], last) or math.inf) for ids in reserved.values()
+                  if (have := [i for i in ids if counts(i) and (i, "usd") in prices and prices[i, "usd"][1]])]
+        total = [[d, c, n, 0] for d, (c, n) in ours_total.items()]
+        if picked:
+            first = max(gold[i, "usd"][0] for i in picked)
+            # Each printing's last price, for up to 60 days (its estimates have holes); worked out
+            # weekly and on our days, the only days shown, and the week's kept for the days between
+            sums, seen = [], {}
+            for d in range(first, last + 1):
+                if (d - first) % 7 and d not in observed:
+                    sums.append(sums[-1])
+                    continue
+                for i in picked:
+                    if (c := on(*prices[i, "usd"], d)) is not None:
+                        seen[i] = (d, c)
+                each = [c for i in picked if (e := seen.get(i)) and d - e[0] <= 60 for c in [e[1]]]
+                sums.append(sum(each) if len(each) == len(picked) else None)
+            est = estimator({d: c for d, (c, _) in ours_total.items()}, (first, sums))
+            cards = max((n for _, n in ours_total.values()), default=0)
+            total += [[d, c, cards, 1] for d in range(last, first - 1, -7)
+                      if not any(e in observed for e in range(d - 3, d + 4)) and (c := est(d)) is not None]
+        total.sort()
+        most = max((t[2] for t in total), default=0)
+        return [t for t in total if t[2] >= 0.9 * most]  # days missing a tenth of the cards would look like a fall
+
     write_json(os.path.join(out_dir, "reserved.json"),
-               {**with_sets([r for r in rows if r[1] in on_list]), "total": total})
+               {**with_sets([[*r, int(r[1] not in unplayable)] for r in rows if r[1] in on_list]),
+                "total": reserve_total(lambda i: True), "playable": reserve_total(lambda i: i not in unplayable)})
 
     def runs(real, est, d0):  # estimated prices: [[first day, days apart, cents, change, ...]]
         out = []
@@ -823,7 +910,7 @@ if __name__ == "__main__":
         hours = sys.argv[sys.argv.index("--hours") + 1] if "--hours" in sys.argv else None
         sys.exit(goldfish_crawl(float(hours) if hours else None))
     if cmd == "site":
-        sys.exit(site_data(load(), by_popularity(load_cards())))
+        sys.exit(site_data(load(), by_popularity(load_cards()), tags=load_oracle_tags()))
     if cmd == "snapshot":
         snapshot()
     elif cmd == "backfill":

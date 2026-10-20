@@ -560,6 +560,12 @@
     .price-filters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px; }
     .price-source { text-align: center; margin-top: 28px; font-size: 15px; }
     #reserved-sorts { margin: 18px 0 10px; }
+    #reserved-printings { justify-content: center; margin: 12px 0 0; }
+    .watch-button { font-size: 15px; padding: 3px 12px; }
+    .watch-button[aria-pressed="true"] { color: var(--brass); border-color: var(--brass); }
+    .watch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .card-alts { margin: 0 0 18px; }
+    .card-alts .found-list { margin-top: 6px; }
     /* Price charts: a line over time, with a crosshair and the day's price under the pointer */
     .price-history { margin: -4px 0 18px; }
     .price-history .chips button { font-size: 14px; padding: 2px 10px; }
@@ -1111,6 +1117,17 @@
             <p class="muted deck-lede" id="price-lookup-note"></p>
             <div class="search-results" id="price-lookup-results" hidden></div>
           </div>
+          <details class="panel" open id="watch-panel" hidden>
+            <summary><h2 class="deck-heading" id="watch-heading">Your watchlist</h2></summary>
+            <p class="muted deck-lede" id="watch-lede"></p>
+            <div class="watch-actions">
+              <button type="button" class="btn-quiet" id="watch-share">Copy a link to this list</button>
+              <button type="button" class="btn-quiet" id="watch-keep" hidden>Add these to my watchlist</button>
+            </div>
+            <div class="chips type-filter" id="watch-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="watch"></div>
+            <div class="more-wrap"><button id="more-watch" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
           <div class="chips type-filter trend-windows" id="price-windows" role="group" aria-label="Period"></div>
           <div class="price-filters">
             <div class="chips type-filter" id="price-finishes" role="group" aria-label="Finish"></div>
@@ -1171,9 +1188,38 @@
             <div class="gallery" id="price-falling"></div>
             <div class="more-wrap"><button id="more-price-falling" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          <details class="panel" open id="spec-panel" hidden>
+            <summary><h2 class="deck-heading">Spec buys and buyouts</h2></summary>
+            <p class="muted deck-lede" id="spec-lede"></p>
+            <h3 class="sub-heading">Spec buys: played more, price hasn't moved</h3>
+            <p class="muted deck-lede" id="spec-buys-lede"></p>
+            <div class="chips type-filter" id="spec-buys-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="spec-buys"></div>
+            <div class="more-wrap"><button id="more-spec-buys" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <h3 class="sub-heading">Buyouts: price up, played no more</h3>
+            <p class="muted deck-lede" id="buyouts-lede"></p>
+            <div class="chips type-filter" id="buyouts-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="buyouts"></div>
+            <div class="more-wrap"><button id="more-buyouts" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open id="spikes-panel" hidden>
+            <summary><h2 class="deck-heading">Tournament spikes</h2></summary>
+            <p class="muted deck-lede" id="spikes-lede"></p>
+            <div class="chips type-filter" id="spikes-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="spikes"></div>
+            <div class="more-wrap"><button id="more-spikes" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          <details class="panel" open id="reprints-panel" hidden>
+            <summary><h2 class="deck-heading">Reprinted lately</h2></summary>
+            <p class="muted deck-lede" id="reprints-lede"></p>
+            <div class="chips type-filter" id="reprints-types" role="group" aria-label="Card type"></div>
+            <div class="gallery" id="reprints"></div>
+            <div class="more-wrap"><button id="more-reprints" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
           <details class="panel" open>
             <summary><h2 class="deck-heading">Reserve list</h2></summary>
             <p class="muted deck-lede" id="reserved-lede"></p>
+            <div class="chips type-filter" id="reserved-printings" role="group" aria-label="Printings"></div>
             <div class="price-chart wide" id="reserved-chart"></div>
             <div class="chips type-filter" id="reserved-sorts" role="group" aria-label="Order"></div>
             <div class="chips type-filter" id="reserved-types" role="group" aria-label="Card type"></div>
@@ -1363,12 +1409,17 @@
       <div class="price-row">
         <span class="price-line" id="price"></span>
         <label class="switch" id="foil-label" hidden><input type="checkbox" id="foil"> Foil</label>
+        <button type="button" class="btn-quiet watch-button" id="watch-button" hidden></button>
       </div>
       <div class="price-history" id="price-history" hidden>
         <p class="history-change" id="history-change"></p>
         <div class="chips type-filter" id="history-ranges" role="group" aria-label="Period"></div>
         <div class="price-chart" id="history-chart"></div>
         <p class="muted" id="history-note"></p>
+      </div>
+      <div class="card-alts" id="card-alts" hidden>
+        <span class="label">Cheaper cards that do the same thing</span>
+        <ul class="found-list" id="alts"></ul>
       </div>
       <span class="label">Printings</span>
       <ul class="printings" id="printings"></ul>
