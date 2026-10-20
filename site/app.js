@@ -680,7 +680,7 @@ async function findSimilar(key) {
       textContent: `${parsed.unknown.length} unrecognized ${parsed.unknown.length === 1 ? "line" : "lines"}` }));
   }
   $("deck-summary").replaceChildren(...summary);
-  showDeckValue([...mine, ...commanders]).catch(err => {
+  showDeckValue([...mine, ...commanders]).then(() => deckSections(), err => {
     console.error(err); // no prices built: the page goes without
     $("deck-value-panel").hidden = true;
   });
@@ -789,7 +789,22 @@ async function findSimilar(key) {
 
   deckMessage("");
   $("deck-results").hidden = false;
+  deckSections = pageSections($("deck-results"), $("deck-views"), [["against", "Against their list"], ["adds", "Cards to add"],
+    ["cuts", "Cards to cut"], ["combos", "Combos"], ["tournament", "Tournament check"], ["similar", "Similar decks"],
+    ["worth", "What it's worth"]], $("deck-how"), {
+    against: "Their list against yours: what's in theirs and not yours, and in yours and not theirs, each ranked by how "
+      + "the commander's tournament decks with it did against those without.",
+    adds: "The decks most like yours (by the cards you share, rare ones counting for more) vote on cards. Cards any "
+      + "deck with this commander plays count for less, so the list is what decks like yours play more than usual.",
+    cuts: "Your cards that the decks most like yours rarely play.",
+    combos: "Combos from Commander Spellbook that this commander's decks play: in your deck, or one card away (a card "
+      + "in your colors).",
+    tournament: "How the commander's cEDH tournament decks with each card did against those without it.",
+    similar: "The decks behind these picks, and commanders whose decks play the most of your cards.",
+    worth: "Each card at its cheapest printing, now and 30 days and a year ago (over the cards priced then).",
+  }, fromDeck ? "against" : "adds");
 }
+let deckSections = () => {}; // shows the deck's sections again, as one fills in later (its worth)
 
 // A gallery of cards with a type filter, PAGE_ADDS cards at a time. Returns a function that
 // shows picks: [{card, type, detail, bar}]
@@ -848,6 +863,26 @@ function showSections(root, box, views, current, pick, attr = "view") {
   for (const e of root.querySelectorAll(`[data-${attr}s]`)) e.hidden = !e.dataset[`${attr}s`].split(" ").includes(current);
   box.replaceChildren(...views.map(([name, label]) => el("button", {
     type: "button", ariaPressed: String(name === current), onclick: () => pick(name) }, label)));
+}
+
+// A page's sections (showSections), the one in the URL (view=) shown and kept there. views:
+// [[name, label]], those with nothing in them (every panel hidden) left out; how: {name: text} for
+// howBox; first: the one shown first when it's there. Returns a function that shows them again,
+// for when a section's panels change
+function pageSections(page, box, views, howBox, how, first = null) {
+  let view = new URLSearchParams(location.search).get("view");
+  const draw = () => {
+    const shown = views.filter(([v]) => [...page.querySelectorAll(`[data-view="${v}"] .panel`)].some(p => !p.hidden));
+    if (!shown.some(([v]) => v === view)) view = shown.some(([v]) => v === first) ? first : shown[0]?.[0];
+    showSections(page, box, shown, view, v => {
+      view = v;
+      setParams({ view: v });
+      draw();
+    });
+    howBox.textContent = how[view] ?? "";
+  };
+  draw();
+  return draw;
 }
 
 function setParams(changes) {
@@ -1681,14 +1716,11 @@ async function showTournaments() {
     const more = cards.filter(x => x.lift > 0 && x.evidence >= SIGNAL).sort((a, b) => b.lift - a.lift);
     const less = cards.filter(x => x.lift < 0 && x.evidence <= -SIGNAL).sort((a, b) => a.lift - b.lift);
     const fresh = cards.filter(x => isNew(released, x.card)).sort((a, b) => b.lift - a.lift);
-    const how = "Each card's decks are measured against the same commander's decks without it, then averaged over the commanders that play it, "
-      + "so a card isn't credited for the commanders it's played with. ▲ is how many points higher their win rate is. "
-      + "A card can stand for a style of deck (turbo lists play Rite of Flame, slower ones Force of Will), so read these as what winning decks play, not proof a card wins on its own.";
-    $("tour-more-lede").textContent = more.length ? `Cards whose decks clearly have a higher win rate. ${how}` : "No card clearly raises its decks' win rate yet.";
-    $("tour-new-lede").textContent = fresh.length ? `Cards from the last few months that enough decks play to compare, best results first. Faded: too few decks to be sure yet.`
+    $("tour-more-lede").textContent = more.length ? "Their decks win more than the same commanders' decks without them."
+      : "No card clearly raises its decks' win rate yet.";
+    $("tour-new-lede").textContent = fresh.length ? "New cards that enough decks play to compare, best results first."
       : "No new card is in enough decks to compare yet.";
-    $("tour-less-lede").textContent = less.length ? "Cards whose decks clearly have a lower win rate than the same commanders' decks without them. "
-      + "Often a sign of the slower or older style of deck they're played in."
+    $("tour-less-lede").textContent = less.length ? "Their decks win less: often a sign of a slower or older style of deck."
       : "No card clearly lowers its decks' win rate yet.";
     showTourMore(more.map(tile));
     showTourNew(fresh.map(tile));
@@ -1723,8 +1755,7 @@ async function showTournaments() {
       else th.removeAttribute("aria-sort");
     }
     $("tour-commanders-lede").textContent = `${list.length.toLocaleString()} commanders with ${min} decks or more`
-      + (f.active ? " that match the filters" : "")
-      + `, by ${SORT_NAMES[by]}. Points are 5 for a win and 1 for a draw. Points per game, win rate and top cut are compared with every deck's.`;
+      + (f.active ? " that match the filters" : "") + `, by ${SORT_NAMES[by]}.`;
     const page = list.slice(0, shownRows);
     const infos = await Promise.all(page.map(r => Promise.all(r.key.split("-").map(c => cardInfo(+c)))));
     if (current.rows !== rows) return;
@@ -1841,6 +1872,18 @@ async function showTournaments() {
   };
   tournamentsMessage("");
   $("tournaments-page").hidden = false;
+  pageSections($("tournaments-page"), $("tour-views"), [["commanders", "Commanders"], ["pilots", "Pilots"], ["cards", "Cards"]],
+    $("tour-how"), {
+      commanders: "cEDH tournaments of 16 players or more. Commanders by decks, points per game (5 for a win, 1 for a draw), "
+        + "win rate or top cut, each compared with every deck's.",
+      pilots: "Players with 5 or more tournament decks in two years, by match points, points per game, games won or top "
+        + "cuts. Search a pilot by name at the top.",
+      cards: "Each card's decks are measured against the same commander's decks without it, then averaged over the "
+        + "commanders that play it, so a card isn't credited for the commanders it's played with. ▲ and ▼ are how many "
+        + "points higher or lower their win rate is. A card can stand for a style of deck (turbo lists play Rite of Flame, "
+        + "slower ones Force of Will), so read these as what winning decks play, not proof a card wins on its own. Faded: "
+        + "too few decks to be sure yet.",
+    });
 }
 
 // === A pilot's page: every tournament deck they played (decks/results/pilots/<block>.json) ===
@@ -2126,8 +2169,9 @@ function trendFilters(trends, lead) {
     f.active = (f.colors !== null) + (f.maxPrice !== null) + !!f.themes + !!f.brackets.length + !!f.kind + !!f.min;
     $("trend-filter-count").textContent = f.active;
     $("trend-filter-count").hidden = !f.active;
+    const view = new URLSearchParams(location.search).get("view");
     history.replaceState(null, "", "?" + new URLSearchParams([...lead.map(k => [k, ""]), ...extra,
-      ...[...data].filter(([, v]) => v)]));
+      ...[...data].filter(([, v]) => v), ...(view ? [["view", view]] : [])]));
     return f;
   };
 }
@@ -2180,10 +2224,21 @@ async function showTrends() {
     showTrendNew(cards.popular.filter(x => isNew(released, x.card)).slice(0, MAX_TRENDING)
       .map(x => pick(x, played(x.decks, x.share))));
   }
-  $("trend-form").addEventListener("input", update);
+  $("trend-form").addEventListener("input", async () => {
+    await update();
+    sections();
+  });
   await update();
   trendsMessage("");
   $("trends-page").hidden = false;
+  const sections = pageSections($("trends-page"), $("trend-views"), [["commanders", "Commanders"], ["cards", "Cards"]], $("trends-how"), {
+    commanders: "Rising: commanders whose share of the decks made in the period beats their share of all decks the most, "
+      + "relative to it, so going from 1% to 4% beats 60% to 66%. Most popular: the most decks made in the period. The "
+      + "filters keep the commanders that pass them (color identity: exactly those colors).",
+    cards: "Rising cards: what the period's new decks play more often than these commanders' decks do overall. Most played: "
+      + "the share of the period's decks that play each card. New cards: first printed in the last few months. With "
+      + "filters, the cards are those of the commanders that pass them.",
+  });
 }
 
 // Cheaper cards that do the same thing (prices/alts/<block>.json, from build_prices.py's

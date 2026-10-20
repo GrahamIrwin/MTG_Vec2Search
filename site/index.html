@@ -559,7 +559,7 @@
     .trend-summary { text-align: center; margin: 14px 0 0; }
     .price-filters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px; }
     /* A page's sections, one at a time (showSections in app.js), and how they're worked out */
-    .section-views { justify-content: center; margin: 4px 0 18px; }
+    .section-views { justify-content: center; margin: 20px 0 18px; }
     .section-views button { font-size: 16px; }
     .section-views.sub { justify-content: flex-start; margin: 18px 0 4px; }
     .section-views.sub button { font-size: 15px; }
@@ -795,6 +795,8 @@
         <p class="message" id="deck-message" hidden></p>
         <div id="deck-results" hidden>
           <div class="results-head"><div class="recognized" id="deck-summary"></div></div>
+          <div class="chips type-filter section-views" id="deck-views" role="group" aria-label="Show"></div>
+          <div data-view="against">
           <details class="panel" open id="against-panel" hidden>
             <summary><h2 class="deck-heading">Against their list</h2></summary>
             <p class="muted deck-lede" id="against-lede"></p>
@@ -809,6 +811,8 @@
             <div class="gallery" id="against-cuts"></div>
             <div class="more-wrap"><button id="more-against-cuts" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          </div>
+          <div data-view="adds">
           <details class="panel" open>
             <summary><h2 class="deck-heading">Cards to add</h2></summary>
             <p class="muted deck-lede" id="adds-lede"></p>
@@ -816,6 +820,8 @@
             <div class="gallery" id="adds"></div>
             <div class="more-wrap"><button id="more-adds" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          </div>
+          <div data-view="cuts">
           <details class="panel" open id="cuts-section">
             <summary><h2 class="deck-heading">Cards to cut</h2></summary>
             <p class="muted deck-lede" id="cuts-lede"></p>
@@ -823,6 +829,8 @@
             <div class="gallery" id="cuts"></div>
             <div class="more-wrap"><button id="more-cuts" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          </div>
+          <div data-view="combos">
           <details class="panel" open id="deck-combos-panel" hidden>
             <summary><h2 class="deck-heading">Combos</h2></summary>
             <h3 class="sub-heading">In your deck</h3>
@@ -839,6 +847,8 @@
             <ol class="combo-list" id="near-combos"></ol>
             <div class="more-wrap"><button id="more-near-combos" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          </div>
+          <div data-view="tournament">
           <details class="panel" open id="deck-tournament" hidden>
             <summary><h2 class="deck-heading">Tournament check</h2></summary>
             <p class="muted deck-lede" id="deck-tournament-lede"></p>
@@ -853,6 +863,8 @@
             <div class="gallery" id="missing-more"></div>
             <div class="more-wrap"><button id="more-missing-more" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          </div>
+          <div data-view="similar">
           <details class="panel" open>
             <summary><h2 class="deck-heading">The decks behind these picks</h2></summary>
             <p class="muted deck-lede">The decks most like yours. Open one to see what it plays that yours doesn't.</p>
@@ -864,12 +876,19 @@
               <p class="muted deck-lede">Commanders whose decks play the most of your cards. Pick one to compare with their decks.</p>
               <div class="term-items" id="others"></div>
           </details>
+          </div>
+          <div data-view="worth">
           <details class="panel" open id="deck-value-panel" hidden>
             <summary><h2 class="deck-heading">What it's worth</h2></summary>
             <p class="muted deck-lede" id="deck-value-lede"></p>
             <div class="chips type-filter" id="deck-movers-types" role="group" aria-label="Card type"></div>
             <div class="gallery" id="deck-movers"></div>
             <div class="more-wrap"><button id="more-deck-movers" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          </div>
+          <details class="section-how">
+            <summary>How these are worked out</summary>
+            <p id="deck-how"></p>
           </details>
         </div>
       </section>
@@ -1117,7 +1136,9 @@
             </details>
           </form>
           <p class="muted trend-summary" id="trend-summary" role="status"></p>
+          <div class="chips type-filter section-views" id="trend-views" role="group" aria-label="Show"></div>
 
+          <div data-view="commanders">
           <details class="panel" open id="rising-commanders-panel">
             <summary><h2 class="deck-heading">Rising commanders</h2></summary>
             <p class="muted deck-lede">Commanders with more new decks than their share of all decks would give them.</p>
@@ -1130,6 +1151,8 @@
             <div class="gallery" id="popular-commanders"></div>
             <div class="more-wrap"><button id="more-popular-commanders" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          </div>
+          <div data-view="cards">
           <details class="panel" open id="rising-cards-panel">
             <summary><h2 class="deck-heading">Rising cards</h2></summary>
             <p class="muted deck-lede">Cards new decks play more often than these commanders' decks do overall.</p>
@@ -1150,6 +1173,11 @@
             <div class="chips type-filter" id="trend-new-types" role="group" aria-label="Card type"></div>
             <div class="gallery" id="trend-new"></div>
             <div class="more-wrap"><button id="more-trend-new" class="btn-quiet" type="button" hidden>Show more</button></div>
+          </details>
+          </div>
+          <details class="section-how">
+            <summary>How these are worked out</summary>
+            <p id="trends-how"></p>
           </details>
         </div>
       </section>
@@ -1310,6 +1338,8 @@
           </section>
           <div class="chips type-filter trend-windows" id="tour-windows" role="group" aria-label="Period"></div>
           <div class="result-stats" id="tour-stats"></div>
+          <div class="chips type-filter section-views" id="tour-views" role="group" aria-label="Show"></div>
+          <div data-view="commanders">
           <details class="panel" open>
             <summary><h2 class="deck-heading">Commanders</h2></summary>
             <p class="muted deck-lede" id="tour-commanders-lede"></p>
@@ -1334,6 +1364,8 @@
             </div>
             <div class="more-wrap"><button id="more-tour" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
+          </div>
+          <div data-view="pilots">
           <details class="panel" open>
             <summary><h2 class="deck-heading">Pilots</h2></summary>
             <div id="ranking" hidden>
@@ -1357,6 +1389,8 @@
               <div class="more-wrap"><button id="more-ranking" class="btn-quiet" type="button" hidden>Show more</button></div>
             </div>
           </details>
+          </div>
+          <div data-view="cards">
           <details class="panel" open>
             <summary><h2 class="deck-heading">Cards that win more</h2></summary>
             <p class="muted deck-lede" id="tour-more-lede"></p>
@@ -1378,9 +1412,15 @@
             <div class="gallery" id="tour-less"></div>
             <div class="more-wrap"><button id="more-tour-less" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
-          <p class="muted source-note">Tournament results from <a href="https://edhtop16.com" target="_blank" rel="noopener">edhtop16</a>,
+          </div>
+          <details class="section-how">
+            <summary>How these are worked out</summary>
+            <p id="tour-how"></p>
+            <p>Tournament results from <a href="https://edhtop16.com" target="_blank" rel="noopener">edhtop16</a>,
             whose decklists and standings come from <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a>:
             cEDH tournaments of 16 players or more.</p>
+          </details>
+
         </div>
         <div id="pilot-page" hidden>
           <div class="commander-head">

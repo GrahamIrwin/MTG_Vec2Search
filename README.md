@@ -109,7 +109,10 @@ time, a few KB after that).
    **Pages are laid out the same way** (`showSections()` in `site/app.js`): what a page is about at
    the top, then what narrows it (a commander's build and bracket), then one row of buttons for its
    sections, shown one at a time (`view=` in the address bar), each with a line on what it is and
-   the details under "How these are worked out" at the bottom.
+   the details under "How these are worked out" at the bottom (`pageSections()`): Prices, a
+   commander's page, Trends (commanders, cards), Tournaments (commanders, pilots, cards) and a
+   deck's recommendations (against a list, cards to add and cut, combos, tournament check, similar
+   decks, what it's worth). A section with nothing to show has no button.
 4. **Commanders** (`?commanders`) lists every commander with decks, which
    Trends' filters narrow down; partners show both cards, overlapped, the one
    behind coming forward when pointed at. Each one's
