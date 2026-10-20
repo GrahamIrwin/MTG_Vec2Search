@@ -674,12 +674,15 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     last = num[-1]
     gold = goldfish_series(goldfish)
     order = {c["oracle_id"]: n for n, c in enumerate(cards)}  # card numbers, in build_index.py's order
-    info, sets, reserved, unplayable, released = {}, {}, defaultdict(list), set(), defaultdict(list)
+    info, sets, reserved, unplayable, released, finishes = {}, {}, defaultdict(list), set(), defaultdict(list), {}
     with gzip.open(printings, "rt", encoding="utf-8") as f:
         for c in map(json.loads, f):
             oracle = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
             if oracle in order and c["id"] in hist["series"]:
                 info[c["id"]] = (order[oracle], sets.setdefault(c["set_name"], len(sets)))
+                # Just the finishes it comes in: 7th to 9th Edition's foils are printings of their own
+                # (325★), but MTGJSON gives the nonfoil one TCGplayer's foil price too (one product)
+                finishes[c["id"]] = {US[k] for k, f in enumerate(("nonfoil", "foil", "etched")) if f in c.get("finishes", [])}
                 if c.get("released_at") and c.get("set_type") != "memorabilia" and not c.get("digital"):
                     released[oracle].append(((date.fromisoformat(c["released_at"]) - EPOCH).days, c["id"]))
                 if c.get("reserved"):
@@ -701,7 +704,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     prices = {}  # (printing, finish) -> (ours, estimator or None)
     for i in info:
         for finish, series in hist["series"][i].items():
-            if finish in US:
+            if finish in finishes[i]:
                 real = ours(series)
                 prices[i, finish] = (real, estimator(real, gold[i, finish]) if (i, finish) in gold else None)
 
@@ -847,7 +850,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     shards = defaultdict(dict)
     for i in info:
         entry = {f: [[number[d], c] for d, c in zip(*v)]
-                 for f, v in hist["series"][i].items() if f in US}
+                 for f, v in hist["series"][i].items() if f in finishes[i]}
         for f in US:
             if (i, f) in prices and prices[i, f][1] and (r := runs(prices[i, f][0], prices[i, f][1], gold[i, f][0])):
                 entry[f + "_e"] = r

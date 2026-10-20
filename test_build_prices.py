@@ -68,11 +68,13 @@ site = {"days": {}, "sources": [], "series": {}}
 for k in range(40):
     day = f"2026-{9 + k // 30:02}-{k % 30 + 1:02}"
     add_day(site, day, "test", {"up": {"usd": 200 if k < 10 else 400 if k != 38 else 9999, "usd_foil": 900},
-                                "rl": {"usd": 10000 if k < 10 else 9000}, "cheap": {"usd": 50 if k < 10 else 25}})
+                                "rl": {"usd": 10000 if k < 10 else 9000, "usd_foil": 500}, "cheap": {"usd": 50 if k < 10 else 25}})
 with tempfile.TemporaryDirectory() as tmp:
     with gzip.open(os.path.join(tmp, "p.jsonl.gz"), "wt") as f:
         for i, oracle, rl in [("up", "o1", False), ("rl", "o2", True), ("cheap", "o1", False)]:
-            f.write(json.dumps({"id": i, "oracle_id": oracle, "set_name": "Set " + i, "reserved": rl}) + "\n")
+            # rl comes in nonfoil only, so its foil price (one TCGplayer product for both, as 7th Edition's) is left out
+            f.write(json.dumps({"id": i, "oracle_id": oracle, "set_name": "Set " + i, "reserved": rl,
+                                "finishes": ["nonfoil"] if rl else ["nonfoil", "foil"]}) + "\n")
     site_data(site, [{"oracle_id": "o2"}, {"oracle_id": "o1"}], tmp, os.path.join(tmp, "p.jsonl.gz"), os.path.join(tmp, "none"))
     read = lambda *path: json.load(open(os.path.join(tmp, *path)))
     moved = read("movers-30.json")
@@ -83,6 +85,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert [r[1] for r in reserved["rows"]] == ["rl"] and reserved["rows"][0][-1] == 1 and reserved["total"][-1][1:] == [9000, 1, 0], reserved
     assert reserved["playable"] == reserved["total"], "nothing in it is not to play with"
     assert read("p", "up.json")["up"]["usd_foil"] == [[(date(2026, 9, 1) - date(1993, 1, 1)).days, 900]]
+    assert "usd_foil" not in read("p", "rl.json")["rl"], "a finish it doesn't come in"
 
 # Estimates between our days: the other guide's prices, scaled to meet ours. Theirs are 10% over
 # ours on day 0 and 20% over on day 10, so on day 5 they're scaled down by about 15%; before our
