@@ -11,6 +11,7 @@ is never replaced.
     python build_prices.py site        # write site/prices/ (after build_index.py: it uses its card numbers)
     python build_prices.py goldfish --hours 24   # fetch daily histories to fill the days between ours
                                                  # (resumable: stop and run it again any time)
+    python build_prices.py goldfish --hours 24 --workers 3   # the same, 3 at a time (each its own file, merged after)
     python build_prices.py goldfish --stop       # stop a crawl that's running (or Ctrl+C it)
 
 The file's first line is {"days": {day: where its prices came from}, "sources": [files imported]}.
@@ -464,31 +465,78 @@ def goldfish_history(card_id):
     return {d: round(float(p) * 100) for d, p in re.findall(r"(\d{4}-\d\d-\d\d), ([\d.]+)", js or "")}
 
 
+def goldfish_parts():
+    """The files of crawls running side by side (goldfish --workers): goldfish.<n>.jsonl."""
+    return sorted(f for f in os.listdir(".") if re.fullmatch(r"goldfish\.\d+\.jsonl", f))
+
+
 def goldfish_rows(path=GOLDFISH_FILE):
-    """goldfish_crawl's lines, less a last one cut off by stopping it mid-write. Read from the
-    release's gzipped copy (path + ".gz") when there's no file of them here (the deploy)."""
+    """goldfish_crawl's lines, less a last one cut off by stopping it mid-write, with those of the
+    workers' files not merged in yet. Read from the release's gzipped copy (path + ".gz") when
+    there's no file of them here (the deploy)."""
     if not os.path.exists(path) and os.path.exists(path + ".gz"):
         with gzip.open(path + ".gz", "rt", encoding="utf-8") as f:
             return [json.loads(line) for line in f]
-    if not os.path.exists(path):
-        return []
-    with open(path, encoding="utf-8") as f:
-        lines = f.read().splitlines()
     rows = []
-    for k, line in enumerate(lines):
-        try:
-            rows.append(json.loads(line))
-        except ValueError:
-            if k < len(lines) - 1:
-                raise
+    for file in [path] + (goldfish_parts() if path == GOLDFISH_FILE else []):
+        if not os.path.exists(file):
+            continue
+        with open(file, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        for k, line in enumerate(lines):
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                if k < len(lines) - 1:
+                    raise
     return rows
 
 
-def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PRINTINGS_FILE):
+def cut_off(path):
+    """Drop a last line cut off by stopping a crawl mid-write, so lines added after are whole."""
+    if os.path.exists(path):
+        with open(path, "rb+") as f:
+            data = f.read()
+            if data and not data.endswith(b"\n"):
+                f.truncate(data.rfind(b"\n") + 1)
+
+
+def merge_goldfish_parts(path=GOLDFISH_FILE):
+    """Add the workers' files to the one file, and remove them."""
+    for part in goldfish_parts():
+        cut_off(part)
+        cut_off(path)
+        with open(part, encoding="utf-8") as f, open(path, "a", encoding="utf-8") as out:
+            shutil.copyfileobj(f, out)
+        os.remove(part)
+
+
+def goldfish_workers(n, hours=None):
+    """Crawl with n workers side by side, each taking every n-th printing of the queue into its own
+    file, merged into GOLDFISH_FILE when they're done (or stopped: goldfish --stop, or Ctrl+C)."""
+    merge_goldfish_parts()
+    goldfish_sets()  # once, before the workers read it
+    args = [sys.executable, "-u", __file__, "goldfish"] + (["--hours", str(hours)] if hours else [])
+    workers = [subprocess.Popen(args + ["--part", f"{k}/{n}"]) for k in range(n)]
+    try:
+        for w in workers:
+            w.wait()
+    except KeyboardInterrupt:
+        open(GOLDFISH_STOP, "w").close()  # each stops after the printing it's on
+        for w in workers:
+            w.wait()
+    if os.path.exists(GOLDFISH_STOP):
+        os.remove(GOLDFISH_STOP)
+    merge_goldfish_parts()
+    print(f"Merged the workers' histories into {GOLDFISH_FILE}.", flush=True)
+
+
+def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PRINTINGS_FILE, part=None):
     """Fetch the daily history of every printing (and finish) at `least` cents or more on the last
     day of ours, and every reserve list printing: the reserve list first, then the priciest. Each
     is a line of `path` as it arrives ({"id", "finish", "card", "start", "cents": [a day each from
-    start, null for none]}, or "miss" when it has none that matches ours), so it can stop and go on."""
+    start, null for none]}, or "miss" when it has none that matches ours), so it can stop and go on.
+    part = (k, n): a worker of n, taking every n-th printing from the k-th, into its own file."""
     stop = time.time() + hours * 3600 if hours else None
     hist, codes = load(), goldfish_sets(printings)
     # Its card pages go by its sets' names: each of ours by name, or else the one that holds it
@@ -497,11 +545,10 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
         (x for k, x in slugs.items() if fold(set_name) in k or k in fold(set_name)), None)
     last = max(hist["days"])
     done = {(r["id"], r["finish"]) for r in goldfish_rows(path)}
-    if os.path.exists(path):  # a line cut off by stopping it mid-write: gone before adding more
-        with open(path, "rb+") as f:
-            data = f.read()
-            if data and not data.endswith(b"\n"):
-                f.truncate(data.rfind(b"\n") + 1)
+    label = f"[{part[0] + 1}/{part[1]}] " if part else ""
+    if part:
+        path = f"goldfish.{part[0]}.jsonl"
+    cut_off(path)
     cards, in_set = {}, defaultdict(int)
     with gzip.open(printings, "rt", encoding="utf-8") as f:
         for c in map(json.loads, f):
@@ -519,7 +566,9 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
             if now and (reserved or now >= least) and (i, finish) not in done:
                 queue.append((not reserved, -now, i, finish))
     queue.sort()
-    print(f"{len(queue):,} printings to fetch ({len(done):,} already), about "
+    if part:
+        queue = queue[part[0]::part[1]]
+    print(f"{label}{len(queue):,} printings to fetch ({len(done):,} already), about "
           f"{len(queue) * GOLDFISH_DELAY / 3600:.0f} hours", flush=True)
     variants = {}  # (set, name) -> goldfish_variants()
     got = missed = 0
@@ -528,9 +577,8 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
             if stop and time.time() > stop:
                 print("Out of time; run it again to go on.", flush=True)
                 break
-            if os.path.exists(GOLDFISH_STOP):
-                os.remove(GOLDFISH_STOP)
-                print("Stopped (goldfish --stop); run it again to go on.", flush=True)
+            if os.path.exists(GOLDFISH_STOP):  # left there for the other workers too
+                print(f"{label}Stopped (goldfish --stop); run it again to go on.", flush=True)
                 break
             name, set_name, s, number, _ = cards[i]
             foil = finish == "usd_foil"
@@ -565,7 +613,7 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
             out.write(json.dumps(row, separators=(",", ":")) + "\n")
             out.flush()
             if k % 25 == 0:
-                print(f"  {k + 1:,}/{len(queue):,}: {got:,} histories, {missed:,} without one; "
+                print(f"  {label}{k + 1:,}/{len(queue):,}: {got:,} histories, {missed:,} without one; "
                       f"{name} [{s}]{' foil' if foil else ''}: {row.get('miss') or row['start']}", flush=True)
     print(f"Fetched {got:,} histories ({missed:,} without one).", flush=True)
 
@@ -922,16 +970,29 @@ if __name__ == "__main__":
     if cmd not in ("snapshot", "backfill", "share", "site", "goldfish"):
         sys.exit(__doc__)
     if cmd == "goldfish":
-        if "--stop" in sys.argv:  # tells a crawl that's running to stop
+        arg = lambda name: sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
+        if "--stop" in sys.argv:  # tells a crawl that's running to stop (every worker of one)
             open(GOLDFISH_STOP, "w").close()
             sys.exit("A running crawl stops after the printing it's on (within a few seconds).")
+        hours = float(arg("--hours")) if arg("--hours") else None
+        if arg("--part"):  # one of goldfish_workers()'s
+            k, n = map(int, arg("--part").split("/"))
+            try:
+                sys.exit(goldfish_crawl(hours, part=(k, n)))
+            except KeyboardInterrupt:
+                sys.exit()
         if os.path.exists(GOLDFISH_STOP):
             os.remove(GOLDFISH_STOP)  # left by a --stop with no crawl running
-        hours = sys.argv[sys.argv.index("--hours") + 1] if "--hours" in sys.argv else None
+        if arg("--workers"):
+            sys.exit(goldfish_workers(int(arg("--workers")), hours))
+        merge_goldfish_parts()
         try:
-            sys.exit(goldfish_crawl(float(hours) if hours else None))
+            goldfish_crawl(hours)
         except KeyboardInterrupt:  # each printing is saved as it arrives: nothing's lost
             sys.exit("Stopped; run it again to go on.")
+        finally:
+            if os.path.exists(GOLDFISH_STOP):
+                os.remove(GOLDFISH_STOP)
     if cmd == "site":
         sys.exit(site_data(load(), by_popularity(load_cards()), tags=load_oracle_tags()))
     if cmd == "snapshot":

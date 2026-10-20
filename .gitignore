@@ -15,3 +15,4 @@ site/prices/
 goldfish.jsonl
 goldfish.jsonl.gz
 goldfish.stop
+goldfish.[0-9]*.jsonl
