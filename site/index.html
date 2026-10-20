@@ -569,9 +569,11 @@
     .section-how p:empty { display: none; }
     /* What a page's sections are narrowed to: a label, then its choices */
     .scope-rows { display: grid; gap: 8px; margin: 18px 0 16px; }
-    .scope-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-    .scope-row > .label { min-width: 64px; }
-    .scope-note { margin: 0; font-size: 15px; }
+    .scope-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; }
+    .scope-row .chips { justify-content: center; }
+    .scope-note { margin: 0; font-size: 15px; text-align: center; }
+    /* Back to the top, at the bottom of every page */
+    .to-top-wrap { text-align: center; margin: 36px 0 0; }
     #reserved-sorts { margin: 18px 0 10px; }
     #reserved-printings { justify-content: center; margin: 12px 0 0; }
     .watch-button { font-size: 15px; padding: 3px 12px; }
@@ -798,14 +800,14 @@
           <div class="chips type-filter section-views" id="deck-views" role="group" aria-label="Show"></div>
           <div data-view="against">
           <details class="panel" open id="against-panel" hidden>
-            <summary><h2 class="deck-heading">Against their list</h2></summary>
+            <summary><h2 class="deck-heading" id="against-heading">Against their list</h2></summary>
             <p class="muted deck-lede" id="against-lede"></p>
-            <h3 class="sub-heading">Theirs, not yours: what to add</h3>
+            <h3 class="sub-heading" id="against-adds-heading">In their list, not yours: what to add</h3>
             <p class="muted deck-lede" id="against-adds-lede"></p>
             <div class="chips type-filter" id="against-adds-types" role="group" aria-label="Card type"></div>
             <div class="gallery" id="against-adds"></div>
             <div class="more-wrap"><button id="more-against-adds" class="btn-quiet" type="button" hidden>Show more</button></div>
-            <h3 class="sub-heading">Yours, not theirs: what to cut</h3>
+            <h3 class="sub-heading" id="against-cuts-heading">In yours, not their list: what to cut</h3>
             <p class="muted deck-lede" id="against-cuts-lede"></p>
             <div class="chips type-filter" id="against-cuts-types" role="group" aria-label="Card type"></div>
             <div class="gallery" id="against-cuts"></div>
@@ -1056,6 +1058,7 @@
               <div class="average-export">
                 <button id="copy-average" class="btn-quiet" type="button">Copy list</button>
                 <button id="download-average" class="btn-quiet" type="button">Download .txt</button>
+                <a id="compare-average" class="btn-quiet" href="?deck">Compare your deck with it</a>
                 <span class="muted">Ready to paste into Moxfield, Archidekt or Deck recommendations.</span>
               </div>
               <div id="average"></div>
@@ -1467,6 +1470,7 @@
             cEDH tournaments of 16 players or more. A pilot is who edhtop16 says played the deck.</p>
         </div>
       </section>
+      <div class="to-top-wrap"><button type="button" class="btn-quiet" id="to-top">↑ To top</button></div>
     </main>
 
     <footer class="colophon">

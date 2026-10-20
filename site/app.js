@@ -579,6 +579,22 @@ async function readDeck(input) {
 // and where it was played, from the pilot's history. {ref, key, pilot, lead, cards: Set, text, label}
 let fromDeck = null;
 let borrowed = null; // a tournament list being looked at as if it were yours: not saved as your deck
+// A commander's average deck to compare a deck with (its page's "Compare your deck with it"):
+// ref "avg.<commander>", its cards (but basic lands) in the URL in base 36, and the build's name
+async function averageTarget(ref, encoded, build) {
+  const key = ref.slice(4);
+  const { names } = await loadDeckData();
+  const cards = (encoded ?? "").split(".").filter(Boolean).map(c => parseInt(c, 36)).filter(c => names[c] !== undefined);
+  if (!cards.length) throw new Error(`No cards for ${ref}`);
+  const lead = commanderNames(key, names);
+  return {
+    ref, key, lead, cards: new Set(cards), average: true,
+    params: { from: ref, cards: encoded, ...(build && { of: build }) },
+    text: [...key.split("-").map(c => `1 ${names[c]} *CMDR*`), ...cards.map(c => `1 ${names[c]}`)].join("\n"),
+    label: `The average ${lead} deck${build ? ` (${build})` : ""}`,
+  };
+}
+
 async function tournamentDeck(ref, pilot) {
   const [key, i] = ref.split(".");
   const [{ names }, lists, block] = await Promise.all([loadDeckData(), getJson(`decks/results/lists/${key}.json`),
@@ -619,10 +635,14 @@ async function showAgainst(target, mine, ownKey) {
     + (results ? `▲ and ▼: how much higher or lower the win rate of ${target.lead} tournament decks with the card is than of those without it, `
       + `in the last ${periodName(results.windows[w])}. A card can stand for a style of build, so weigh them together.` : "There are no tournament results to rank them by.")
     + (ownKey !== target.key ? " Your deck's commander isn't theirs, so expect many differences." : "");
-  $("against-adds-lede").textContent = adds.length ? "In their list, not yours: the biggest win rate boosts first. Faded: too few decks to be sure yet."
-    : "Your deck has every card in their list.";
-  $("against-cuts-lede").textContent = cuts.length ? "In your deck, not theirs: the lowest win rates first."
-    : "Every card in your deck is in their list.";
+  const theirs = target.average ? "the average deck" : "their list";
+  $("against-heading").textContent = `Against ${theirs}`;
+  $("against-adds-heading").textContent = `In ${theirs}, not yours: what to add`;
+  $("against-cuts-heading").textContent = `In yours, not ${theirs}: what to cut`;
+  $("against-adds-lede").textContent = adds.length ? (results ? "The biggest win rate boosts first. Faded: too few decks to be sure yet." : "")
+    : `Your deck has every card in ${theirs}.`;
+  $("against-cuts-lede").textContent = cuts.length ? (results ? "The lowest win rates first." : "")
+    : `Every card in your deck is in ${theirs}.`;
   await Promise.all([showAgainstAdds(adds.map(tile)), showAgainstCuts(cuts.map(tile))]);
 }
 
@@ -632,7 +652,7 @@ async function findSimilar(key) {
   if (input !== borrowed) try { localStorage.setItem("decklist", input); } catch {}
   // A link goes in the address bar, so the page can be shared or bookmarked
   history.replaceState(null, "", "?" + new URLSearchParams({ deck: LINK.test(input.trim()) ? input.trim() : "",
-    ...(fromDeck && { from: fromDeck.ref, ...(fromDeck.pilot && { pilot: fromDeck.pilot }) }) }));
+    ...(fromDeck && (fromDeck.params ?? { from: fromDeck.ref, ...(fromDeck.pilot && { pilot: fromDeck.pilot }) })) }));
   $("deck-results").hidden = true;
   const deck = await readDeck(input);
   if (deck.error) return deckMessage(deck.error);
@@ -797,7 +817,8 @@ async function findSimilar(key) {
 
   deckMessage("");
   $("deck-results").hidden = false;
-  deckSections = pageSections($("deck-results"), $("deck-views"), [["against", "Against their list"], ["adds", "Cards to add"],
+  deckSections = pageSections($("deck-results"), $("deck-views"), [["against", fromDeck?.average ? "Against the average deck"
+    : "Against their list"], ["adds", "Cards to add"],
     ["cuts", "Cards to cut"], ["combos", "Combos"], ["tournament", "Tournament check"], ["similar", "Similar decks"],
     ["worth", "What it's worth"]], $("deck-how"), {
     against: "Their list against yours: what's in theirs and not yours, and in yours and not theirs, each ranked by how "
@@ -892,6 +913,9 @@ function pageSections(page, box, views, howBox, how, first = null) {
   draw();
   return draw;
 }
+
+// Back to the top of the page, smoothly unless the visitor would rather not
+$("to-top").onclick = () => scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 
 function setParams(changes) {
   const url = new URLSearchParams(location.search);
@@ -1227,6 +1251,8 @@ async function showCommander(key) {
         $("copy-average").textContent = "Couldn't copy";
       }
     };
+    $("compare-average").href = "?" + new URLSearchParams({ deck: "", from: `avg.${key}`,
+      cards: [...average.spells, ...average.lands].map(p => shard.cards[p].toString(36)).join("."), ...(!all && { of: g.name }) });
     $("download-average").onclick = () => {
       const a = el("a", { download: `${lead}${all ? "" : ` (${g.name})`} average deck.txt`,
         href: URL.createObjectURL(new Blob([listText()], { type: "text/plain" })) });
@@ -2963,9 +2989,11 @@ if (deckMode) {
     e.preventDefault();
     run();
   });
-  if (params.get("from")) { // a tournament list to compare your deck with
-    deckMessage("Loading the tournament list…");
-    tournamentDeck(params.get("from"), Number(params.get("pilot")) || 0).then(deck => {
+  if (params.get("from")) { // a tournament list, or a commander's average deck, to compare your deck with
+    const average = params.get("from").startsWith("avg.");
+    deckMessage(average ? "Loading the average deck…" : "Loading the tournament list…");
+    (average ? averageTarget(params.get("from"), params.get("cards"), params.get("of"))
+      : tournamentDeck(params.get("from"), Number(params.get("pilot")) || 0)).then(deck => {
       fromDeck = deck;
       $("compare-target-text").textContent = deck.label;
       $("compare-target").hidden = false;
@@ -2979,7 +3007,7 @@ if (deckMode) {
       deckMessage("Paste your deck, or a Moxfield or Archidekt link, to compare it with this list.");
     }).catch(err => {
       console.error(err);
-      deckMessage("Couldn't load that tournament list. Please try again.");
+      deckMessage(`Couldn't load that ${average ? "average deck" : "tournament list"}. Please try again.`);
     });
   } else if (link) run(); // a shared ?deck=<link>
 }

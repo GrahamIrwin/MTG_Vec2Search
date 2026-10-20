@@ -120,7 +120,10 @@ time, a few KB after that).
    decks play, an average deck and the decklists themselves. The average deck
    takes as many spells and nonbasic lands as the decks play on average (the
    most played of each), then basic lands to make 100, and copies or
-   downloads as a plain list. Its decks are split into **builds** in the
+   downloads as a plain list, or opens in Deck recommendations against yours ("Compare your
+   deck with it": `?deck&from=avg.<file name>&cards=<its card numbers in base 36>&of=<build>`, a
+   link like a tournament list's, the cards in the average deck and not yours, and in yours and
+   not it). Its decks are split into **builds** in the
    browser: spherical k-means over the same IDF-weighted cards, leaving out
    lands (they split decks by budget, not plan), one build per 50 decks to
    start, dropping builds under 8% of the decks and merging ones too alike.
