@@ -422,7 +422,7 @@ gh release download deck-corpus --pattern results.jsonl.gz   # tournament result
 python build_decks.py build        # site/decks/, for Find similar decks
 gh release download price-history --pattern prices.jsonl.gz
 python build_prices.py site        # site/prices/, for Prices and price charts
-python -m http.server -d site      # http://localhost:8000
+python serve.py                    # http://localhost:8000, changes show on a plain refresh
 ```
 
 Tests: `python test_build_index.py`, `python test_build_decks.py`, `python test_build_prices.py` and `node --test` (Node 24).
