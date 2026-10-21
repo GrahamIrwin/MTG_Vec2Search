@@ -196,8 +196,10 @@ def vectorize_card(card, index, find_keywords, card_tags=(), subtype_names=froze
 def load_printings():
     """From every paper printing, by oracle_id: the cheapest current USD price (nonfoil, foil or
     etched), the first release date (YYYY-MM-DD) and the sets it was printed in.
-    Also {set code: (name, release date, set type)} for every paper set."""
-    prices, released, in_sets, sets = {}, {}, {}, {}
+    Also {set code: (name, release date, set type)} for every paper set, and {oracle_id: the other
+    names it's printed under}: Universes Beyond's (Glittering Caves of Aglarond is Gemstone
+    Caverns) and the like, Scryfall's flavor_name and printed_name."""
+    prices, released, in_sets, sets, aliases = {}, {}, {}, {}, {}
     with gzip.open(PRINTINGS_FILE, "rt", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -212,12 +214,17 @@ def load_printings():
                 prices[oracle_id] = min(prices.get(oracle_id, usd[0]), *usd)
             if c.get("released_at"):
                 released[oracle_id] = min(released.get(oracle_id, c["released_at"]), c["released_at"])
+            own = {n.lower() for n in [c["name"], *c["name"].split(" // ")]}
+            for part in [c, *(c.get("card_faces") or [])]:
+                for other in (part.get("flavor_name"), c.get("lang") == "en" and part.get("printed_name")):
+                    if other and other.lower() not in own:
+                        aliases.setdefault(oracle_id, set()).add(other)
             if c.get("set_type") not in NO_SET_FILTER:
                 in_sets.setdefault(oracle_id, set()).add(c["set"])
                 day = c.get("released_at") or ""
                 first = min(sets.get(c["set"], ("", day))[1], day)
                 sets[c["set"]] = (c["set_name"], first, c.get("set_type"))
-    return prices, released, in_sets, sets
+    return prices, released, in_sets, sets, aliases
 
 
 # === Step 4: Write the index ===
@@ -228,6 +235,7 @@ def load_printings():
 #   c/<chunk>.json name + Scryfall id (+ 1 when it has a back face to flip to) for each block of
 #                  CHUNK cards, fetched to show results
 #   names.json     all card names, only fetched for card-name searches and sorting by name
+#   aliases.json   [[another name a card is printed under, card number]] (Universes Beyond's)
 #   released.json  first release date per card (days since 1993-01-01), only fetched to sort by date
 #   s/<set>.json   the cards printed in each set (numbered as in meta's sets), fetched to filter by set
 # Cards are in popularity order (EDHREC rank), so the top results sit in the first chunks.
@@ -256,7 +264,7 @@ def write_json(path, data):
 
 
 def build_index(cards, updated, tags, printings):
-    prices, released, in_sets, all_sets = printings
+    prices, released, in_sets, all_sets, aliases = printings
     terms, keywords, categories = build_term_space(cards, tags)
     index = {t: i for i, t in enumerate(terms)}
     find_keywords = keyword_matcher(keywords)
@@ -302,6 +310,8 @@ def build_index(cards, updated, tags, printings):
     })
     write_json(os.path.join(OUT_DIR, "columns.json"), columns)
     write_json(os.path.join(OUT_DIR, "names.json"), [c["name"] for c in cards])
+    write_json(os.path.join(OUT_DIR, "aliases.json"), sorted([other, i] for i, c in enumerate(cards)
+                                                             for other in aliases.get(c.get("oracle_id"), ())))
     first = [released.get(c.get("oracle_id")) or c.get("released_at") for c in cards]
     write_json(os.path.join(OUT_DIR, "released.json"),
                [(date.fromisoformat(d) - EPOCH).days if d else NO_DATE for d in first])

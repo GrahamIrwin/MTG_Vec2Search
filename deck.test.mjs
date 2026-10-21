@@ -27,6 +27,12 @@ Delver of Secrets
   assert.deepEqual(unknown, ["1 Not A Card"]);
 });
 
+test("a card by another name it's printed under (Universes Beyond's)", () => {
+  const { cards, unknown } = parseDecklist("1 Glittering Caves of Aglarond\n1 Sol Ring", nameLookup(NAMES, [["Glittering Caves of Aglarond", 6]]));
+  assert.deepEqual([...cards].sort(), [0, 6]);
+  assert.deepEqual(unknown, []);
+});
+
 test("Archidekt categories and *CMDR* markers pick the commander; side boards are left out", () => {
   const archidekt = parse("1x Krenko, Mob Boss (ddt) 52 [Commander{top}]\n1x Sol Ring (c21) 263 [Ramp]\n1x Swords to Plowshares (sta) 10 [Maybeboard{noDeck}{noPrice}]");
   assert.deepEqual(archidekt.commanders, [6]);

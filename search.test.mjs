@@ -82,6 +82,12 @@ test("oracle tags: slang, plurals, specificity, and tag words not counted as car
   assert.equal(names("double the number of tokens")[0], "Doubling Season");
 });
 
+test("a name search finds cards by another name they're printed under", () => {
+  const wasteland = cards.findIndex(c => c[0] === "Wasteland");
+  const found = nameSearch(index, cards.map(c => c[0]), "aglarond", {}, [["Glittering Caves of Aglarond", wasteland]]);
+  assert.deepEqual(found.map(r => cards[r.card][0]), ["Wasteland"]);
+});
+
 test("verb forms and common phrasings", () => {
   // "drawing" -> draw; of two equally long matches, the rarer tag (draw-hate) wins over pure-draw
   assert.deepEqual(parsed("punish opponents for drawing cards"), ["tag:draw-hate"]);

@@ -255,15 +255,15 @@ export function search(index, groups, postings, filters = {}) {
   return results.sort(byScoreThenPopularity);
 }
 
-// Nothing recognized in the query: cards whose name contains it, most popular first
-export function nameSearch(index, names, query, filters = {}) {
+// Nothing recognized in the query: cards whose name contains it, or another name it's printed under
+// (aliases: [[name, card]], index/aliases.json: Glittering Caves of Aglarond is Gemstone Caverns)
+export function nameSearch(index, names, query, filters = {}, aliases = []) {
   const passes = filterFn(index, filters);
   const q = query.trim().toLowerCase();
-  const results = [];
-  names.forEach((name, card) => {
-    if (name.toLowerCase().includes(q) && passes(card)) results.push({ card, score: null });
-  });
-  return results;
+  const found = new Set();
+  names.forEach((name, card) => name.toLowerCase().includes(q) && found.add(card));
+  for (const [name, card] of aliases) if (name.toLowerCase().includes(q)) found.add(card);
+  return [...found].sort((a, b) => a - b).filter(passes).map(card => ({ card, score: null }));
 }
 
 // === Sorting ===

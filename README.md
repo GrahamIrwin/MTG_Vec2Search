@@ -35,6 +35,10 @@ time, a few KB after that).
      popularity order, so top results come from the first few chunks
    - `names.json`, `released.json`: names and first-release dates, only fetched
      for card-name searches and the name/date sorts
+   - `aliases.json`: other names cards are printed under (Universes Beyond's: Glittering
+     Caves of Aglarond is Gemstone Caverns; Scryfall's `flavor_name` and English
+     `printed_name`). Searching one finds the card, though its words would read as a search
+     ("cave"), and decklists and the Prices lookup know them too
    - `s/<n>.json`: the cards printed in each set (`meta.json` lists the sets,
      newest first), only fetched to filter by set
 2. In the browser, `site/search.js` maps the query to the same terms:

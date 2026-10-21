@@ -46,6 +46,9 @@ function el(tag, props = {}, ...children) {
 // The site's own data files are checked with the server before a cached copy is used (an
 // unchanged file is a quick "304 Not Modified"): after a rebuild, a stale deck file read with a
 // fresh card index would show the wrong cards
+// Other names cards are printed under ([[name, card]]); none if the file's missing
+let aliasData;
+const getAliases = () => (aliasData ??= getJson("index/aliases.json").catch(() => []));
 async function getJson(url) {
   const res = await fetch(url, { cache: /^https?:/.test(url) ? "default" : "no-cache" });
   if (!res.ok) throw new Error(`${res.status} ${url}`);
@@ -200,12 +203,18 @@ async function runSearch() {
   };
   const set = index.sets.findIndex(([code]) => code === params.get("s"));
   if (set >= 0) filters.printedIn = new Set(decodePosting(await getJson(`index/s/${set}.json`)));
-  const groups = parseQuery(query, index);
-  if (groups.length) {
+  // A name a card is printed under (Glittering Caves of Aglarond: Gemstone Caverns) is that card,
+  // though its words would read as a search ("cave")
+  const q = query.trim().toLowerCase();
+  const printedAs = q ? (await getAliases()).filter(([name]) => name.toLowerCase() === q).map(([, card]) => card) : [];
+  const groups = printedAs.length ? [] : parseQuery(query, index);
+  if (printedAs.length) {
+    results = nameSearch(index, [], query, filters, (await getAliases()).filter(([, card]) => printedAs.includes(card)));
+  } else if (groups.length) {
     const postings = await Promise.all(termsNeeded(index, groups).map(async t => [t, decodePosting(await getJson(`index/t/${t}.json`))]));
     results = search(index, groups, new Map(postings), filters);
   } else if (query.trim() && filters.maxPrice === null) {
-    results = nameSearch(index, await getJson("index/names.json"), query, filters);
+    results = nameSearch(index, await getJson("index/names.json"), query, filters, await getAliases());
   } else {
     results = search(index, [], new Map(), filters); // filters only
   }
@@ -217,7 +226,7 @@ async function runSearch() {
     $("recognized").replaceChildren(el("span", { className: "label", textContent: "Matched" }),
       ...chips.map(c => el("span", { className: "term-chip", textContent: c })));
   } else if (query) {
-    $("recognized").replaceChildren(el("span", { className: "muted", textContent: `Cards named “${query}”` }));
+    $("recognized").replaceChildren(el("span", { className: "muted", textContent: printedAs.length ? `Printed as “${query}”` : `Cards named “${query}”` }));
   }
 
   $("sort").replaceChildren(...Object.entries(SORTS).map(([value, label]) => el("option", { value, textContent: label })));
@@ -541,11 +550,11 @@ const deckMessage = text => {
 let deckData;
 function loadDeckData() {
   deckData ??= Promise.all([getMeta(), getJson("index/columns.json"), getJson("index/names.json"),
-    getDeckIndex(), usdRate(currency)])
-    .then(([meta, columns, names, decks, rate]) => {
+    getDeckIndex(), usdRate(currency), getAliases()])
+    .then(([meta, columns, names, decks, rate, aliases]) => {
       money = moneyFormatter(currency, rate);
       index = buildIndex(meta, columns);
-      return { names, lookup: nameLookup(names), decks, files: new Set(decks.commanders.map(c => c[0])) };
+      return { names, lookup: nameLookup(names, aliases), decks, files: new Set(decks.commanders.map(c => c[0])) };
     });
   deckData.catch(() => (deckData = null)); // try again next time
   return deckData;
@@ -2866,6 +2875,7 @@ async function showPrices() {
     if ($("price-lookup").value.trim().toLowerCase() !== q) return; // typed on meanwhile
     const found = [];
     names.forEach((name, card) => name.toLowerCase().includes(q) && found.push(card));
+    for (const [name, card] of await getAliases()) if (name.toLowerCase().includes(q) && !found.includes(card)) found.push(card);
     found.sort((a, b) => !names[a].toLowerCase().startsWith(q) - !names[b].toLowerCase().startsWith(q) || a - b);
     if (!found.length) {
       $("price-lookup-note").textContent = `No card is named like “${typed}”.`;

@@ -1240,6 +1240,6 @@ if __name__ == "__main__":
         sys.exit(0 if share(load_corpus(), state) else 1)
     else:
         combos = load_combos()  # first: reading it takes 2 GB for a moment, before the corpus is in memory
-        prices, _, in_sets, sets = load_printings()
+        prices, _, in_sets, sets, _ = load_printings()
         build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=prices,
               results=load_corpus(RESULTS), precons=precon_sets(in_sets, sets), combos=combos)

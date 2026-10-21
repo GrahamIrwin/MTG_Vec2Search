@@ -12,12 +12,14 @@ const OUT_OF_DECK = /^(sideboard|maybeboard|considering|tokens?)$/i;
 const fold = s => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’`]/g, "'").trim();
 
 // names: every card name, by card number (index/names.json). Double-faced cards can be
-// written with just their front face ("Delver of Secrets").
-export function nameLookup(names) {
+// written with just their front face ("Delver of Secrets"), and a card by another name it's
+// printed under (aliases: [[name, card]], index/aliases.json: Glittering Caves of Aglarond)
+export function nameLookup(names, aliases = []) {
   const lookup = new Map();
   names.forEach((name, card) => {
     for (const n of [name, name.split(" // ")[0]]) if (!lookup.has(fold(n))) lookup.set(fold(n), card);
   });
+  for (const [name, card] of aliases) if (!lookup.has(fold(name))) lookup.set(fold(name), card);
   return lookup;
 }
 
