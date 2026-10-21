@@ -100,6 +100,12 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(os.path.join(out, "0.json"), encoding="utf-8") as f:
         shard = json.load(f)
     assert shard["cards"][:2] == [2, 98] and len(shard["cards"]) == 97  # c0 and c96 are in every deck
+    # A card banned in Commander (Jeweled Lotus) is left out of what the decks play: nothing suggests it
+    banned = [dict(c) for c in cards]
+    banned[3]["legalities"] = {"commander": "banned"}  # c1, in 4 of the 5 decks
+    build(corpus, banned, tags, os.path.join(tmp, "banned"), today=date(2026, 10, 4))
+    with open(os.path.join(tmp, "banned", "0.json"), encoding="utf-8") as f:
+        assert 3 in shard["cards"] and 3 not in json.load(f)["cards"]
     assert shard["tags"] == [["pump", [0, 1]]] and len(shard["signature"]) == 60, shard["tags"]
     precon = [sum(shard["precon"][:i + 1]) for i in range(len(shard["precon"]))]
     assert sorted(shard["cards"][p] for p in precon) == [2, 7], shard["precon"]

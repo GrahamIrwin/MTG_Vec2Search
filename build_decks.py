@@ -1057,6 +1057,8 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
     combos: see load_combos."""
     number = {c["oracle_id"]: i for i, c in enumerate(cards) if c.get("oracle_id")}
     basic = {c["oracle_id"] for c in cards if "Basic" in c.get("type_line", "")}
+    # Banned in Commander now (Jeweled Lotus): left out of what its decks play, so nothing suggests it
+    banned = {c["oracle_id"] for c in cards if c.get("legalities", {}).get("commander") == "banned"}
     prices, precons = prices or {}, precons or {}
     # Combos by their least played card (the highest number), which a commander's decks must play
     by_rarest = defaultdict(list)
@@ -1076,7 +1078,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             continue
         key = "-".join(str(n) for n in sorted(number[o] for o in d["commanders"]))
         played = sorted({number[o] for o in d["cards"]
-                         if o in number and o not in basic and o not in d["commanders"]})
+                         if o in number and o not in basic and o not in banned and o not in d["commanders"]})
         groups[key].append((d, played))
 
     # A window is every deck made from its first day on. None: no deck known to be made in it, or no
