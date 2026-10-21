@@ -633,11 +633,19 @@ def estimator(real, gf):
     line from one to the next. None for a day it has no price on, or if it has no day in common."""
     d0, theirs = gf
 
-    def on(d):  # theirs: the median of the 5 days around, so a day of a glitch (a price doubled) is gone
+    def median(d):  # the median of the 5 days around, so a day of a glitch (a price doubled) is gone
         if not (0 <= d - d0 < len(theirs)) or theirs[d - d0] is None:
             return None
         near = sorted(c for c in theirs[max(0, d - d0 - 2):d - d0 + 3] if c is not None)
         return near[len(near) // 2]
+
+    def on(d):  # and none for a longer glitch: 5 times (or a fifth of) the price both 30 days before and after
+        if not (t := median(d)):
+            return t
+        before, after = median(d - 30), median(d + 30)
+        if before and after and (t > 5 * max(before, after) or 5 * t < min(before, after)):
+            return None
+        return t
     both = sorted((d, math.log(c / t)) for d, c in real.items() if (t := on(d)))
     if not both:
         return lambda d: None
@@ -869,8 +877,9 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
         total = [[d, c, n, 0] for d, (c, n) in ours_total.items()]
         if picked:
             first = max(gold[i, "usd"][0] for i in picked)
-            # Each printing's last price, for up to 60 days (its estimates have holes); worked out
-            # weekly and on our days, the only days shown, and the week's kept for the days between
+            # Each printing's last price (its estimates have holes), a week left out when more than 1 in 50
+            # are over 60 days old; worked out weekly and on our days, the only days shown, and the
+            # week's kept for the days between
             sums, seen = [], {}
             for d in range(first, last + 1):
                 if (d - first) % 7 and d not in observed:
@@ -879,8 +888,9 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
                 for i in picked:
                     if (c := on(*prices[i, "usd"], d)) is not None:
                         seen[i] = (d, c)
-                each = [c for i in picked if (e := seen.get(i)) and d - e[0] <= 60 for c in [e[1]]]
-                sums.append(sum(each) if len(each) == len(picked) else None)
+                stale = sum(d - e[0] > 60 for e in seen.values())
+                sums.append(sum(c for _, c in seen.values())
+                            if len(seen) == len(picked) and stale <= len(picked) // 50 else None)
             est = estimator({d: c for d, (c, _) in ours_total.items()}, (first, sums))
             cards = max((n for _, n in ours_total.values()), default=0)
             total += [[d, c, cards, 1] for d in range(last, first - 1, -7)

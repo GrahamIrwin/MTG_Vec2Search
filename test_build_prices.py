@@ -95,6 +95,9 @@ est = estimator({0: 100, 10: 100}, theirs)
 assert est(0) == 100 and est(10) == 100 and est(-5) == 100, [est(d) for d in (0, 10, -5)]
 assert abs(est(5) - 115 / (1.1 ** 0.5 * 1.2 ** 0.5)) <= 1 and est(11) is None and est(12) == 200
 assert estimator({0: 100}, (50, [1, 2]))(51) is None, "no day in common: no estimates"
+glitch = estimator({0: 100}, (0, [100] * 40 + [6000] * 15 + [100] * 45 + [600] * 60))
+assert glitch(45) is None and glitch(30) == 100 and glitch(130) == 600, \
+    "two weeks at 60 times: left out; a rise that stays: kept"
 
 # Cheaper alternatives: the same type, within its colors, half its price or less, most of its tags
 from build_prices import alternatives
