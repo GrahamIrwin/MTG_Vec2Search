@@ -717,7 +717,7 @@ async function findSimilar(key) {
       textContent: `${parsed.unknown.length} unrecognized ${parsed.unknown.length === 1 ? "line" : "lines"}` }));
   }
   $("deck-summary").replaceChildren(...summary);
-  showDeckValue([...mine, ...commanders]).then(() => deckSections(), err => {
+  showDeckValue([...mine, ...commanders], parsed.printings).then(() => deckSections(), err => {
     console.error(err); // no prices built: the page goes without
     $("deck-value-panel").hidden = true;
   });
@@ -2343,19 +2343,31 @@ function showWatchButton() {
 // the cards that moved most in 30 days (prices/cards.json)
 let cardPrices;
 const showDeckMovers = typedGallery($("deck-movers-types"), $("deck-movers"), $("more-deck-movers"));
-async function showDeckValue(deck) {
+// A set's printings' prices (prices/sets/set-<code>.json: {number: {id, finish: [now, 30, 365 days before]}}), each fetched once
+const setPrices = new Map();
+const getSetPrices = code => setPrices.get(code)
+  ?? setPrices.set(code, getJson(`prices/sets/set-${code}.json`).catch(() => ({}))).get(code);
+
+// The deck's worth: each card at the printing its line names ("(CMM) 400 *F*"), else at its cheapest
+async function showDeckValue(deck, printings = new Map()) {
   cardPrices ??= getJson("prices/cards.json").catch(err => { cardPrices = null; throw err; });
   const p = await cardPrices;
-  const priced = deck.filter(c => p.now[c] >= 0);
+  const codes = [...new Set(deck.map(c => printings.get(c)?.set).filter(Boolean))];
+  const sets = Object.fromEntries(await Promise.all(codes.map(async code => [code, await getSetPrices(code)])));
+  const at = new Map(deck.map(c => {
+    const named = printings.get(c), printing = named && sets[named.set][named.number], own = printing?.[named.finish];
+    return [c, own ? { now: own[0], 30: own[1], 365: own[2], named, id: printing.id } : { now: p.now[c], 30: p["30"][c], 365: p["365"][c] }];
+  }));
+  const priced = deck.filter(c => at.get(c).now >= 0);
   if (!priced.length) {
     $("deck-value-panel").hidden = true;
     return;
   }
-  const worth = cards => cards.reduce((sum, c) => sum + p.now[c], 0);
+  const worth = cards => cards.reduce((sum, c) => sum + at.get(c).now, 0);
   // A change over the cards priced both then and now
   const change = w => {
-    const both = priced.filter(c => p[w][c] >= 0);
-    const now = worth(both), then = both.reduce((sum, c) => sum + p[w][c], 0);
+    const both = priced.filter(c => at.get(c)[w] >= 0);
+    const now = worth(both), then = both.reduce((sum, c) => sum + at.get(c)[w], 0);
     const diff = now - then;
     return both.length && el("span", {},
       `${diff >= 0 ? "up" : "down"} ${wholeDollars(Math.abs(diff))} (`,
@@ -2363,18 +2375,25 @@ async function showDeckValue(deck) {
       `) ${w === "30" ? "in 30 days" : "in a year"}` + (both.length < priced.length ? ` (the ${both.length} cards with a price then)` : ""));
   };
   const parts = ["30", "365"].map(change).filter(Boolean);
+  const named = priced.filter(c => at.get(c).named).length;
   $("deck-value-lede").replaceChildren(
-    `At each card's cheapest printing, the ${priced.length} cards with a price are worth ${wholeDollars(worth(priced))}`
+    (named === priced.length ? "At the printings in your list"
+      : named ? `At the printings in your list (the cheapest printing for the ${priced.length - named} without a priced one named)`
+      : "At each card's cheapest printing")
+      + `, the ${priced.length} cards with a price are worth ${wholeDollars(worth(priced))}`
       + (priced.length < deck.length ? ` (${deck.length - priced.length} have none)` : ""),
     ...(parts.length ? [": ", ...parts.flatMap((x, k) => [k ? " and " : "", x])] : []),
     ". The cards whose prices moved most in 30 days:");
-  const size = c => Math.abs(Math.log(p.now[c] / p["30"][c]));
-  const moved = priced.filter(c => p["30"][c] > 0 && p.now[c] !== p["30"][c]).sort((a, b) => size(b) - size(a));
+  const size = c => Math.abs(Math.log(at.get(c).now / at.get(c)[30]));
+  const moved = priced.filter(c => at.get(c)[30] > 0 && at.get(c).now !== at.get(c)[30]).sort((a, b) => size(b) - size(a));
   $("deck-value-panel").hidden = false;
-  await showDeckMovers(moved.map(c => ({
-    card: c, type: typeOf(c), price: p.now[c], detail: priceChange(p.now[c], p["30"][c]),
-    tone: p.now[c] > p["30"][c] ? "up" : "down", note: `${dollars(p["30"][c])} 30 days ago`,
-  })));
+  await showDeckMovers(moved.map(c => {
+    const { now, 30: then, named: printing, id } = at.get(c);
+    return {
+      card: c, id, type: typeOf(c), price: now, foil: printing?.finish > 0, detail: priceChange(now, then),
+      tone: now > then ? "up" : "down", note: `${dollars(then)} 30 days ago`,
+    };
+  }));
 }
 
 const PRICE_WINDOWS = [7, 30, 90, 365]; // WINDOWS in build_prices.py

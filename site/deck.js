@@ -6,7 +6,8 @@
 // "Commander"/"Deck"/"Sideboard" section headers (Arena, Moxfield), and Archidekt's
 // "1x Atraxa, Praetors' Voice (2x2) 190 [Commander{top}]" categories.
 const SECTION = /^(?:\/\/\s*)?(commanders?|deck|main(?:board)?|sideboard|maybeboard|considering|companion|tokens?)\s*:?\s*(?:\(\d+\))?$/i;
-const LINE = /^(?:(\d+)\s*x?\s+)?(.+?)(?:\s+\([A-Za-z0-9]{2,6}\)(?:\s+\S+)?)?(?:\s+\*[A-Z]+\*)*(?:\s+\[([^\]]*)\])?(?:\s+\^[^^]*\^)?\s*$/;
+// Groups: copies, name, set code, collector number, markers (*F* foil, *E* etched, *CMDR*), category
+const LINE = /^(?:(\d+)\s*x?\s+)?(.+?)(?:\s+\(([A-Za-z0-9]{2,6})\)(?:\s+([^\s*\[^]\S*))?)?((?:\s+\*[A-Z]+\*)*)(?:\s+\[([^\]]*)\])?(?:\s+\^[^^]*\^)?\s*$/;
 const OUT_OF_DECK = /^(sideboard|maybeboard|considering|tokens?)$/i;
 
 const fold = s => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’`]/g, "'").trim();
@@ -23,7 +24,8 @@ export function nameLookup(names, aliases = []) {
   return lookup;
 }
 
-// Returns { cards: Set of card numbers, commanders: [card numbers], possible: [card numbers], unknown: [lines] }.
+// Returns { cards: Set of card numbers, commanders: [card numbers], possible: [card numbers], unknown: [lines],
+// printings: Map of card number -> { set, number, finish (0 nonfoil, 1 foil, 2 etched) } for lines that name one }.
 // A commander is marked (*CMDR*, an Archidekt [Commander] category or a Commander section), wherever
 // it is, a sideboard included. With none marked, `possible` are the cards at the bottom that may be
 // the commanders (findSimilar takes them if they are): Moxfield's MTGO export puts them in the
@@ -33,6 +35,7 @@ export function parseDecklist(text, lookup) {
   const commanders = [];
   const unknown = [];
   const sideboard = [];
+  const printings = new Map();
   let group = []; // the cards since the last blank line or section header
   let groups = 0; // groups of cards before it
   let section = "deck";
@@ -52,12 +55,15 @@ export function parseDecklist(text, lookup) {
       continue;
     }
     const m = line.match(LINE);
-    const tags = (m?.[3] ?? "").toLowerCase();
+    const tags = (m?.[6] ?? "").toLowerCase();
     const name = m?.[2].replace(/\s+\*CMDR\*$/i, "");
     const card = name && lookup.get(fold(name));
     if (card === undefined) {
       unknown.push(line);
       continue;
+    }
+    if (m[3] && m[4] && !printings.has(card)) {
+      printings.set(card, { set: m[3].toLowerCase(), number: m[4], finish: /\*E\*/.test(m[5]) ? 2 : /\*F\*/.test(m[5]) ? 1 : 0 });
     }
     const category = tags.split(/[,{]/)[0].trim();
     if (section.startsWith("commander") || /\*cmdr\*/i.test(line) || category === "commander") {
@@ -76,7 +82,7 @@ export function parseDecklist(text, lookup) {
   const possible = commanders.length ? []
     : fewAtTheEnd(sideboard) ? sideboard
     : groups && fewAtTheEnd(group) ? group : [];
-  return { cards, commanders, possible, unknown };
+  return { cards, commanders, possible, unknown, printings };
 }
 
 // === Similar decks ===

@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory() as tmp:
     with gzip.open(os.path.join(tmp, "p.jsonl.gz"), "wt") as f:
         for i, oracle, rl in [("up", "o1", False), ("rl", "o2", True), ("cheap", "o1", False)]:
             # rl comes in nonfoil only, so its foil price (one TCGplayer product for both, as 7th Edition's) is left out
-            f.write(json.dumps({"id": i, "oracle_id": oracle, "set_name": "Set " + i, "reserved": rl,
+            f.write(json.dumps({"id": i, "oracle_id": oracle, "set_name": "Set " + i, "set": "s" + i, "collector_number": "7", "reserved": rl,
                                 "finishes": ["nonfoil"] if rl else ["nonfoil", "foil"]}) + "\n")
     site_data(site, [{"oracle_id": "o2"}, {"oracle_id": "o1"}], tmp, os.path.join(tmp, "p.jsonl.gz"), os.path.join(tmp, "none"))
     read = lambda *path: json.load(open(os.path.join(tmp, *path)))
@@ -86,6 +86,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert reserved["playable"] == reserved["total"], "nothing in it is not to play with"
     assert read("p", "up.json")["up"]["usd_foil"] == [[(date(2026, 9, 1) - date(1993, 1, 1)).days, 900]]
     assert "usd_foil" not in read("p", "rl.json")["rl"], "a finish it doesn't come in"
+    assert read("sets", "set-sup.json") == {"7": {"id": "up", "0": [400, 200, -1], "1": [900, 900, -1]}}, "by set and number, for decklists"
 
 # Estimates between our days: the other guide's prices, scaled to meet ours. Theirs are 10% over
 # ours on day 0 and 20% over on day 10, so on day 5 they're scaled down by about 15%; before our

@@ -827,6 +827,8 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     prices US cents, a printing's row is [card number, Scryfall id, set (in "sets"), finish (0 nonfoil,
     1 foil, 2 etched), price on the last day, then ...]):
       days.json        the days with prices of ours
+      sets/set-<code>.json  {collector number: {"id": Scryfall id, finish: [cents now, 30 and 365 days before (-1: none)]}}:
+                       each printing's price by set, for a decklist's printings ("(CMM) 400 *F*")
       cards.json       {"now", "30", "90", "365": [cents by card number, -1: none]}: each card's
                        cheapest printing's price (any finish) now, and 30, 90 and 365 days before
       alts/<n>.json    {card number - ALT_BLOCK * n: [cheaper cards that do the same thing]} for card
@@ -856,11 +858,13 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     last = num[-1]
     order = {c["oracle_id"]: n for n, c in enumerate(cards)}  # card numbers, in build_index.py's order
     info, sets, reserved, unplayable, released, finishes, plain = {}, {}, defaultdict(list), set(), defaultdict(list), {}, {}
+    where = {}  # printing -> (set code, collector number), for decklists' "(CMM) 400"
     with gzip.open(printings, "rt", encoding="utf-8") as f:
         for c in map(json.loads, f):
             oracle = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
             if oracle in order and c["id"] in hist["series"]:
                 info[c["id"]] = (order[oracle], sets.setdefault(c["set_name"], len(sets)))
+                where[c["id"]] = (c["set"], c["collector_number"])
                 # Just the finishes it comes in: 7th to 9th Edition's foils are printings of their own
                 # (325★), but MTGJSON gives the nonfoil one TCGplayer's foil price too (one product)
                 finishes[c["id"]] = {US[k] for k, f in enumerate(("nonfoil", "foil", "etched")) if f in c.get("finishes", [])}
@@ -912,6 +916,9 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
             past = [price(real, est, last - w, max(7, w // 10)) for w in WINDOWS]
             card, s = info[i]
             rows.append([card, i, s, US.index(finish), now, *(-1 if c is None else c for c in past)])
+    by_set = defaultdict(lambda: defaultdict(dict))  # set code -> collector number -> finish -> [now, 30, 365 days before]
+    for card, i, s, finish, now, _, before30, _, before365 in rows:
+        by_set[where[i][0]][where[i][1]].update({"id": i, finish: [now, before30, before365]})
     # Printings of a card in a set with the very same prices are one TCGplayer product (Odyssey's
     # Cephalid Looter #72 and #72†): one of them, the plain collector number's
     rows.sort(key=lambda r: not plain[r[1]])
@@ -919,6 +926,8 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     rows = [r for r in rows if (key := (r[0], r[2], r[3], *r[4:])) not in seen and not seen.add(key)]
     shutil.rmtree(out_dir, ignore_errors=True)
     write_json(os.path.join(out_dir, "days.json"), num)
+    for code, numbers in by_set.items():  # "set-": Conflux is "con", a name Windows keeps for itself
+        write_json(os.path.join(out_dir, "sets", f"set-{code}.json"), numbers)
     # Reprints: cards with a printing out in the last REPRINT_DAYS and others REPRINT_OLDER days
     # older, and how the older printing that was cheapest REPRINT_BEFORE days before it moved since
     reprints = []

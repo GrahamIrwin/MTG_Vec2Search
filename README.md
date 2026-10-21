@@ -321,10 +321,13 @@ time, a few KB after that).
    - **Cheaper cards that do the same thing**, in a card's details, for cards at $5 or more: the
      same main type, within its color identity, half its price or less, with most of its Scryfall
      Tagger tags (each weighted by how rare it is), from `prices/alts/<n>.json`.
-   - **Deck recommendations** also say what a deck is worth: its cards at their cheapest
-     printings now, up or down how much in 30 days and a year (over the cards priced then), and
-     the ones that moved most in 30 days, from `prices/cards.json` (each card's cheapest price now,
-     30 and 365 days before, by card number).
+   - **Deck recommendations** also say what a deck is worth: each card at the printing its line
+     names (`1 Sol Ring (CMM) 400 *F*`: set, collector number, `*F*` foil or `*E*` etched, as
+     Moxfield and Archidekt export them), else at its cheapest, now, up or down how much in 30
+     days and a year (over the cards priced then), and the ones that moved most in 30 days. The
+     printings' prices are in `prices/sets/set-<code>.json` (one file per set, so a deck fetches
+     only its sets'), the cheapest in `prices/cards.json` (each card's cheapest price now, 30 and
+     365 days before, by card number).
 
 ## Updating card data
 

@@ -27,6 +27,13 @@ Delver of Secrets
   assert.deepEqual(unknown, ["1 Not A Card"]);
 });
 
+test("the printing a line names: set, collector number and finish", () => {
+  const { printings } = parse("1 Atraxa, Praetors' Voice (2X2) 190 *CMDR*\n1x Sol Ring (CMM) 400 *F*\n1 Island (PLST) TMP-345 *E*\nDelver of Secrets");
+  assert.deepEqual(Object.fromEntries(printings), {
+    1: { set: "2x2", number: "190", finish: 0 }, 0: { set: "cmm", number: "400", finish: 1 }, 3: { set: "plst", number: "TMP-345", finish: 2 },
+  });
+});
+
 test("a card by another name it's printed under (Universes Beyond's)", () => {
   const { cards, unknown } = parseDecklist("1 Glittering Caves of Aglarond\n1 Sol Ring", nameLookup(NAMES, [["Glittering Caves of Aglarond", 6]]));
   assert.deepEqual([...cards].sort(), [0, 6]);
