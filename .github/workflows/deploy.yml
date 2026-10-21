@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # numpy: build_prices.py works out every day's estimated prices with it
+      - run: python3 -m pip install --break-system-packages numpy
       - run: python3 test_build_index.py && python3 test_build_decks.py && python3 test_build_prices.py && node --test
       - run: python3 build_index.py
       # Similar decks, from the corpus that "Crawl decks" keeps on the deck-corpus release, with the

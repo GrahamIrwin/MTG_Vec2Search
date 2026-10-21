@@ -78,6 +78,7 @@ CARD_TYPES = ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artif
 REPRINT_DAYS = 120  # a printing this new is a reprint, when its card has printings older than
 REPRINT_OLDER = 180  # this many days before it
 REPRINT_BEFORE = 45  # an older printing's price before a reprint: this many days before it came out
+ESTIMATE_MOVE = 0.01  # an estimated price is kept (for the site) where it moved this much since the last kept one
 
 
 def load(path=HISTORY):
@@ -524,25 +525,27 @@ def goldfish_parts():
 
 
 def goldfish_rows(path=GOLDFISH_FILE):
-    """goldfish_crawl's lines, less a last one cut off by stopping it mid-write, with those of the
-    workers' files not merged in yet. Read from the release's gzipped copy (path + ".gz") when
-    there's no file of them here (the deploy)."""
+    """goldfish_crawl's lines, one at a time (they're big), less a last one cut off by stopping it
+    mid-write, with those of the workers' files not merged in yet. Read from the release's gzipped
+    copy (path + ".gz") when there's no file of them here (the deploy)."""
     if not os.path.exists(path) and os.path.exists(path + ".gz"):
         with gzip.open(path + ".gz", "rt", encoding="utf-8") as f:
-            return [json.loads(line) for line in f]
-    rows = []
+            yield from map(json.loads, f)
+        return
     for file in [path] + (goldfish_parts() if path == GOLDFISH_FILE else []):
         if not os.path.exists(file):
             continue
         with open(file, encoding="utf-8") as f:
-            lines = f.read().splitlines()
-        for k, line in enumerate(lines):
+            line = None
+            for after in f:
+                if line is not None:
+                    yield json.loads(line)  # a line before the last: whole, or the file's broken
+                line = after
             try:
-                rows.append(json.loads(line))
+                if line is not None:
+                    yield json.loads(line)
             except ValueError:
-                if k < len(lines) - 1:
-                    raise
-    return rows
+                pass
 
 
 def cut_off(path):
@@ -598,9 +601,10 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
         (x for k, x in slugs.items() if fold(set_name) in k or k in fold(set_name)), None)
     last = max(hist["days"])
     # Done: found, or looked for on its card page; one not found by the set's page is looked for again
-    rows = goldfish_rows(path)
-    done = {(r["id"], r["finish"]) for r in rows if r.get("card") or r.get("by") == "card"}
-    again = {(r["id"], r["finish"]) for r in rows} - done
+    done, again = set(), set()
+    for r in goldfish_rows(path):
+        (done if r.get("card") or r.get("by") == "card" else again).add((r["id"], r["finish"]))
+    again -= done
     label = f"[{part[0] + 1}/{part[1]}] " if part else ""
     if part:
         path = f"goldfish.{part[0]}.jsonl"
@@ -709,51 +713,79 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
 
 
 def goldfish_series(path=GOLDFISH_FILE):
-    """{(printing, finish): (first day, [cents a day from it, None for none])} of the histories
-    goldfish_crawl fetched (days are days since EPOCH)."""
-    return {(r["id"], r["finish"]): ((date.fromisoformat(r["start"]) - EPOCH).days, r["cents"])
-            for r in goldfish_rows(path) if r.get("cents")}
+    """((printing, finish), (first day, numpy array of cents a day from it, nan for none)) of each
+    history goldfish_crawl fetched, one at a time (days are days since EPOCH)."""
+    import numpy as np  # for the site's estimates only: pip install numpy
+    for r in goldfish_rows(path):
+        if r.get("cents"):
+            yield (r["id"], r["finish"]), ((date.fromisoformat(r["start"]) - EPOCH).days, np.array(r["cents"], dtype=np.float32))
 
 
 def estimator(real, gf):
-    """A printing's estimated price on any day, from another guide's prices gf = (first day, [cents])
-    scaled to meet ours, real = {day: cents} on the days we have. The scale (ln(ours / theirs)) on
-    each of our days is the median of it and its neighbours' within 3 days, and in between a straight
-    line from one to the next. None for a day it has no price on, or if it has no day in common."""
+    """A printing's estimated price on any day, from another guide's prices gf = (first day, [cents
+    a day, None or nan for none]) scaled to meet ours, real = {day: cents} on the days we have. The
+    scale (ln(ours / theirs)) on each of our days is the median of it and its neighbours' within 3
+    days, and in between a straight line from one to the next. est(day) is None for a day it has no
+    price on, or if it has no day in common; est.d0 and est.values (cents a day from d0, nan for
+    none) are every day's at once."""
+    import numpy as np
     d0, theirs = gf
-
-    def median(d):  # the median of the 5 days around, so a day of a glitch (a price doubled) is gone
-        if not (0 <= d - d0 < len(theirs)) or theirs[d - d0] is None:
-            return None
-        near = sorted(c for c in theirs[max(0, d - d0 - 2):d - d0 + 3] if c is not None)
-        return near[len(near) // 2]
-
-    def on(d):  # and none for a longer glitch: 5 times (or a fifth of) the price both 30 days before and after
-        if not (t := median(d)):
-            return t
-        before, after = median(d - 30), median(d + 30)
-        if before and after and (t > 5 * max(before, after) or 5 * t < min(before, after)):
-            return None
-        return t
-    both = sorted((d, math.log(c / t)) for d, c in real.items() if (t := on(d)))
-    if not both:
-        return lambda d: None
-    at_days = [d for d, _ in both]
-    scale = []
-    for d, _ in both:
-        near = sorted(r for _, r in both[bisect.bisect_left(at_days, d - 3):bisect.bisect_right(at_days, d + 3)])
-        scale.append(near[len(near) // 2])
+    theirs = np.asarray(theirs, dtype=np.float64)
+    n = len(theirs)
+    # The median of the 5 days around (the upper one of an even few), so a day of a glitch (a price
+    # doubled) is gone
+    nan2 = np.full(2, np.nan)
+    window = np.sort(np.lib.stride_tricks.sliding_window_view(np.concatenate([nan2, theirs, nan2]), 5), axis=1)
+    med = window[np.arange(n), (~np.isnan(window)).sum(axis=1) // 2]
+    med[np.isnan(theirs) | ~(med > 0)] = np.nan
+    # And none for a longer glitch: 5 times (or a fifth of) the price both 30 days before and after
+    before, after = np.full(n, np.nan), np.full(n, np.nan)
+    before[30:], after[:-30] = med[:-30], med[30:]
+    with np.errstate(invalid="ignore"):
+        med[(before > 0) & (after > 0) & ((med > 5 * np.fmax(before, after)) | (5 * med < np.fmin(before, after)))] = np.nan
+    both = sorted((d, math.log(c / med[d - d0])) for d, c in real.items() if 0 <= d - d0 < n and med[d - d0] > 0)
+    values = np.full(n, np.nan, dtype=np.float32)
+    if both:
+        at_days = [d for d, _ in both]
+        scale = []
+        for d, _ in both:
+            near = sorted(r for _, r in both[bisect.bisect_left(at_days, d - 3):bisect.bisect_right(at_days, d + 3)])
+            scale.append(near[len(near) // 2])
+        values[:] = np.round(med * np.exp(np.interp(np.arange(d0, d0 + n), at_days, scale)))
 
     def est(d):
-        if not (t := on(d)):
-            return None
-        j = bisect.bisect_right(at_days, d)
-        if j in (0, len(at_days)):
-            r = scale[0] if j == 0 else scale[-1]
-        else:
-            r = scale[j - 1] + (scale[j] - scale[j - 1]) * (d - at_days[j - 1]) / (at_days[j] - at_days[j - 1])
-        return round(t * math.exp(r))
+        return int(values[d - d0]) if 0 <= d - d0 < n and not math.isnan(values[d - d0]) else None
+    est.d0, est.values = d0, values
     return est
+
+
+def daily(real, est):
+    """A printing's estimated prices for the site: est (estimator()) on every day it has one, but
+    within 3 days of one of ours (real = {day: cents}), as [days since the point before (day 0 for
+    the first), change in cents (null: none from that day until the next point), ...]: a point
+    where it moved ESTIMATE_MOVE or more (a cent at least) since the last, so flat in between."""
+    import numpy as np
+    values = est.values.copy()
+    near = np.array(sorted(real), dtype=np.int64) - est.d0
+    for k in range(-3, 4):
+        at_k = near + k
+        values[at_k[(at_k >= 0) & (at_k < len(values))]] = np.nan
+    gone = np.isnan(values)
+    changed = np.flatnonzero(np.concatenate([[True], (values[1:] != values[:-1]) & ~(gone[1:] & gone[:-1])]))
+    out, prev, last, on = [], 0, 0, False
+    for k in changed.tolist():  # where it changed: kept if it started, stopped or moved enough
+        d = est.d0 + k
+        if gone[k]:
+            if on:
+                out += [d - prev, None]
+                prev, on = d, False
+        elif not on or abs(values[k] - last) >= max(1, ESTIMATE_MOVE * last):
+            c = int(values[k])
+            out += [d - prev, c - last]
+            prev, last, on = d, c, True
+    if on:
+        out += [est.d0 + len(values) - prev, None]
+    return out
 
 
 def alternatives(cards, tags, prices):
@@ -814,16 +846,14 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
                        nonfoil printing) over time, of all printings or just the ones to play with
                        (not Collectors' Edition's, 30th Anniversary's, gold-bordered or oversized)
       p/<first 3 characters of the Scryfall id>.json  each printing's prices: {finish: [[day,
-                       cents or null]] where they changed on our days, finish + "_e": [[first day,
-                       days apart, cents, change in cents, ...]]}: estimated prices between ours
-                       (estimator()), weekly for the last 3 years and every 4 weeks before
+                       cents or null]] where they changed on our days, finish + "_d": the estimated
+                       prices between ours (estimator()), a day at a time, as daily()
     A price on the Prices page is the median of the printing's last 3 days within a week (estimated
     ones too), so one odd day doesn't make it rise or fall."""
     days = sorted(hist["days"])
     num = [(date.fromisoformat(d) - EPOCH).days for d in days]
     number = dict(zip(days, num))
     last = num[-1]
-    gold = goldfish_series(goldfish)
     order = {c["oracle_id"]: n for n, c in enumerate(cards)}  # card numbers, in build_index.py's order
     info, sets, reserved, unplayable, released, finishes, plain = {}, {}, defaultdict(list), set(), defaultdict(list), {}, {}
     with gzip.open(printings, "rt", encoding="utf-8") as f:
@@ -857,8 +887,10 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     for i in info:
         for finish, series in hist["series"][i].items():
             if finish in finishes[i]:
-                real = ours(series)
-                prices[i, finish] = (real, estimator(real, gold[i, finish]) if (i, finish) in gold else None)
+                prices[i, finish] = (ours(series), None)
+    for key, gf in goldfish_series(goldfish):
+        if key in prices:
+            prices[key] = (prices[key][0], estimator(prices[key][0], gf))
 
     def on(real, est, d):
         c = real.get(d)
@@ -965,7 +997,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
                   if (have := [i for i in ids if counts(i) and (i, "usd") in prices and prices[i, "usd"][1]])]
         total = [[d, c, n, 0] for d, (c, n) in ours_total.items()]
         if picked:
-            first = max(gold[i, "usd"][0] for i in picked)
+            first = max(prices[i, "usd"][1].d0 for i in picked)
             # Each printing's last price (its estimates have holes), a week left out when more than 1 in 50
             # are over 60 days old; worked out weekly and on our days, the only days shown, and the
             # week's kept for the days between
@@ -992,27 +1024,13 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
                {**with_sets([[*r, int(r[1] not in unplayable)] for r in rows if r[1] in on_list]),
                 "total": reserve_total(lambda i: True), "playable": reserve_total(lambda i: i not in unplayable)})
 
-    def runs(real, est, d0):  # estimated prices: [[first day, days apart, cents, change, ...]]
-        out = []
-        for start, end, step in ((d0, last - 3 * 365, 28), (max(d0, last - 3 * 365), last + 1, 7)):
-            if start >= end:
-                continue
-            values, prev = [], 0
-            for d in range(start, end, step):
-                c = None if any(real.get(e) is not None for e in range(d - 3, d + 4)) else est(d)
-                values.append(None if c is None else c - prev)
-                prev = prev if c is None else c
-            if any(v is not None for v in values):
-                out.append([start, step, *values])
-        return out
-
     shards = defaultdict(dict)
     for i in info:
         entry = {f: [[number[d], c] for d, c in zip(*v)]
                  for f, v in hist["series"][i].items() if f in finishes[i]}
         for f in US:
-            if (i, f) in prices and prices[i, f][1] and (r := runs(prices[i, f][0], prices[i, f][1], gold[i, f][0])):
-                entry[f + "_e"] = r
+            if (i, f) in prices and prices[i, f][1] and (r := daily(*prices[i, f])):
+                entry[f + "_d"] = r
         shards[i[:3]][i] = entry
     for k, shard in shards.items():
         write_json(os.path.join(out_dir, "p", f"{k}.json"), shard)
@@ -1039,19 +1057,18 @@ def share(path=HISTORY, goldfish=GOLDFISH_FILE):
             save(hist, path)
         files = [path]
         if os.path.exists(goldfish):
-            rows = goldfish_rows(goldfish)
-            if goldfish + ".gz" in listed.stdout.split():
+            if goldfish + ".gz" in listed.stdout.split():  # the release's rows we don't have, added here
                 with tempfile.TemporaryDirectory() as tmp:
                     if subprocess.run(["gh", "release", "download", RELEASE, "--dir", tmp,
                                        "--pattern", goldfish + ".gz"]).returncode:
                         raise RuntimeError("couldn't download the release to merge with")
-                    have = {(r["id"], r["finish"]) for r in rows}
-                    theirs = [r for r in goldfish_rows(os.path.join(tmp, goldfish)) if (r["id"], r["finish"]) not in have]
-                rows += theirs
-                with open(goldfish, "a", encoding="utf-8") as f:
-                    f.writelines(json.dumps(r, separators=(",", ":")) + "\n" for r in theirs)
+                    have = {(r["id"], r["finish"]) for r in goldfish_rows(goldfish)}
+                    cut_off(goldfish)
+                    with open(goldfish, "a", encoding="utf-8") as f:
+                        f.writelines(json.dumps(r, separators=(",", ":")) + "\n" for r in goldfish_rows(os.path.join(tmp, goldfish))
+                                     if (r["id"], r["finish"]) not in have)
             with gzip.open(goldfish + ".gz", "wt", encoding="utf-8") as f:
-                f.writelines(json.dumps(r, separators=(",", ":")) + "\n" for r in rows)
+                f.writelines(json.dumps(r, separators=(",", ":")) + "\n" for r in goldfish_rows(goldfish))
             files.append(goldfish + ".gz")
         if subprocess.run(["gh", "release", "upload", RELEASE, *files, "--clobber"]).returncode:
             raise RuntimeError("the upload failed")

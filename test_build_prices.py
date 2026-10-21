@@ -99,6 +99,14 @@ glitch = estimator({0: 100}, (0, [100] * 40 + [6000] * 15 + [100] * 45 + [600] *
 assert glitch(45) is None and glitch(30) == 100 and glitch(130) == 600, \
     "two weeks at 60 times: left out; a rise that stays: kept"
 
+# Estimates for the site, a day at a time: a point where it starts, moves, stops (null) and ends,
+# none within 3 days of ours (day 0), none for days without theirs (20-24), none for a move under 1%
+from build_prices import daily
+gf = (0, [100] * 20 + [None] * 5 + [100] * 5 + [103] * 10 + [150] * 10)
+assert daily({0: 100}, estimator({0: 100}, gf)) == [4, 100, 16, None, 5, 0, 5, 3, 10, 47, 10, None], \
+    daily({0: 100}, estimator({0: 100}, gf))
+assert daily({0: 1000}, estimator({0: 1000}, (0, [1000] * 20 + [1005] * 20))) == [4, 1000, 36, None]
+
 # The other guide's card page: every printing of a card, matched to ours by set, number, finish and variant
 from build_prices import goldfish_match, goldfish_printings
 page = "".join(f'<a data-card-id="{i}" rel="popover" href="{h}">' for i, h in [

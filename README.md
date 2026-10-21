@@ -78,6 +78,8 @@ time, a few KB after that).
      decks list printings (turned into oracle ids with Scryfall's
      `default_cards`). A deck's id says where it's from: Archidekt's are
      numbers, Moxfield's strings.
+   - Cards banned in Commander now (Scryfall's legality, read on every build) are left out of
+     what the decks play, so nothing suggests them (older decks still have Jeweled Lotus).
    - `build_decks.py build` writes `site/decks/`: one file per commander (or
      partner pair) with its newest 3,000 decks. Each deck is stored as positions
      in that commander's list of cards, most played first, gap-encoded like the
@@ -288,8 +290,9 @@ time, a few KB after that).
      printing, rising, falling or most expensive.
    - A card's details chart its printing's price (nonfoil or foil, as picked) over 3 months, a
      year, 3 years or all of it, from `prices/p/<first 3 characters of its Scryfall id>.json`
-     (4,096 files). Between our days, a lighter line is estimated (below); lines across
-     stretches with no prices at all are dashed.
+     (4,096 files: the id is the key, so a card's chart reads one file of about 25 KB, never the
+     rest). Between our days, a lighter line is estimated (below), a day at a time back to 2010
+     or the printing's release; lines across stretches with no prices at all are dashed.
    - Prices aren't split by condition, so a card that rarely sells (Tabernacle) can swing with
      which copies sold; the page says so.
    - **Look up a card** at the top finds cards by name (most played first, names starting with
@@ -377,19 +380,26 @@ and euros (Cardmarket). The Prices tab and card details read it (see **Prices** 
 - Where Scryfall and MTGJSON both have a week, their prices match (the same median, 97% of US
   prices within 10%).
 - **Estimates between our days**: `python build_prices.py goldfish --hours 24` fetches another
-  price guide's daily history (back to 2010) of every printing at 50 cents or more and the whole
-  reserve list, the reserve list first, then the priciest, one request every 2 seconds, into
+  price guide's daily history (back to 2010) of every printing at 50 cents or more (`--least 1`:
+  every printing with a price) and the whole reserve list, the reserve list first, then the
+  priciest, one request every 2 seconds, into
   `goldfish.jsonl` (a line per printing and finish as it arrives: stop and run it again any time;
   `python build_prices.py goldfish --stop` stops a crawl running elsewhere, or Ctrl+C it).
   `--workers 3` runs 3 side by side, each taking every third printing into its own
   `goldfish.<n>.jsonl`, merged in when they stop; each still waits 2 seconds between requests.
   It finds each printing by the guide's set codes (`goldfish_sets.json`, from its set pages, by
-  name or else by code) and, for a name printed more than once in a set, the card's page. A
+  name or else by code) and, for a name printed more than once in a set, the card's page. Sets
+  it has no page of (The List, promo sets, Fallout) and printings not found that way are looked
+  for on the card's own page (by a set of it there, ours, or its search), which lists every
+  printing in every set: by set, collector number, finish and variant (a promo set's stamped
+  or prerelease printing is a variant in the set it's from, or in the guide's own promo sets). A
   history whose latest price isn't near ours (within a factor of 2, or 5 when the printing is
   sure) is taken for another printing and skipped. Its prices are its own measure, 0 to 20% off
   TCGplayer's depending on the year, so they're never stored as ours: `site` scales them to meet
   ours on each of our days (the ratio a straight line from one of our days to the next) and uses
-  them only between, marked as estimates.
+  them only between, marked as estimates. The site gets every day's estimate, kept where it moved
+  1% or more (`daily()`: flat in between, invisible at a chart's size), which keeps all of them
+  to about 25 KB per file gzipped. `site` works them out with numpy (`pip install numpy`).
 - Only changes are stored: each printing's prices are lists of `[day, cents]`, a point only where
   the price changed since the day before (null when it stopped having one). The first line lists
   the days and where each came from. A day with none of a price at all (MTGJSON has a few days

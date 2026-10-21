@@ -2391,13 +2391,16 @@ function priceChange(now, was) {
 }
 let priceDays; // prices/days.json: the days with prices
 const getPriceDays = () => (priceDays ??= getJson("prices/days.json"));
-// Estimated prices, [[first day, days apart, cents, change, ...]] (build_prices.py's runs()), as
-// [[day, cents, true]]
-function estimated(runs = []) {
+// Estimated prices, [days since the point before, change in cents (null: none until the next point),
+// ...] (build_prices.py's daily()), flat between points, as [[day, cents, true]]
+function estimated(points = []) {
   const out = [];
-  for (const [start, step, ...changes] of runs) {
-    let c = 0;
-    changes.forEach((x, k) => x !== null && out.push([start + k * step, (c += x), true]));
+  let d = 0, c = 0, on = false;
+  for (let k = 0; k < points.length; k += 2) {
+    d += points[k];
+    if (on && points[k] > 1) out.push([d - 1, c, true]);
+    on = points[k + 1] !== null;
+    if (on) out.push([d, (c += points[k + 1]), true]);
   }
   return out;
 }
@@ -2540,7 +2543,7 @@ async function showHistory(id, finish) {
     const prices = shard[id] ?? {};
     const key = [finish, "usd_etched", "usd_foil", "usd"].find(k => prices[k]);
     if (current?.id !== id || !key) return;
-    const all = [...onDays(prices[key], days), ...estimated(prices[key + "_e"])].sort((a, b) => a[0] - b[0]);
+    const all = [...onDays(prices[key], days), ...estimated(prices[key + "_d"])].sort((a, b) => a[0] - b[0]);
     if (all.length < 2) return;
     const draw = () => {
       const points = historyRange ? all.filter(p => p[0] >= days.at(-1) - historyRange) : all;
@@ -2687,7 +2690,7 @@ async function showPrices() {
     const series = await Promise.all(list.map(async w => {
       const shard = await (shards[w.id.slice(0, 3)] ??= getJson(`prices/p/${w.id.slice(0, 3)}.json`).catch(() => ({})));
       const prices = shard[w.id] ?? {};
-      return [...onDays(prices[w.finish] ?? [], days), ...estimated(prices[w.finish + "_e"])].sort((a, b) => a[0] - b[0]);
+      return [...onDays(prices[w.finish] ?? [], days), ...estimated(prices[w.finish + "_d"])].sort((a, b) => a[0] - b[0]);
     }));
     const at = (points, back) => points.findLast(p => p[0] <= points.at(-1)[0] - back);
     $("watch-heading").textContent = shared ? "A shared watchlist" : "Your watchlist";
