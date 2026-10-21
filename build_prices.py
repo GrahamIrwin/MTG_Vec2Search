@@ -1082,6 +1082,7 @@ def share(path=HISTORY, goldfish=GOLDFISH_FILE):
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")  # card names (꞉) in a log file Windows would write in cp1252
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd not in ("snapshot", "backfill", "share", "site", "goldfish"):
         sys.exit(__doc__)
