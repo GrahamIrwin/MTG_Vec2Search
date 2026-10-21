@@ -99,6 +99,29 @@ glitch = estimator({0: 100}, (0, [100] * 40 + [6000] * 15 + [100] * 45 + [600] *
 assert glitch(45) is None and glitch(30) == 100 and glitch(130) == 600, \
     "two weeks at 60 times: left out; a rise that stays: kept"
 
+# The other guide's card page: every printing of a card, matched to ours by set, number, finish and variant
+from build_prices import goldfish_match, goldfish_printings
+page = "".join(f'<a data-card-id="{i}" rel="popover" href="{h}">' for i, h in [
+    ("Tomb [TE]", "/price/tempest/tomb"), ("Tomb [TE] (F)", "/price/tempest/tomb-foil"),
+    ("Tomb [PLIST]", "/price/the-list/315/tomb"), ("Tomb [PLIST]", "/price/the-list/315/tomb"),
+    ("Tomb [KHM]", "/price/kaldheim/27/tomb"), ("Tomb &lt;planeswalker stamp&gt; [KHM] (F)", "/price/kaldheim/27/tomb-planeswalker stamp-foil"),
+    ("Tomb &lt;prerelease&gt; [KHM] (F)", "/price/kaldheim/27/tomb-prerelease-foil"),
+    ("Tomb [PRM-PRE] (F)", "/price/prerelease-cards/24/tomb-foil"), ("Tomb [PRM-UMA]", "/price/ultimate-box-topper/36/tomb")])
+pr = goldfish_printings(page)
+assert len(pr) == 8 and pr[0] == ("tempest", None, False, "TE", "", "Tomb [TE]"), pr
+m = lambda names, codes, number, foil, promos=(): goldfish_match(pr, names, codes, number, foil, promos)
+assert m(("The List", None), ({"plst"}, set()), "TMP-315", False) == ("Tomb [PLIST]", True)
+assert m(("Tempest", None), ({"tmp", "te"}, set()), "315", True) == ("Tomb [TE] (F)", True), "numberless there"
+assert m(("Ultimate Box Toppers", None), ({"puma"}, set()), "U36", False) == ("Tomb [PRM-UMA]", True)
+assert m(("Kaldheim Promos", "Kaldheim"), ({"pkhm"}, {"khm"}), "27p", True, ["promopack", "stamped"]) == \
+    ("Tomb <planeswalker stamp> [KHM] (F)", False), "a promo: a variant in its set"
+assert m(("Kaldheim Promos", "Kaldheim"), ({"pkhm"}, {"khm"}), "27s", True, ["prerelease"]) == \
+    ("Tomb <prerelease> [KHM] (F)", False)
+assert m(("War Promos", "War"), ({"pwar"}, {"war"}), "24s", True, ["prerelease"]) == ("Tomb [PRM-PRE] (F)", False), \
+    "or in their promo set its promo type names"
+assert m(("Kaldheim", None), ({"khm"}, set()), "27", True) is None, "no plain foil there"
+assert m(("Mirage", None), ({"mir"}, set()), "1", False) is None
+
 # Cheaper alternatives: the same type, within its colors, half its price or less, most of its tags
 from build_prices import alternatives
 cards = [{"oracle_id": o, "type_line": t, "color_identity": c} for o, t, c in [

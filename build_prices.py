@@ -42,6 +42,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+import zlib
 from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 
@@ -457,6 +458,54 @@ def goldfish_variants(slug, name):
     return found
 
 
+def goldfish_printings(page):
+    """[(set slug, collector number or None, foil, set code, variant or "", card id)] of every
+    printing of a card in every set, from one of its price pages."""
+    out = []
+    for card_id, href in dict.fromkeys(re.findall(r'data-card-id="([^"]*)"[^>]*href="(/price/[^"#]*)"', page or "")):
+        card_id = html.unescape(card_id)
+        m = re.fullmatch(r"/price/([^/]+)/(?:([^/]+)/)?[^/]+", html.unescape(href))
+        code = re.search(r"\[([^\]]+)\]", card_id)
+        if m and code:
+            tag = re.search(r"<([^>]*)>", card_id)
+            out.append((m.group(1), m.group(2), card_id.endswith("(F)"), code.group(1), tag.group(1) if tag else "", card_id))
+    return out
+
+
+# Scryfall's promo types, and the words of its variants they go by
+PROMO_TAGS = {"prerelease": "prerelease", "datestamped": "prerelease", "promopack": "stamp", "stamped": "stamp",
+              "buyabox": "buy-a-box", "bundle": "bundle", "release": "release", "boxtopper": "topper",
+              "judgegift": "judge", "fnm": "fnm", "gameday": "game day", "instore": "store"}
+
+
+def goldfish_match(printings, set_names, codes, number, foil, promo_types=()):
+    """(card id, sure) of a printing among goldfish_printings(): in its set (by the set's name, its
+    code, or ours: set_names[0] and codes[0]); or else a promo set's printing (pkhm) as a variant in
+    the set it's from (set_names[1], codes[1]), or in a promo set of theirs its promo types name
+    (Prerelease Cards, PRM-PRE). By its collector number ("TMP-315" on The List is 315 there, "17e"
+    or "U36" may be 17 or 36) and finish; of several, the variant its promo types name, or else the
+    plain one. sure: the one printing it could be, in its set. None if there's none."""
+    tail = number.split("-")[-1]
+    numbers = {number, tail, re.sub(r"\D+$", "", tail), re.sub(r"^\D+|\D+$", "", tail)}
+    same = lambda a, b: bool(b) and fold(a).rstrip("s") == fold(b).rstrip("s")  # Ultimate Box Topper(s)
+    wanted = [fold(PROMO_TAGS.get(t, t)) for t in promo_types]
+    named = lambda slug, tag: any(w in fold(tag) or w in fold(slug) for w in wanted)
+    promo = lambda tag: any(fold(w) in fold(tag) for w in PROMO_TAGS.values()) and not named("", tag)
+    passes = (lambda slug, code, tag: (same(slug, set_names[0]) or code.lower() in codes[0]) and not promo(tag),
+              lambda slug, code, tag: bool(tag) and (same(slug, set_names[1]) or code.lower() in codes[1]),
+              lambda slug, code, tag: code.startswith("PRM") and named(slug, tag))
+    for k, in_set in enumerate(passes):
+        best, score, ties = None, -1, 0
+        for slug, n, f, code, tag, card_id in printings:
+            if f != foil or (n is not None and n not in numbers) or not in_set(slug, code, tag):
+                continue
+            s = (2 if n == number else 1 if n else 0) + (2 if tag and named("", tag) else 0) + (not tag)
+            best, score, ties = (card_id, s, 1) if s > score else (best, score, ties + (s == score))
+        if best:
+            return best, ties == 1 and k == 0
+    return None
+
+
 def goldfish_history(card_id):
     """{day: cents} of a card id's paper prices, every day it has one."""
     q = urllib.parse.urlencode({"card_id": card_id, "selector": "#tab-paper", "type": "paper", "price_type": ""})
@@ -544,30 +593,57 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
     slug_for = lambda set_name: slugs.get(fold(set_name)) or next(
         (x for k, x in slugs.items() if fold(set_name) in k or k in fold(set_name)), None)
     last = max(hist["days"])
-    done = {(r["id"], r["finish"]) for r in goldfish_rows(path)}
+    # Done: found, or looked for on its card page; one not found by the set's page is looked for again
+    rows = goldfish_rows(path)
+    done = {(r["id"], r["finish"]) for r in rows if r.get("card") or r.get("by") == "card"}
+    again = {(r["id"], r["finish"]) for r in rows} - done
     label = f"[{part[0] + 1}/{part[1]}] " if part else ""
     if part:
         path = f"goldfish.{part[0]}.jsonl"
     cut_off(path)
-    cards, in_set = {}, defaultdict(int)
+    cards, in_set, set_names, known = {}, defaultdict(int), {}, defaultdict(list)
     with gzip.open(printings, "rt", encoding="utf-8") as f:
         for c in map(json.loads, f):
-            if c.get("digital") or c["set"] not in codes:
+            if c.get("digital"):
                 continue
             # Double-faced cards go by their front's name there; split cards by both halves'
             name = c["name"] if c.get("layout") in ("split", "flip") else c["name"].split(" // ")[0]
-            cards[c["id"]] = (name, c["set_name"], c["set"], c["collector_number"], c.get("reserved", False))
+            cards[c["id"]] = (name, c["set_name"], c["set"], c["collector_number"], c.get("reserved", False),
+                              c.get("promo_types", []))
             in_set[c["set"], name] += 1
+            set_names[c["set"]] = c["set_name"]
+            if c["set"] in codes:
+                known[name].append(c["set_name"])
     queue = []
-    for i, (name, set_name, s, number, reserved) in cards.items():
+    for i, (name, set_name, s, number, reserved, _) in cards.items():
         for finish in ("usd", "usd_foil"):
             series = hist["series"].get(i, {}).get(finish)
             now = at(series, last) if series else None
             if now and (reserved or now >= least) and (i, finish) not in done:
                 queue.append((not reserved, -now, i, finish))
     queue.sort()
-    if part:
-        queue = queue[part[0]::part[1]]
+    if part:  # by card name, so each card's page is read by one of them
+        queue = [q for q in queue if zlib.crc32(cards[q[2]][0].encode()) % part[1] == part[0]]
+    pages = {}  # name -> goldfish_printings()
+
+    def by_card(name, set_name):  # its printings, from its page: in a set of it there, or ours, or found by a search
+        if name not in pages:
+            plain = urllib.parse.quote_plus(re.sub(r"[^\w\s-]", "", name))
+            tries = [f"/price/{slug}/{plain}" for slug in dict.fromkeys(
+                [slugs[fold(n)] for n in known[name] if fold(n) in slugs][:1] + [urllib.parse.quote_plus(set_name)])]
+            pages[name] = []
+            for page_path in tries + [None]:
+                if page_path is None:  # the search's link to the card's own page
+                    found = re.findall(r'href="(/price/[^"#]*)"', goldfish_get(
+                        "/q?" + urllib.parse.urlencode({"query_string": name})) or "")
+                    kebab = re.sub(r"[^a-z0-9]+", "-", unicodedata.normalize("NFKD", name).lower()).strip("-")
+                    page_path = next((h for h in found if h.rsplit("/", 1)[-1].startswith(kebab)), None)
+                    if not page_path:
+                        break
+                if found := goldfish_printings(goldfish_get(page_path)):
+                    pages[name] = found
+                    break
+        return pages[name]
     print(f"{label}{len(queue):,} printings to fetch ({len(done):,} already), about "
           f"{len(queue) * GOLDFISH_DELAY / 3600:.0f} hours", flush=True)
     variants = {}  # (set, name) -> goldfish_variants()
@@ -580,9 +656,17 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
             if os.path.exists(GOLDFISH_STOP):  # left there for the other workers too
                 print(f"{label}Stopped (goldfish --stop); run it again to go on.", flush=True)
                 break
-            name, set_name, s, number, _ = cards[i]
+            name, set_name, s, number, _, promo_types = cards[i]
             foil = finish == "usd_foil"
-            if in_set[s, name] == 1:
+            by = "set" if s in codes and (i, finish) not in again else "card"
+            sure = in_set[s, name] == 1
+            if by == "card":  # a set it has no page of, or not found by its set's: by the card's page
+                p = s[1:] if s.startswith("p") and s[1:] in set_names else None  # a promo set's own
+                card_id, sure = goldfish_match(
+                    by_card(name, set_name), (set_name, set_names.get(p)),
+                    ({s, codes.get(s, "").lower()}, {p, codes.get(p, "").lower()} if p else set()),
+                    number, foil, promo_types) or (None, False)
+            elif sure:
                 card_id = f"{name} [{codes[s]}]" + (" (F)" if foil else "")
             else:  # one of several printings of the name in the set: its page says which is which
                 if (s, name) not in variants:
@@ -592,12 +676,12 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
                 card_id = next((v for num in (number, number.rstrip("★†zsp")) for (_, n, f), v in variants[s, name].items()
                                 if n == num and f == foil and f"[{codes[s]}]" in v), None)
             prices = goldfish_history(card_id) if card_id else {}
-            row = {"id": i, "finish": finish, "card": card_id}
+            row = {"id": i, "finish": finish, "card": card_id, **({"by": "card"} if by == "card" else {})}
             # Its latest price should be about ours: otherwise it's another printing. Within a factor
             # of 2 for one of a name's printings in a set; a sure one only within 5, as cards that
             # rarely sell (Alpha's) can be priced very differently. The estimates are scaled anyway
             latest = prices[max(prices)] if prices else None
-            within = 2 if in_set[s, name] > 1 else 5
+            within = 5 if sure else 2
             if not latest or not 1 / within <= latest / -minus_now <= within:
                 row["miss"] = "none" if not latest else f"{latest} against our {-minus_now}"
                 missed += 1
