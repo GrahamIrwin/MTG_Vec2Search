@@ -13,6 +13,7 @@ is never replaced.
                                                  # (resumable: stop and run it again any time)
     python build_prices.py goldfish --hours 24 --workers 3   # the same, 3 at a time (each its own file, merged after)
     python build_prices.py goldfish --stop       # stop a crawl that's running (or Ctrl+C it)
+    python build_prices.py goldfish --least 1    # printings under MIN_MOVER cents too (the default leaves them out)
 
 The file's first line is {"days": {day: where its prices came from}, "sources": [files imported]}.
 Then a line per printing (Scryfall id), with a series per price: [[day, cents], ...], a point only
@@ -563,12 +564,12 @@ def merge_goldfish_parts(path=GOLDFISH_FILE):
         os.remove(part)
 
 
-def goldfish_workers(n, hours=None):
+def goldfish_workers(n, hours=None, least=MIN_MOVER):
     """Crawl with n workers side by side, each taking every n-th printing of the queue into its own
     file, merged into GOLDFISH_FILE when they're done (or stopped: goldfish --stop, or Ctrl+C)."""
     merge_goldfish_parts()
     goldfish_sets()  # once, before the workers read it
-    args = [sys.executable, "-u", __file__, "goldfish"] + (["--hours", str(hours)] if hours else [])
+    args = [sys.executable, "-u", __file__, "goldfish", "--least", str(least)] + (["--hours", str(hours)] if hours else [])
     workers = [subprocess.Popen(args + ["--part", f"{k}/{n}"]) for k in range(n)]
     try:
         for w in workers:
@@ -1073,19 +1074,20 @@ if __name__ == "__main__":
             open(GOLDFISH_STOP, "w").close()
             sys.exit("A running crawl stops after the printing it's on (within a few seconds).")
         hours = float(arg("--hours")) if arg("--hours") else None
+        least = int(arg("--least") or MIN_MOVER)  # cents: --least 1 for every printing with a price
         if arg("--part"):  # one of goldfish_workers()'s
             k, n = map(int, arg("--part").split("/"))
             try:
-                sys.exit(goldfish_crawl(hours, part=(k, n)))
+                sys.exit(goldfish_crawl(hours, least, part=(k, n)))
             except KeyboardInterrupt:
                 sys.exit()
         if os.path.exists(GOLDFISH_STOP):
             os.remove(GOLDFISH_STOP)  # left by a --stop with no crawl running
         if arg("--workers"):
-            sys.exit(goldfish_workers(int(arg("--workers")), hours))
+            sys.exit(goldfish_workers(int(arg("--workers")), hours, least))
         merge_goldfish_parts()
         try:
-            goldfish_crawl(hours)
+            goldfish_crawl(hours, least)
         except KeyboardInterrupt:  # each printing is saved as it arrives: nothing's lost
             sys.exit("Stopped; run it again to go on.")
         finally:
