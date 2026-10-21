@@ -396,6 +396,9 @@ def goldfish_get(path, **headers):
                 return None
             print(f"  {e}; waiting {60 * (k + 1)}s", flush=True)
             time.sleep(60 * (k + 1))
+        except http.client.InvalidURL as e:  # a link of theirs we can't ask for: not there
+            print(f"  {path}: {e}", flush=True)
+            return None
         except (OSError, http.client.HTTPException) as e:
             print(f"  {e}; waiting {60 * (k + 1)}s", flush=True)
             time.sleep(60 * (k + 1))
@@ -640,6 +643,7 @@ def goldfish_crawl(hours=None, least=MIN_MOVER, path=GOLDFISH_FILE, printings=PR
                     page_path = next((h for h in found if h.rsplit("/", 1)[-1].startswith(kebab)), None)
                     if not page_path:
                         break
+                    page_path = urllib.parse.quote(html.unescape(page_path))  # "-shattered glass"
                 if found := goldfish_printings(goldfish_get(page_path)):
                     pages[name] = found
                     break
