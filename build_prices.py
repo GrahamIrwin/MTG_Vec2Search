@@ -827,10 +827,11 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     prices US cents, a printing's row is [card number, Scryfall id, set (in "sets"), finish (0 nonfoil,
     1 foil, 2 etched), price on the last day, then ...]):
       days.json        the days with prices of ours
-      sets/set-<code>.json  {collector number: {"id": Scryfall id, finish: [cents now, 30 and 365 days before (-1: none)]}}:
-                       each printing's price by set, for a decklist's printings ("(CMM) 400 *F*")
-      cards.json       {"now", "30", "90", "365": [cents by card number, -1: none]}: each card's
-                       cheapest printing's price (any finish) now, and 30, 90 and 365 days before
+      sets/set-<code>.json  {collector number: {"id": Scryfall id, "card": card number, finish: [cents now, then
+                       WINDOWS days before (-1: none)]}}: each printing's price by set, for a decklist's
+                       printings ("(CMM) 400 *F*"; the card number tells a mistyped one)
+      cards.json       {"now", "7", "30", "90", "365": [cents by card number, -1: none]}: each card's
+                       cheapest printing's price (any finish) now, and 7, 30, 90 and 365 days before
       alts/<n>.json    {card number - ALT_BLOCK * n: [cheaper cards that do the same thing]} for card
                        numbers from ALT_BLOCK * n, as alternatives()
       reprints.json    {"sets", "rows": [[card number, an older printing, its set, the new one's set,
@@ -916,9 +917,9 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
             past = [price(real, est, last - w, max(7, w // 10)) for w in WINDOWS]
             card, s = info[i]
             rows.append([card, i, s, US.index(finish), now, *(-1 if c is None else c for c in past)])
-    by_set = defaultdict(lambda: defaultdict(dict))  # set code -> collector number -> finish -> [now, 30, 365 days before]
-    for card, i, s, finish, now, _, before30, _, before365 in rows:
-        by_set[where[i][0]][where[i][1]].update({"id": i, finish: [now, before30, before365]})
+    by_set = defaultdict(lambda: defaultdict(dict))  # set code -> collector number -> finish -> [now, then WINDOWS days before]
+    for card, i, s, finish, *now_then in rows:
+        by_set[where[i][0]][where[i][1]].update({"id": i, "card": card, finish: now_then})
     # Printings of a card in a set with the very same prices are one TCGplayer product (Odyssey's
     # Cephalid Looter #72 and #72†): one of them, the plain collector number's
     rows.sort(key=lambda r: not plain[r[1]])
@@ -947,7 +948,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
         if now is not None and min(was, now) >= MIN_MOVER:
             reprints.append([info[old][0], old, info[old][1], info[newest][1], out, was, now, fresh])
     write_json(os.path.join(out_dir, "reprints.json"), {"sets": list(sets), "rows": reprints})
-    # Each card's cheapest printing (any finish) now, and 30, 90 and 365 days before, by card number
+    # Each card's cheapest printing (any finish) now, and WINDOWS days before, by card number
     cheapest = {}
     for r in rows:
         now, then = cheapest.get(r[0], (math.inf, [math.inf] * len(WINDOWS)))
@@ -955,7 +956,7 @@ def site_data(hist, cards, out_dir=SITE, printings=PRINTINGS_FILE, goldfish=GOLD
     by_card = lambda pick: [(lambda c: -1 if c == math.inf else c)(pick(cheapest[n])) if n in cheapest else -1
                             for n in range(len(cards))]
     write_json(os.path.join(out_dir, "cards.json"), {"now": by_card(lambda x: x[0]),
-                **{str(w): by_card(lambda x, k=k: x[1][k]) for k, w in enumerate(WINDOWS) if w in (30, 90, 365)}})
+                **{str(w): by_card(lambda x, k=k: x[1][k]) for k, w in enumerate(WINDOWS)}})
     if tags:
         alts = alternatives(cards, tags, {n: now for n, (now, _) in cheapest.items()})
         for k in range(0, len(cards), ALT_BLOCK):

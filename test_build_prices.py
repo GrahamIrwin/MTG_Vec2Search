@@ -80,13 +80,13 @@ with tempfile.TemporaryDirectory() as tmp:
     moved = read("movers-30.json")
     assert sorted([moved["sets"][r[2]], *r[3:]] for r in moved["rows"]) == [["Set rl", 0, 9000, 10000], ["Set up", 0, 400, 200]], moved
     assert moved["cutoffs"][0][2] == [0, 0], "a band with fewer than TOP is complete"
-    assert read("cards.json") == {"now": [9000, 25], "30": [10000, 50], "90": [-1, -1], "365": [-1, -1]}, read("cards.json")  # its cheapest
+    assert read("cards.json") == {"now": [9000, 25], "7": [9000, 25], "30": [10000, 50], "90": [-1, -1], "365": [-1, -1]}, read("cards.json")  # its cheapest
     reserved = read("reserved.json")
     assert [r[1] for r in reserved["rows"]] == ["rl"] and reserved["rows"][0][-1] == 1 and reserved["total"][-1][1:] == [9000, 1, 0], reserved
     assert reserved["playable"] == reserved["total"], "nothing in it is not to play with"
     assert read("p", "up.json")["up"]["usd_foil"] == [[(date(2026, 9, 1) - date(1993, 1, 1)).days, 900]]
     assert "usd_foil" not in read("p", "rl.json")["rl"], "a finish it doesn't come in"
-    assert read("sets", "set-sup.json") == {"7": {"id": "up", "0": [400, 200, -1], "1": [900, 900, -1]}}, "by set and number, for decklists"
+    assert read("sets", "set-sup.json") == {"7": {"id": "up", "card": 1, "0": [400, 400, 200, -1, -1], "1": [900, 900, 900, -1, -1]}}, "by set and number, for decklists"
 
 # Estimates between our days: the other guide's prices, scaled to meet ours. Theirs are 10% over
 # ours on day 0 and 20% over on day 10, so on day 5 they're scaled down by about 15%; before our

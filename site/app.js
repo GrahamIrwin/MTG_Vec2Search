@@ -2343,57 +2343,69 @@ function showWatchButton() {
 // the cards that moved most in 30 days (prices/cards.json)
 let cardPrices;
 const showDeckMovers = typedGallery($("deck-movers-types"), $("deck-movers"), $("more-deck-movers"));
-// A set's printings' prices (prices/sets/set-<code>.json: {number: {id, finish: [now, 30, 365 days before]}}), each fetched once
+// A set's printings' prices (prices/sets/set-<code>.json: {number: {id, card, finish: [now, then PRICE_WINDOWS days
+// before]}}), each fetched once
 const setPrices = new Map();
 const getSetPrices = code => setPrices.get(code)
   ?? setPrices.set(code, getJson(`prices/sets/set-${code}.json`).catch(() => ({}))).get(code);
+const windowName = w => (w === 365 ? "a year" : `${w} days`);
 
-// The deck's worth: each card at the printing its line names ("(CMM) 400 *F*"), else at its cheapest
+// The deck's worth: each card at the printing its line names ("(CMM) 400 *F*"), else at its cheapest,
+// and how it changed over the period picked (w= in the URL, as on the Prices tab)
 async function showDeckValue(deck, printings = new Map()) {
   cardPrices ??= getJson("prices/cards.json").catch(err => { cardPrices = null; throw err; });
   const p = await cardPrices;
   const codes = [...new Set(deck.map(c => printings.get(c)?.set).filter(Boolean))];
   const sets = Object.fromEntries(await Promise.all(codes.map(async code => [code, await getSetPrices(code)])));
+  // Each card's [now, then each of PRICE_WINDOWS before] (-1: none)
   const at = new Map(deck.map(c => {
-    const named = printings.get(c), printing = named && sets[named.set][named.number], own = printing?.[named.finish];
-    return [c, own ? { now: own[0], 30: own[1], 365: own[2], named, id: printing.id } : { now: p.now[c], 30: p["30"][c], 365: p["365"][c] }];
+    // Only if that printing is this card ("(SNC) 197" for Tivit is Lord Xander: a mistyped number)
+    const named = printings.get(c), printing = named && sets[named.set][named.number];
+    const own = printing?.card === c && printing[named.finish];
+    return [c, own ? { prices: own, named, id: printing.id }
+      : { prices: [p.now[c], ...PRICE_WINDOWS.map(w => p[w]?.[c] ?? -1)] }];
   }));
-  const priced = deck.filter(c => at.get(c).now >= 0);
+  const now = c => at.get(c).prices[0];
+  const then = (c, w) => at.get(c).prices[1 + PRICE_WINDOWS.indexOf(w)] ?? -1;
+  const priced = deck.filter(c => now(c) >= 0);
   if (!priced.length) {
     $("deck-value-panel").hidden = true;
     return;
   }
-  const worth = cards => cards.reduce((sum, c) => sum + at.get(c).now, 0);
-  // A change over the cards priced both then and now
-  const change = w => {
-    const both = priced.filter(c => at.get(c)[w] >= 0);
-    const now = worth(both), then = both.reduce((sum, c) => sum + at.get(c)[w], 0);
-    const diff = now - then;
-    return both.length && el("span", {},
-      `${diff >= 0 ? "up" : "down"} ${wholeDollars(Math.abs(diff))} (`,
-      el("span", { className: diff > 0 ? "up" : diff < 0 ? "down" : "", textContent: priceChange(now, then) }),
-      `) ${w === "30" ? "in 30 days" : "in a year"}` + (both.length < priced.length ? ` (the ${both.length} cards with a price then)` : ""));
-  };
-  const parts = ["30", "365"].map(change).filter(Boolean);
+  const worth = cards => cards.reduce((sum, c) => sum + now(c), 0);
   const named = priced.filter(c => at.get(c).named).length;
-  $("deck-value-lede").replaceChildren(
-    (named === priced.length ? "At the printings in your list"
-      : named ? `At the printings in your list (the cheapest printing for the ${priced.length - named} without a priced one named)`
-      : "At each card's cheapest printing")
-      + `, the ${priced.length} cards with a price are worth ${wholeDollars(worth(priced))}`
-      + (priced.length < deck.length ? ` (${deck.length - priced.length} have none)` : ""),
-    ...(parts.length ? [": ", ...parts.flatMap((x, k) => [k ? " and " : "", x])] : []),
-    ". The cards whose prices moved most in 30 days:");
-  const size = c => Math.abs(Math.log(at.get(c).now / at.get(c)[30]));
-  const moved = priced.filter(c => at.get(c)[30] > 0 && at.get(c).now !== at.get(c)[30]).sort((a, b) => size(b) - size(a));
+  const fromUrl = Number(params.get("w"));
+  let w = PRICE_WINDOWS.includes(fromUrl) ? fromUrl : 30;
+
+  function show() {
+    setParams({ w: w === 30 ? null : w });
+    chipRow($("deck-value-windows"), PRICE_WINDOWS.map(x => [x, x === 365 ? "1 year" : `${x} days`,
+      !priced.some(c => then(c, x) >= 0)]), w, x => { w = x; show(); });
+    // The change over the cards priced both then and now
+    const both = priced.filter(c => then(c, w) >= 0);
+    const total = worth(both), was = both.reduce((sum, c) => sum + then(c, w), 0), diff = total - was;
+    $("deck-value-lede").replaceChildren(
+      (named === priced.length ? "At the printings in your list"
+        : named ? `At the printings in your list (the cheapest printing for the ${priced.length - named} without a priced one named)`
+        : "At each card's cheapest printing")
+        + `, the ${priced.length} cards with a price are worth ${wholeDollars(worth(priced))}`
+        + (priced.length < deck.length ? ` (${deck.length - priced.length} have none)` : ""),
+      ...(both.length ? [`: ${diff >= 0 ? "up" : "down"} ${wholeDollars(Math.abs(diff))} (`,
+        el("span", { className: diff > 0 ? "up" : diff < 0 ? "down" : "", textContent: priceChange(total, was) }),
+        `) in ${windowName(w)}` + (both.length < priced.length ? ` (the ${both.length} cards with a price then)` : "")] : []),
+      `. The cards whose prices moved most in ${windowName(w)}:`);
+    const size = c => Math.abs(Math.log(now(c) / then(c, w)));
+    const moved = priced.filter(c => then(c, w) > 0 && now(c) !== then(c, w)).sort((a, b) => size(b) - size(a));
+    return showDeckMovers(moved.map(c => {
+      const { named: printing, id } = at.get(c);
+      return {
+        card: c, id, type: typeOf(c), price: now(c), foil: printing?.finish > 0, detail: priceChange(now(c), then(c, w)),
+        tone: now(c) > then(c, w) ? "up" : "down", note: `${dollars(then(c, w))} ${windowName(w)} ago`,
+      };
+    }));
+  }
   $("deck-value-panel").hidden = false;
-  await showDeckMovers(moved.map(c => {
-    const { now, 30: then, named: printing, id } = at.get(c);
-    return {
-      card: c, id, type: typeOf(c), price: now, foil: printing?.finish > 0, detail: priceChange(now, then),
-      tone: now > then ? "up" : "down", note: `${dollars(then)} 30 days ago`,
-    };
-  }));
+  await show();
 }
 
 const PRICE_WINDOWS = [7, 30, 90, 365]; // WINDOWS in build_prices.py

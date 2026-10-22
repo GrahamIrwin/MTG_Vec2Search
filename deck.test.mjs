@@ -176,15 +176,16 @@ test("combos for a primer: cards as [[links]], what comes first, steps and resul
 test("deck link worker: Moxfield and Archidekt decks become plain decklists", async () => {
   const { default: worker } = await import("./worker/deck-link.js");
   const realFetch = globalThis.fetch;
-  const card = (name, quantity = 1) => ({ quantity, card: { name } });
+  const card = (name, quantity = 1, set, cn, finish = "nonFoil") => ({ quantity, finish, card: { name, set, cn } });
   const responses = {
     "https://api2.moxfield.com/v3/decks/all/abc": { name: "Goblins", boards: {
-      commanders: { cards: { a: card("Krenko, Mob Boss") } },
-      mainboard: { cards: { b: card("Sol Ring"), c: card("Mountain", 30) } },
+      commanders: { cards: { a: card("Krenko, Mob Boss", 1, "m13", "141") } },
+      mainboard: { cards: { b: card("Sol Ring", 1, "cmm", "410", "foil"), c: card("Mountain", 30), e: card("Arcane Signet", 1, "cmm", "367", "etched") } },
       maybeboard: { cards: { d: card("Swords to Plowshares") } } } },
     "https://archidekt.com/api/decks/42/": { name: "Atraxa", categories: [{ name: "Maybeboard", includedInDeck: false }],
-      cards: [["Atraxa, Praetors' Voice", ["Commander"]], ["Sol Ring", ["Ramp"]], ["Doubling Season", ["Maybeboard"]]]
-        .map(([name, categories]) => ({ quantity: 1, categories, card: { oracleCard: { name } } })) },
+      cards: [["Atraxa, Praetors' Voice", ["Commander"], "Normal"], ["Sol Ring", ["Ramp"], "Foil"], ["Doubling Season", ["Maybeboard"], "Normal"]]
+        .map(([name, categories, modifier]) => ({ quantity: 1, categories, modifier,
+          card: { oracleCard: { name }, edition: { editioncode: "cmm" }, collectorNumber: "1" } })) },
   };
   globalThis.fetch = async url => (responses[url] ? new Response(JSON.stringify(responses[url])) : new Response("{}", { status: 404 }));
   const ask = async link => {
@@ -195,9 +196,14 @@ test("deck link worker: Moxfield and Archidekt decks become plain decklists", as
     const [status, mox, origin] = await ask("https://www.moxfield.com/decks/abc");
     assert.equal(status, 200);
     assert.equal(origin, "http://localhost:8000");
-    assert.deepEqual(mox, { name: "Goblins", site: "Moxfield", list: "1 Krenko, Mob Boss *CMDR*\n1 Sol Ring\n30 Mountain" });
+    assert.deepEqual(mox, { name: "Goblins", site: "Moxfield",
+      list: "1 Krenko, Mob Boss (M13) 141 *CMDR*\n1 Sol Ring (CMM) 410 *F*\n30 Mountain\n1 Arcane Signet (CMM) 367 *E*" });
     const [, arch] = await ask("https://archidekt.com/decks/42/atraxa");
-    assert.equal(arch.list, "1 Atraxa, Praetors' Voice *CMDR*\n1 Sol Ring");
+    assert.equal(arch.list, "1 Atraxa, Praetors' Voice (CMM) 1 *CMDR*\n1 Sol Ring (CMM) 1 *F*");
+    // The site reads those lines back with their printings
+    const { printings } = parseDecklist(mox.list, nameLookup(["Krenko, Mob Boss", "Sol Ring", "Mountain", "Arcane Signet"]));
+    assert.deepEqual(Object.fromEntries(printings), { 0: { set: "m13", number: "141", finish: 0 },
+      1: { set: "cmm", number: "410", finish: 1 }, 3: { set: "cmm", number: "367", finish: 2 } });
     assert.equal((await ask("https://moxfield.com/decks/missing"))[0], 404);
     assert.equal((await ask("https://example.com/decks/1"))[0], 400);
   } finally {

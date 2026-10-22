@@ -1,6 +1,7 @@
 // Cloudflare Worker: turns a Moxfield or Archidekt deck link into a plain decklist for the site.
 // Browsers can't call either site's API from another site (CORS), so the page asks this instead:
-//   GET /?url=https://moxfield.com/decks/abc123  ->  { name, site, list: "1 Atraxa, Praetors' Voice *CMDR*\n1 Sol Ring\n..." }
+//   GET /?url=https://moxfield.com/decks/abc123  ->  { name, site, list: "1 Atraxa, Praetors' Voice (2X2) 190 *CMDR*\n1 Sol Ring (CMM) 410 *F*\n..." }
+// Each line names its printing (set, collector number, *F* foil, *E* etched), as the sites' own exports do
 // It fetches only the one deck it's asked for, as itself (no crawling, no pretending to be a browser).
 const UA = "MTG_Vec2Search/1.0 (+https://github.com/grahamirwin/MTG_Vec2Search)";
 const SITE = "https://grahamirwin.github.io";
@@ -16,6 +17,7 @@ const SITES = [
       commanders: Object.values(deck.boards?.commanders?.cards ?? {}),
       cards: Object.values(deck.boards?.mainboard?.cards ?? {}),
       nameOf: entry => entry.card.name,
+      printingOf: entry => [entry.card.set, entry.card.cn, entry.finish], // finish: nonFoil, foil, etched
     }),
   },
   {
@@ -31,13 +33,20 @@ const SITES = [
         commanders: inDeck.filter(e => e.categories?.includes("Commander")),
         cards: inDeck.filter(e => !e.categories?.includes("Commander")),
         nameOf: entry => entry.card.oracleCard.name,
+        printingOf: entry => [entry.card.edition?.editioncode, entry.card.collectorNumber, entry.modifier], // Normal, Foil, Etched
       };
     },
   },
 ];
 
 export function deckList(read) {
-  const line = (e, mark = "") => `${e.quantity ?? 1} ${read.nameOf(e)}${mark}`;
+  const printing = e => {
+    const [set, number, finish = ""] = read.printingOf(e);
+    if (!set || !number) return "";
+    const f = finish.toLowerCase();
+    return ` (${set.toUpperCase()}) ${number}${f === "foil" ? " *F*" : f === "etched" ? " *E*" : ""}`;
+  };
+  const line = (e, mark = "") => `${e.quantity ?? 1} ${read.nameOf(e)}${printing(e)}${mark}`;
   return [...read.commanders.map(e => line(e, " *CMDR*")), ...read.cards.map(e => line(e))].join("\n");
 }
 

@@ -101,7 +101,8 @@ time, a few KB after that).
    - A pasted Moxfield or Archidekt link is read by `worker/deck-link.js`, a
      small Cloudflare Worker: neither site's API can be called from another
      site's page (CORS). It fetches just that one deck and returns it as a
-     plain decklist. A link also goes in the address bar (`?deck=<link>`), so
+     plain decklist, each line naming its printing as the sites' exports do
+     (`1 Sol Ring (CMM) 410 *F*`). A link also goes in the address bar (`?deck=<link>`), so
      results can be shared.
    - A commander with too few decks is compared with the commander whose
      signature cards the deck plays the most of. That same match powers "decks
@@ -323,10 +324,11 @@ time, a few KB after that).
      Tagger tags (each weighted by how rare it is), from `prices/alts/<n>.json`.
    - **Deck recommendations** also say what a deck is worth: each card at the printing its line
      names (`1 Sol Ring (CMM) 400 *F*`: set, collector number, `*F*` foil or `*E*` etched, as
-     Moxfield and Archidekt export them), else at its cheapest, now, up or down how much in 30
-     days and a year (over the cards priced then), and the ones that moved most in 30 days. The
+     Moxfield and Archidekt export them, or a pasted link), else at its cheapest, now, up or down
+     how much over 7 days, 30 days, 90 days or a year as picked (`w=`, over the cards priced
+     then), and the ones that moved most in that time. The
      printings' prices are in `prices/sets/set-<code>.json` (one file per set, so a deck fetches
-     only its sets'), the cheapest in `prices/cards.json` (each card's cheapest price now, 30 and
+     only its sets'), the cheapest in `prices/cards.json` (each card's cheapest price now, 7, 30, 90 and
      365 days before, by card number).
 
 ## Updating card data
