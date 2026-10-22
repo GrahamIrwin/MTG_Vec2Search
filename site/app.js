@@ -2376,9 +2376,10 @@ async function showDeckValue(deck, printings = new Map()) {
   const named = priced.filter(c => at.get(c).named).length;
   const fromUrl = Number(params.get("w"));
   let w = PRICE_WINDOWS.includes(fromUrl) ? fromUrl : 30;
+  let order = params.get("order") === "falling" ? "falling" : "rising";
 
   function show() {
-    setParams({ w: w === 30 ? null : w });
+    setParams({ w: w === 30 ? null : w, order: order === "rising" ? null : order });
     chipRow($("deck-value-windows"), PRICE_WINDOWS.map(x => [x, x === 365 ? "1 year" : `${x} days`,
       !priced.some(c => then(c, x) >= 0)]), w, x => { w = x; show(); });
     // The change over the cards priced both then and now
@@ -2393,9 +2394,17 @@ async function showDeckValue(deck, printings = new Map()) {
       ...(both.length ? [`: ${diff >= 0 ? "up" : "down"} ${wholeDollars(Math.abs(diff))} (`,
         el("span", { className: diff > 0 ? "up" : diff < 0 ? "down" : "", textContent: priceChange(total, was) }),
         `) in ${windowName(w)}` + (both.length < priced.length ? ` (the ${both.length} cards with a price then)` : "")] : []),
-      `. The cards whose prices moved most in ${windowName(w)}:`);
-    const size = c => Math.abs(Math.log(now(c) / then(c, w)));
-    const moved = priced.filter(c => then(c, w) > 0 && now(c) !== then(c, w)).sort((a, b) => size(b) - size(a));
+      ".");
+    // Rising or falling, the biggest change first
+    const ratio = c => now(c) / then(c, w);
+    const rose = priced.filter(c => then(c, w) > 0 && ratio(c) > 1).sort((a, b) => ratio(b) - ratio(a));
+    const fell = priced.filter(c => then(c, w) > 0 && ratio(c) < 1).sort((a, b) => ratio(a) - ratio(b));
+    if (!(order === "rising" ? rose : fell).length && (order === "rising" ? fell : rose).length) order = order === "rising" ? "falling" : "rising";
+    const counted = (label, n) => el("span", {}, label, el("small", { textContent: n }));
+    chipRow($("deck-value-order"), [["rising", counted("Rising", rose.length), !rose.length],
+      ["falling", counted("Falling", fell.length), !fell.length]], order, o => { order = o; show(); });
+    const moved = order === "rising" ? rose : fell;
+    $("deck-value-none").textContent = moved.length ? "" : `No card's price changed in ${windowName(w)}.`;
     return showDeckMovers(moved.map(c => {
       const { named: printing, id } = at.get(c);
       return {
