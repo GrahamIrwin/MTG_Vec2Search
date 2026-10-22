@@ -42,6 +42,12 @@ function el(tag, props = {}, ...children) {
   node.append(...children);
   return node;
 }
+// A row of buttons, the one picked pressed: options = [[value, label, disabled, tooltip]]; pick(value)
+const chipRow = (box, options, current, pick) => box.replaceChildren(...options.map(([value, label, off, title = ""]) =>
+  el("button", { type: "button", ariaPressed: String(value === current), disabled: !!off, title, onclick: () => pick(value) },
+    ...[label].flat())));
+// A button's label with its count beside it, smaller ("Rising 31")
+const withCount = (label, n) => [label, el("small", { textContent: n.toLocaleString() })];
 
 // The site's own data files are checked with the server before a cached copy is used (an
 // unchanged file is a quick "304 Not Modified"): after a rebuild, a stale deck file read with a
@@ -853,11 +859,9 @@ function typedGallery(types, gallery, more) {
     const current = view;
     const counts = {};
     for (const p of current.picks) counts[p.type] = (counts[p.type] ?? 0) + 1;
-    types.replaceChildren(...["All", ...TYPE_ORDER, "Other"].filter(t => t === "All" || counts[t]).map(t =>
-      el("button", {
-        type: "button", ariaPressed: String(current.type === t),
-        onclick: () => { view = { ...current, type: t, shown: PAGE_ADDS }; show(); },
-      }, typeLabel(t), el("small", { textContent: t === "All" ? current.picks.length : counts[t] }))));
+    chipRow(types, ["All", ...TYPE_ORDER, "Other"].filter(t => t === "All" || counts[t])
+      .map(t => [t, withCount(typeLabel(t), t === "All" ? current.picks.length : counts[t])]),
+    current.type, t => { view = { ...current, type: t, shown: PAGE_ADDS }; show(); });
     const list = current.type === "All" ? current.picks : current.picks.filter(p => p.type === current.type);
     const page = list.slice(0, current.shown);
     const infos = await Promise.all(page.map(a => cardInfo(a.card)));
@@ -899,8 +903,7 @@ const commanderLink = key => "?" + new URLSearchParams({ commander: key });
 function showSections(root, box, views, current, pick, attr = "view") {
   for (const e of root.querySelectorAll(`[data-${attr}]`)) e.hidden = e.dataset[attr] !== current;
   for (const e of root.querySelectorAll(`[data-${attr}s]`)) e.hidden = !e.dataset[`${attr}s`].split(" ").includes(current);
-  box.replaceChildren(...views.map(([name, label]) => el("button", {
-    type: "button", ariaPressed: String(name === current), onclick: () => pick(name) }, label)));
+  chipRow(box, views, current, pick);
 }
 
 // A page's sections (showSections), the one in the URL (view=) shown and kept there. views:
@@ -1177,14 +1180,9 @@ async function showCommander(key) {
   // both (the build by name), so a view of a commander is a link to share.
   let build = groups.find(g => g.name === params.get("build")) ?? groups[0];
   let bracket = Math.max(0, BRACKETS.findIndex((_, b) => b && String(b) === params.get("bracket")));
-  $("builds").replaceChildren(...groups.map((g, i) => el("button", {
-    type: "button", ariaPressed: String(g === build),
-    onclick: e => {
-      for (const b of $("builds").children) b.ariaPressed = String(b === e.currentTarget);
-      build = g;
-      showBuild();
-    },
-  }, g.name, el("small", { textContent: i ? `${Math.round(g.members.length / n * 100)}%` : n.toLocaleString() }))));
+  const showBuilds = () => chipRow($("builds"), groups.map((g, i) =>
+    [g, withCount(g.name, i ? `${Math.round(g.members.length / n * 100)}%` : n)]), build, g => { build = g; showBuilds(); showBuild(); });
+  showBuilds();
 
   // Packages, with the decks in groups of alike ones (see packageGroups), each with the combos it's part of
   // (Displacer Kitten and Teferi: with Sol Ring, or Mana Vault, ...)
@@ -1204,11 +1202,10 @@ async function showCommander(key) {
         + "each named for the kind of card (Scryfall Tagger tag) it plays more of than the rest. " : "")
       + `Brackets are the ones each deck's builder gave it: ${percent(given / build.members.length)} of these decks have one.`
       + (bracket === 5 && tournament ? ` With bracket 5, cards also show how their decks did in tournaments in the last ${tournament.period}.` : "");
-    $("brackets").replaceChildren(...BRACKETS.map((label, b) => {
+    chipRow($("brackets"), BRACKETS.map((label, b) => {
       const k = b ? ofBracket(build.members, b).length : build.members.length;
-      return el("button", { type: "button", ariaPressed: String(b === bracket), disabled: !k,
-        onclick: () => { bracket = b; showBuild(); } }, label, el("small", { textContent: k.toLocaleString() }));
-    }));
+      return [b, withCount(label, k), !k];
+    }), bracket, b => { bracket = b; showBuild(); });
     return showGroup(!bracket ? build : { ...build, all: false, members: ofBracket(build.members, bracket),
       name: [build.all ? "" : build.name, `bracket ${bracket}`].filter(Boolean).join(", ") });
   }
@@ -1327,9 +1324,7 @@ async function showCommander(key) {
     const pickTab = name => {
       comboTab = name;
       for (const [t] of tabs) $(`${t}-tab`).hidden = t !== name;
-      $("combo-tabs").replaceChildren(...tabs.map(([t, label, k]) => el("button", {
-        type: "button", ariaPressed: String(t === name), onclick: () => pickTab(t),
-      }, label, el("small", { textContent: k.toLocaleString() }))));
+      chipRow($("combo-tabs"), tabs.map(([t, label, k]) => [t, withCount(label, k)]), name, pickTab);
     };
     pickTab(comboTab);
   }
@@ -1341,11 +1336,9 @@ async function showCommander(key) {
   if (shownWindow < 0) shownWindow = windows.findIndex(w => w.since !== null);
   function showCommanderTrends(g, counts) {
     const recentOf = w => (w.since === null ? [] : g.members.filter(d => shard.decks[d].made >= w.since));
-    $("commander-windows").replaceChildren(...windows.map((w, i) => ({ w, i })).reverse().map(({ w, i }) => el("button", {
-      type: "button", ariaPressed: String(i === shownWindow), disabled: w.since === null,
-      title: w.since === null ? "Not enough data yet" : "",
-      onclick: () => { shownWindow = i; showCommanderTrends(g, counts); },
-    }, `${w.days} days`, el("small", { textContent: w.since === null ? "–" : recentOf(w).length }))));
+    chipRow($("commander-windows"), windows.map((w, i) => [i, withCount(`${w.days} days`, w.since === null ? "–" : recentOf(w).length),
+      w.since === null, w.since === null ? "Not enough data yet" : ""]).reverse(),
+    shownWindow, i => { shownWindow = i; showCommanderTrends(g, counts); });
     const w = windows[shownWindow];
     const recent = w ? recentOf(w) : [];
     const whose = g.all ? `${lead}'s` : "these";
@@ -1557,9 +1550,8 @@ function showResults(key, results, names, released, onPeriod) {
 
   function show() {
     setParams({ results: w === first ? null : results.windows[w] });
-    $("results-windows").replaceChildren(...results.windows.map((days, i) => el("button", {
-      type: "button", ariaPressed: String(i === w), onclick: () => { w = i; show(); showPackage(); onPeriod(); },
-    }, `Last ${periodName(days)}`, el("small", { textContent: results.totals[i][0].toLocaleString() }))));
+    chipRow($("results-windows"), results.windows.map((days, i) => [i, withCount(`Last ${periodName(days)}`, results.totals[i][0])]),
+      w, i => { w = i; show(); showPackage(); onPeriod(); });
 
     // The headline: how its decks do against every deck in these tournaments
     const [decks, games, wins, cutDecks, cuts, draws = 0] = results.totals[w];
@@ -1732,9 +1724,8 @@ async function showTournaments() {
 
   function show() {
     const days = all.windows[w];
-    $("tour-windows").replaceChildren(...all.windows.map((d, i) => el("button", {
-      type: "button", ariaPressed: String(i === w), onclick: () => { w = i; show(); },
-    }, `Last ${periodName(d)}`, el("small", { textContent: all.field[i][0].toLocaleString() }))));
+    chipRow($("tour-windows"), all.windows.map((d, i) => [i, withCount(`Last ${periodName(d)}`, all.field[i][0])]),
+      w, i => { w = i; show(); });
     const fieldDecks = all.field[w][0];
     const field = totalsRow(all.field[w], 0);
     const rows = commanders.map(c => ({ ...c, ...totalsRow(c.flat, w) })).filter(r => r.decks);
@@ -2046,9 +2037,8 @@ function showListsOverTime(pilot, rows, theirs, names, leadName) {
   const rateOf = ([g, k]) => (g ? percent(k / g) : "–");
   async function draw() {
     const key = chosen;
-    $("pilot-lists-commanders").replaceChildren(...listed.map(c => el("button", {
-      type: "button", ariaPressed: String(c.key === key), onclick: () => { chosen = c.key; draw(); },
-    }, leadName(c.key), el("small", { textContent: kept(c.key).length }))));
+    chipRow($("pilot-lists-commanders"), listed.map(c => [c.key, withCount(leadName(c.key), kept(c.key).length)]),
+      key, k => { chosen = k; draw(); });
     const lists = await getJson(`decks/results/lists/${key}.json`);
     if (key !== chosen) return; // another commander was picked meanwhile
     const decks = kept(key).map(row => {
@@ -2232,10 +2222,8 @@ async function showTrends() {
   async function update() {
     const f = readFilters(w, [["w", windows[w].days ?? "all"]]);
     const { active } = f;
-    $("trend-windows").replaceChildren(...windows.map((x, i) => ({ x, i })).reverse().map(({ x, i }) => el("button", {
-      type: "button", ariaPressed: String(i === w), disabled: x.since === null, title: x.since === null ? "Not enough data yet" : "",
-      onclick: () => { w = i; update(); },
-    }, x.days ? `${x.days} days` : "All time")));
+    chipRow($("trend-windows"), windows.map((x, i) => [i, x.days ? `${x.days} days` : "All time",
+      x.since === null, x.since === null ? "Not enough data yet" : ""]).reverse(), w, i => { w = i; update(); });
 
     const scope = active ? filterCommanders(trends.commanders, f) : trends.commanders;
     const { popular, rising, total, recent } = trendingCommanders(scope, w);
@@ -2403,10 +2391,9 @@ async function showDeckValue(deck, printings = new Map()) {
       falling: priced.filter(c => then(c, w) > 0 && ratio(c) < 1).sort((a, b) => ratio(a) - ratio(b)),
     };
     if (!lists[order].length) order = "all";
-    const counted = (label, n) => el("span", {}, label, el("small", { textContent: n }));
-    chipRow($("deck-value-order"), [["all", counted("All cards", lists.all.length)],
-      ["rising", counted("Rising", lists.rising.length), !lists.rising.length],
-      ["falling", counted("Falling", lists.falling.length), !lists.falling.length]], order, o => { order = o; show(); });
+    chipRow($("deck-value-order"), [["all", withCount("All cards", lists.all.length)],
+      ["rising", withCount("Rising", lists.rising.length), !lists.rising.length],
+      ["falling", withCount("Falling", lists.falling.length), !lists.falling.length]], order, o => { order = o; show(); });
     return showDeckMovers(lists[order].map(c => {
       const { named: printing, id } = at.get(c);
       const tile = { card: c, id, type: typeOf(c), price: now(c), foil: printing?.finish > 0 };
@@ -2422,7 +2409,6 @@ const PRICE_WINDOWS = [7, 30, 90, 365]; // WINDOWS in build_prices.py
 const PRICE_BANDS = [1, 5, 20, 100]; // US dollars, shown as round amounts of the visitor's currency
 const FINISHES = ["", "foil", "etched"];
 const GAP_DAYS = 21; // longer stretches without prices are drawn dashed
-const EST_GAP_DAYS = 35; // the same between estimates (every 4 weeks, more than 3 years back)
 const HISTORY_RANGES = [[90, "3 months"], [365, "1 year"], [1095, "3 years"], [null, "All"]];
 const pricesMessage = text => {
   $("prices-message").textContent = text;
@@ -2442,18 +2428,22 @@ function priceChange(now, was) {
 let priceDays; // prices/days.json: the days with prices
 const getPriceDays = () => (priceDays ??= getJson("prices/days.json"));
 // Estimated prices, [days since the point before, change in cents (null: none until the next point),
-// ...] (build_prices.py's daily()), flat between points, as [[day, cents, true]]
+// ...] (build_prices.py's daily()), flat between points, as [[day, cents, true, starts after none]]
 function estimated(points = []) {
   const out = [];
   let d = 0, c = 0, on = false;
   for (let k = 0; k < points.length; k += 2) {
     d += points[k];
     if (on && points[k] > 1) out.push([d - 1, c, true]);
+    const starts = !on;
     on = points[k + 1] !== null;
-    if (on) out.push([d, (c += points[k + 1]), true]);
+    if (on) out.push([d, (c += points[k + 1]), true, starts]);
   }
   return out;
 }
+// A stretch with no prices between two points: estimates run unbroken until one starts again after
+// none; between ours (or ours and an estimate), more than GAP_DAYS apart
+const priceGap = (a, b) => (a[2] && b[2] ? !!b[3] : b[0] - a[0] > GAP_DAYS);
 // A series' price on each day with prices: series = [[day, cents or null]], where it changed
 function onDays(series, days) {
   const out = [];
@@ -2496,8 +2486,6 @@ function completeTo(data, cents, finish, rose) {
   }
   return cut;
 }
-const chipRow = (box, options, current, pick) => box.replaceChildren(...options.map(([value, label, off]) =>
-  el("button", { type: "button", ariaPressed: String(value === current), disabled: !!off, onclick: () => pick(value) }, label)));
 
 // A line chart of prices: points = [[day, cents]], one per day with a price. Lines across more than
 // GAP_DAYS without prices are dashed. A crosshair and the day's price follow the pointer
@@ -2552,13 +2540,12 @@ function priceChart(box, points, label) {
   // Each step is a line of ours, a lighter one to or from an estimate, or dashed across a gap
   const paths = { line: "", est: "", gap: "" };
   const dots = [];
-  const far = (a, b) => b[0] - a[0] > (a[2] || b[2] ? EST_GAP_DAYS : GAP_DAYS);
   const xy = ([d, c]) => `${x(d).toFixed(1)},${y(c).toFixed(1)}`;
   points.forEach((p, k) => {
     const prev = points[k - 1], next = points[k + 1];
-    if (prev) paths[far(prev, p) ? "gap" : prev[2] || p[2] ? "est" : "line"] += `M${xy(prev)}L${xy(p)}`;
+    if (prev) paths[priceGap(prev, p) ? "gap" : prev[2] || p[2] ? "est" : "line"] += `M${xy(prev)}L${xy(p)}`;
     // A day of ours with no other close by would be no line at all: a dot instead
-    if (!p[2] && (!prev || far(prev, p) || prev[2]) && (!next || far(p, next) || next[2])) {
+    if (!p[2] && (!prev || priceGap(prev, p) || prev[2]) && (!next || priceGap(p, next) || next[2])) {
       dots.push(svgEl("circle", { class: "dot", cx: x(p[0]), cy: y(p[1]), r: 3 }));
     }
   });
@@ -2611,7 +2598,7 @@ async function showHistory(id, finish) {
         : (ours.length ? `${ours.length} days of TCGplayer prices since ${dayName(ours[0][0])}.` : "No TCGplayer prices in this period.")
           + (ours.length < points.length ? " The lighter line is estimated between them, from another price guide's daily prices"
             + " scaled to meet TCGplayer's." : "")
-          + (points.some((p, k) => k && p[0] - points[k - 1][0] > (p[2] || points[k - 1][2] ? EST_GAP_DAYS : GAP_DAYS))
+          + (points.some((p, k) => k && priceGap(points[k - 1], p))
             ? " Dashed lines cross stretches with no prices." : "");
     };
     if (historyRange && all[0][0] >= days.at(-1) - historyRange / 2) historyRange = null;
@@ -2989,14 +2976,9 @@ async function showCardPage(card) {
     showCardCommanders(playing.filter(c => strategy === null || c.themes.includes(strategy)).map(c => ({ key: c.key, name: c.name,
       detail: `${c.decks.toLocaleString()} of ${c.made[0].toLocaleString()} decks (${percent(c.share)})` })));
   };
-  $("card-themes").replaceChildren(...strategies.map(t => el("button", {
-    type: "button", ariaPressed: String(t === null),
-    onclick: e => {
-      for (const b of $("card-themes").children) b.ariaPressed = String(b === e.currentTarget);
-      show(t);
-    },
-  }, t === null ? "All" : tagLabel(trends.themes[t]),
-  el("small", { textContent: t === null ? playing.length : playing.filter(c => c.themes.includes(t)).length }))));
+  const showThemes = picked => chipRow($("card-themes"), strategies.map(t => [t, withCount(t === null ? "All" : tagLabel(trends.themes[t]),
+    t === null ? playing.length : playing.filter(c => c.themes.includes(t)).length)]), picked, t => { showThemes(t); show(t); });
+  showThemes(null);
   show(null);
   commanderMessage("");
   $("card-page").hidden = false;

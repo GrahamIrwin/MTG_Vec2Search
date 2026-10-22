@@ -140,7 +140,7 @@ export function similarDecks(shard, deckCards) {
 
 // Near-copies (a precon with a few changes, "Copy of …") fold into the first deck like them,
 // so the list isn't the same deck twenty times. Returns [{...result, copies}].
-export const COPY = 0.9; // share of cards in common (Jaccard)
+const COPY = 0.9; // share of cards in common (Jaccard)
 export function foldCopies(results, limit) {
   const shown = [];
   for (const r of results) {
@@ -162,7 +162,7 @@ export function foldCopies(results, limit) {
 // share of the votes minus part of how often any deck with this commander plays it, so the list
 // is what decks like yours play more than usual, not just staples.
 // Tuned by hiding 10 cards of real decks and recommending them back (tune_recommend.mjs)
-export const NEIGHBORS = { ratio: 0.3, min: 10, max: 100 };
+const NEIGHBORS = { ratio: 0.3, min: 10, max: 100 };
 export const STAPLE_DISCOUNT = 0.5;
 export function recommend(shard, similar, deckCards, { neighbors = NEIGHBORS, discount = STAPLE_DISCOUNT } = {}) {
   const cut = neighbors.ratio * (similar[0]?.similarity ?? 0);
