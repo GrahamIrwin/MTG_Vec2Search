@@ -2410,10 +2410,8 @@ async function showDeckValue(deck, printings = new Map()) {
     return showDeckMovers(lists[order].map(c => {
       const { named: printing, id } = at.get(c);
       const tile = { card: c, id, type: typeOf(c), price: now(c), foil: printing?.finish > 0 };
-      return order === "all" ? tile : {
-        ...tile, detail: priceChange(now(c), then(c, w)), tone: now(c) > then(c, w) ? "up" : "down",
-        note: `${dollars(then(c, w))} ${windowName(w)} ago`,
-      };
+      return order === "all" ? tile : { ...tile, ...priceTag(now(c), then(c, w), `${windowName(w)} ago`,
+        printing ? [index.sets.find(([code]) => code === printing.set)?.[1], FINISHES[printing.finish]] : []) };
     }));
   }
   $("deck-value-panel").hidden = false;
@@ -2467,15 +2465,20 @@ function onDays(series, days) {
   return out;
 }
 
-// A printing's row ([card, id, set, finish, now, ...]) as a tile: its price, how much it changed
-// since `was`, and its set, finish and old price under it
+// A price tag, the same on every tab: the price now, its change since `was` (green up, red down),
+// and under it the printing (set, foil) and what it cost then, saying when ("$80.96 30 days ago")
+function priceTag(now, was, when, printing = []) {
+  const has = was > 0;
+  return {
+    price: now, detail: has ? priceChange(now, was) : "", tone: has && now > was ? "up" : has && now < was ? "down" : "",
+    note: [...printing, has && `${dollars(was)} ${when}`].filter(Boolean).join(" · "),
+  };
+}
+
+// A printing's row ([card, id, set, finish, now, ...]) as a tile, against its price w days before
 function pricePick(r, sets, was, w) {
   const [card, id, set, finish, now] = r;
-  return {
-    card, id, type: typeOf(card), price: now, foil: finish > 0,
-    detail: was > 0 ? priceChange(now, was) : "", tone: was > 0 && now > was ? "up" : was > 0 && now < was ? "down" : "",
-    note: [sets[set], FINISHES[finish], was > 0 && `was ${dollars(was)}`].filter(Boolean).join(" · "),
-  };
+  return { card, id, type: typeOf(card), foil: finish > 0, ...priceTag(now, was, `${windowName(w)} ago`, [sets[set], FINISHES[finish]]) };
 }
 // A round amount of the visitor's currency near `usd` dollars: 1, 2 or 5 times a power of ten
 function roundLocal(usd) {
@@ -2766,13 +2769,10 @@ async function showPrices() {
     };
     await showWatched(list.map((w, k) => {
       const points = series[k];
-      if (!points.length) return { card: w.card, id: w.id, type: typeOf(w.card), detail: "no price", note: w.set ?? "" };
-      const now = points.at(-1)[1], month = at(points, 30), year = at(points, 365);
-      return {
-        card: w.card, id: w.id, type: typeOf(w.card), price: now, foil: w.finish !== "usd",
-        detail: month ? priceChange(now, month[1]) : "", tone: month && now > month[1] ? "up" : month && now < month[1] ? "down" : "",
-        note: [w.set, w.finish !== "usd" && "foil", year && `${priceChange(now, year[1])} in a year`].filter(Boolean).join(" · "),
-      };
+      const printing = [w.set, w.finish !== "usd" && "foil"];
+      if (!points.length) return { card: w.card, id: w.id, type: typeOf(w.card), price: -1, note: printing.filter(Boolean).join(" · ") };
+      const now = points.at(-1)[1], month = at(points, 30);
+      return { card: w.card, id: w.id, type: typeOf(w.card), foil: w.finish !== "usd", ...priceTag(now, month?.[1], "30 days ago", printing) };
     }));
   };
   onWatchChange = () => showWatchlist().catch(err => console.error(err));
@@ -2801,10 +2801,12 @@ async function showPrices() {
     $("buyouts-lede").textContent = `Up ${percent(BUYOUT_RISE)} or more in 30 days, while Commander decks play them no more than usual.`;
     showSpecBuys(buys.map(x => ({ card: x.card, type: typeOf(x.card), price: p.now[x.card],
       detail: `${(x.share / x.was).toFixed(1)}× played`, tone: "up",
-      note: `${deckShare(x)} · price ${priceChange(p.now[x.card], p["30"][x.card])}` })));
-    showBuyouts(outs.map(c => ({ card: c, type: typeOf(c), price: p.now[c],
-      detail: priceChange(p.now[c], p["30"][c]), tone: "up",
-      note: `was ${dollars(p["30"][c])} · ` + (played.has(c) ? deckShare(played.get(c)) : "in no new Commander decks") })));
+      note: `${deckShare(x)} · price ${priceChange(p.now[x.card], p["30"][x.card])} in 30 days` })));
+    showBuyouts(outs.map(c => {
+      const tag = priceTag(p.now[c], p["30"][c], "30 days ago");
+      return { card: c, type: typeOf(c), ...tag,
+        note: `${tag.note} · ` + (played.has(c) ? deckShare(played.get(c)) : "in no new Commander decks") };
+    }));
   };
 
   // Tournament spikes: cards in far more of the last 90 days' cEDH tournament decks than of the
@@ -2827,7 +2829,7 @@ async function showPrices() {
       const now = p.now[x.card], then = p["90"][x.card];
       return {
         card: x.card, type: typeOf(x.card), price: now, detail: `${(x.share / x.was).toFixed(1)}× played`, tone: "up",
-        note: `${percent1(x.share)} of decks, usually ${percent1(x.was)}` + (then > 0 ? ` · price ${priceChange(now, then)}` : ""),
+        note: `${percent1(x.share)} of tournament decks, usually ${percent1(x.was)}` + (then > 0 ? ` · price ${priceChange(now, then)} in 90 days` : ""),
       };
     }));
 
@@ -2842,11 +2844,10 @@ async function showPrices() {
       && Math.min(r[5], r[6]) >= floor);
     rows.sort((a, b) => a[6] / a[5] - b[6] / b[5]);
     $("reprints-lede").textContent = `Older printings since a reprint came out (in the last ${REPRINT_DAYS} days), the biggest falls first.`;
-    showReprints(rows.map(([card, id, oldSet, newSet, out, was, now, fresh]) => ({
-      card, id, type: typeOf(card), price: now, detail: priceChange(now, was),
-      tone: now > was ? "up" : now < was ? "down" : "",
-      note: `${reprints.sets[oldSet]} · was ${dollars(was)}` + (fresh >= 0 ? ` · reprint ${dollars(fresh)}` : ""),
-    })));
+    showReprints(rows.map(([card, id, oldSet, newSet, out, was, now, fresh]) => {
+      const tag = priceTag(now, was, "before the reprint", [reprints.sets[oldSet]]);
+      return { card, id, type: typeOf(card), ...tag, note: tag.note + (fresh >= 0 ? ` · the reprint ${dollars(fresh)}` : "") };
+    }));
 
   };
 

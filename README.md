@@ -120,6 +120,9 @@ time, a few KB after that).
    commander's page, Trends (commanders, cards), Tournaments (commanders, pilots, cards) and a
    deck's recommendations (against a list, cards to add and cut, combos, tournament check, similar
    decks, what it's worth). A section with nothing to show has no button.
+   **Price tags read the same everywhere** (`priceTag()`): the price now, its change (green up, red
+   down), and under it the printing (set, foil) and what it cost then, saying when ("$80.96 30 days
+   ago", "before the reprint"); a change in how often a card is played names its period too.
 4. **Commanders** (`?commanders`) lists every commander with decks, which
    Trends' filters narrow down; partners show both cards, overlapped, the one
    behind coming forward when pointed at. Each one's
