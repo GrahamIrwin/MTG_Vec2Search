@@ -1055,7 +1055,7 @@ def share(path=HISTORY, goldfish=GOLDFISH_FILE):
             files.append(goldfish + ".gz")
         if subprocess.run(["gh", "release", "upload", RELEASE, *files, "--clobber"]).returncode:
             raise RuntimeError("the upload failed")
-        print(f"Uploaded {len(hist['days'])} days" + (f" and {len(rows):,} histories" if len(files) > 1 else "") + ".",
+        print(f"Uploaded {len(hist['days'])} days" + (" and the other guide's histories" if len(files) > 1 else "") + ".",
               flush=True)
         return True
     except (OSError, RuntimeError) as e:  # OSError: gh isn't installed
