@@ -326,7 +326,7 @@ time, a few KB after that).
      names (`1 Sol Ring (CMM) 400 *F*`: set, collector number, `*F*` foil or `*E*` etched, as
      Moxfield and Archidekt export them, or a pasted link), else at its cheapest, now, up or down
      how much over 7 days, 30 days, 90 days or a year as picked (`w=`, over the cards priced
-     then), and the cards rising or falling most in that time (`order=`). The
+     then), and every card by price (the default) or the ones rising or falling most in that time (`order=`). The
      printings' prices are in `prices/sets/set-<code>.json` (one file per set, so a deck fetches
      only its sets'), the cheapest in `prices/cards.json` (each card's cheapest price now, 7, 30, 90 and
      365 days before, by card number).

@@ -2376,10 +2376,10 @@ async function showDeckValue(deck, printings = new Map()) {
   const named = priced.filter(c => at.get(c).named).length;
   const fromUrl = Number(params.get("w"));
   let w = PRICE_WINDOWS.includes(fromUrl) ? fromUrl : 30;
-  let order = params.get("order") === "falling" ? "falling" : "rising";
+  let order = ["rising", "falling"].includes(params.get("order")) ? params.get("order") : "all";
 
   function show() {
-    setParams({ w: w === 30 ? null : w, order: order === "rising" ? null : order });
+    setParams({ w: w === 30 ? null : w, order: order === "all" ? null : order });
     chipRow($("deck-value-windows"), PRICE_WINDOWS.map(x => [x, x === 365 ? "1 year" : `${x} days`,
       !priced.some(c => then(c, x) >= 0)]), w, x => { w = x; show(); });
     // The change over the cards priced both then and now
@@ -2395,21 +2395,24 @@ async function showDeckValue(deck, printings = new Map()) {
         el("span", { className: diff > 0 ? "up" : diff < 0 ? "down" : "", textContent: priceChange(total, was) }),
         `) in ${windowName(w)}` + (both.length < priced.length ? ` (the ${both.length} cards with a price then)` : "")] : []),
       ".");
-    // Rising or falling, the biggest change first
+    // Every card by price, most first; or rising or falling, the biggest change first
     const ratio = c => now(c) / then(c, w);
-    const rose = priced.filter(c => then(c, w) > 0 && ratio(c) > 1).sort((a, b) => ratio(b) - ratio(a));
-    const fell = priced.filter(c => then(c, w) > 0 && ratio(c) < 1).sort((a, b) => ratio(a) - ratio(b));
-    if (!(order === "rising" ? rose : fell).length && (order === "rising" ? fell : rose).length) order = order === "rising" ? "falling" : "rising";
+    const lists = {
+      all: [...priced].sort((a, b) => now(b) - now(a)),
+      rising: priced.filter(c => then(c, w) > 0 && ratio(c) > 1).sort((a, b) => ratio(b) - ratio(a)),
+      falling: priced.filter(c => then(c, w) > 0 && ratio(c) < 1).sort((a, b) => ratio(a) - ratio(b)),
+    };
+    if (!lists[order].length) order = "all";
     const counted = (label, n) => el("span", {}, label, el("small", { textContent: n }));
-    chipRow($("deck-value-order"), [["rising", counted("Rising", rose.length), !rose.length],
-      ["falling", counted("Falling", fell.length), !fell.length]], order, o => { order = o; show(); });
-    const moved = order === "rising" ? rose : fell;
-    $("deck-value-none").textContent = moved.length ? "" : `No card's price changed in ${windowName(w)}.`;
-    return showDeckMovers(moved.map(c => {
+    chipRow($("deck-value-order"), [["all", counted("All cards", lists.all.length)],
+      ["rising", counted("Rising", lists.rising.length), !lists.rising.length],
+      ["falling", counted("Falling", lists.falling.length), !lists.falling.length]], order, o => { order = o; show(); });
+    return showDeckMovers(lists[order].map(c => {
       const { named: printing, id } = at.get(c);
-      return {
-        card: c, id, type: typeOf(c), price: now(c), foil: printing?.finish > 0, detail: priceChange(now(c), then(c, w)),
-        tone: now(c) > then(c, w) ? "up" : "down", note: `${dollars(then(c, w))} ${windowName(w)} ago`,
+      const tile = { card: c, id, type: typeOf(c), price: now(c), foil: printing?.finish > 0 };
+      return order === "all" ? tile : {
+        ...tile, detail: priceChange(now(c), then(c, w)), tone: now(c) > then(c, w) ? "up" : "down",
+        note: `${dollars(then(c, w))} ${windowName(w)} ago`,
       };
     }));
   }
