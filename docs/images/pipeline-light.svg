@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" font-family="Georgia, 'Times New Roman', serif">
+<defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8f7a63"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="#faf4e6"/>
+<text x="120.0" y="34.0" font-size="13" fill="#6a5440" text-anchor="middle" font-weight="bold">Sources</text>
+<text x="360.0" y="34.0" font-size="13" fill="#6a5440" text-anchor="middle" font-weight="bold">Scripts (scripts/)</text>
+<text x="600.0" y="34.0" font-size="13" fill="#6a5440" text-anchor="middle" font-weight="bold">Kept in data/ and releases</text>
+<text x="842.5" y="34.0" font-size="13" fill="#6a5440" text-anchor="middle" font-weight="bold">Built into site/</text>
+<rect x="20.0" y="52.0" width="200.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="120.0" y="80.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">Scryfall</text>
+<text x="120.0" y="98.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">cards, tags, printings</text>
+<rect x="265.0" y="52.0" width="190.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="360.0" y="80.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">build_index.py</text>
+<text x="360.0" y="98.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">a vector per card</text>
+<rect x="500.0" y="52.0" width="200.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="600.0" y="80.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">oracle_cards, default_cards</text>
+<text x="600.0" y="98.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">downloaded fresh</text>
+<rect x="745.0" y="52.0" width="195.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="842.5" y="80.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">site/index/</text>
+<text x="842.5" y="98.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">the search index</text>
+<line x1="224" y1="83" x2="259" y2="83" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<line x1="459" y1="83" x2="494" y2="83" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<line x1="704" y1="83" x2="739" y2="83" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<rect x="20.0" y="136.0" width="200.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="120.0" y="164.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">Archidekt, Moxfield</text>
+<text x="120.0" y="182.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">public Commander decks</text>
+<rect x="265.0" y="136.0" width="190.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="360.0" y="164.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">build_decks.py crawl</text>
+<text x="360.0" y="182.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">one request a second</text>
+<rect x="500.0" y="136.0" width="200.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="600.0" y="164.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">decks.jsonl.gz</text>
+<text x="600.0" y="182.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">deck-corpus release</text>
+<rect x="745.0" y="136.0" width="195.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="842.5" y="164.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">site/decks/</text>
+<text x="842.5" y="182.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">commanders, builds, trends</text>
+<line x1="224" y1="167" x2="259" y2="167" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<line x1="459" y1="167" x2="494" y2="167" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<line x1="704" y1="167" x2="739" y2="167" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<rect x="20.0" y="220.0" width="200.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="120.0" y="248.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">edhtop16</text>
+<text x="120.0" y="266.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">cEDH tournament results</text>
+<rect x="265.0" y="220.0" width="190.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="360.0" y="248.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">build_decks.py results</text>
+<text x="360.0" y="266.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">two years of events</text>
+<rect x="500.0" y="220.0" width="200.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="600.0" y="248.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">results.jsonl.gz</text>
+<text x="600.0" y="266.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">deck-corpus release</text>
+<rect x="745.0" y="220.0" width="195.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="842.5" y="248.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">site/decks/results/</text>
+<text x="842.5" y="266.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">win rates, top cuts</text>
+<line x1="224" y1="251" x2="259" y2="251" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<line x1="459" y1="251" x2="494" y2="251" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<line x1="704" y1="251" x2="739" y2="251" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<rect x="20.0" y="304.0" width="200.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="120.0" y="332.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">Scryfall, price archives</text>
+<text x="120.0" y="350.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">every printing&#x27;s price</text>
+<rect x="265.0" y="304.0" width="190.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="360.0" y="332.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">build_prices.py</text>
+<text x="360.0" y="350.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">daily snapshots, backfill</text>
+<rect x="500.0" y="304.0" width="200.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="600.0" y="332.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">prices.jsonl.gz</text>
+<text x="600.0" y="350.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">price-history release</text>
+<rect x="745.0" y="304.0" width="195.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="842.5" y="332.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">site/prices/</text>
+<text x="842.5" y="350.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">charts, movers</text>
+<line x1="224" y1="335" x2="259" y2="335" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<line x1="459" y1="335" x2="494" y2="335" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<line x1="704" y1="335" x2="739" y2="335" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<rect x="745.0" y="52.0" width="195.0" height="330.0" rx="8" fill="none" stroke="#8f7a63" stroke-width="1.2" stroke-dasharray="4 3"/>
+<line x1="842" y1="386" x2="842" y2="414" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<rect x="745.0" y="420.0" width="195.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="842.5" y="448.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">GitHub Pages</text>
+<text x="842.5" y="466.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">serves site/ as static files</text>
+<line x1="741" y1="451" x2="600" y2="451" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<rect x="380.0" y="420.0" width="216.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="488.0" y="448.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">Your browser</text>
+<text x="488.0" y="466.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">search.js, deck.js do the work</text>
+<line x1="150" y1="451" x2="376" y2="451" stroke="#8f7a63" stroke-width="1.6" marker-end="url(#head)"/>
+<rect x="20.0" y="420.0" width="126.0" height="62.0" rx="8" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
+<text x="83.0" y="448.0" font-size="14" fill="#2b1e14" text-anchor="middle" font-weight="bold">deck-link.js</text>
+<text x="83.0" y="466.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">Cloudflare Worker</text>
+<text x="263.0" y="440.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal" font-style="italic">a pasted deck link</text>
+<text x="480.0" y="522.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">GitHub Actions: crawl.yml every day (decks, tournaments, a day of prices, then a deploy) · deploy.yml rebuilds everything</text>
+<text x="480.0" y="542.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">No server, no database: the heavy work happens at build time, and a search downloads only the pieces of the index it needs.</text>
+</svg>

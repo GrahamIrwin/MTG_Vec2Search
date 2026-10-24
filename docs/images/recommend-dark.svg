@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" width="900" height="400" font-family="Georgia, 'Times New Roman', serif">
+<defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8c7860"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="#231b15"/>
+<rect x="20.0" y="150.0" width="150.0" height="70.0" rx="8" fill="#2b2119" stroke="#4a3929" stroke-width="1.2"/>
+<text x="95.0" y="182.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">Your deck</text>
+<text x="95.0" y="200.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">97 cards, Kinnan</text>
+<line x1="174" y1="185" x2="220" y2="185" stroke="#8c7860" stroke-width="1.6" marker-end="url(#head)"/>
+<rect x="226.0" y="60.0" width="170.0" height="44.0" rx="8" fill="#2b2119" stroke="#4a3929" stroke-width="1.2"/>
+<text x="311.0" y="80.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">76% alike</text>
+<text x="311.0" y="96.0" font-size="11" fill="#bba586" text-anchor="middle" font-weight="normal">92 cards in common</text>
+<rect x="226.0" y="116.0" width="170.0" height="44.0" rx="8" fill="#2b2119" stroke="#4a3929" stroke-width="1.2"/>
+<text x="311.0" y="136.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">72% alike</text>
+<text x="311.0" y="152.0" font-size="11" fill="#bba586" text-anchor="middle" font-weight="normal">92 cards in common</text>
+<rect x="226.0" y="172.0" width="170.0" height="44.0" rx="8" fill="#2b2119" stroke="#4a3929" stroke-width="1.2"/>
+<text x="311.0" y="192.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">72% alike</text>
+<text x="311.0" y="208.0" font-size="11" fill="#bba586" text-anchor="middle" font-weight="normal">93 cards in common</text>
+<rect x="226.0" y="228.0" width="170.0" height="44.0" rx="8" fill="#2b2119" stroke="#4a3929" stroke-width="1.2"/>
+<text x="311.0" y="248.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">71% alike</text>
+<text x="311.0" y="264.0" font-size="11" fill="#bba586" text-anchor="middle" font-weight="normal">92 cards in common</text>
+<text x="311.0" y="300.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal" font-style="italic">… the 100 most alike decks</text>
+<line x1="400" y1="185" x2="440" y2="185" stroke="#8c7860" stroke-width="1.6" marker-end="url(#head)"/>
+<text x="446.0" y="34.0" font-size="14" fill="#ecdfc8" text-anchor="start" font-weight="bold">Cards they play that yours doesn&#x27;t</text>
+<rect x="446.0" y="48.0" width="12.0" height="12.0" rx="2" fill="#45a066" stroke="none" stroke-width="1.2"/>
+<text x="464.0" y="58.0" font-size="11" fill="#bba586" text-anchor="start" font-weight="normal">share of the votes, more alike decks counting more</text>
+<rect x="446.0" y="64.0" width="12.0" height="12.0" rx="2" fill="#3d2e1a" stroke="#c4832a" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="464.0" y="74.0" font-size="11" fill="#bba586" text-anchor="start" font-weight="normal">less half the share of all decks that play it</text>
+<text x="588.0" y="110.0" font-size="13" fill="#ecdfc8" text-anchor="end" font-weight="normal">Botanical Sanctum</text>
+<text x="588.0" y="126.0" font-size="11" fill="#8c7860" text-anchor="end" font-weight="normal">30% of all decks play it</text>
+<rect x="600.0" y="96.0" width="119.5" height="26.0" rx="3" fill="#45a066" stroke="none" stroke-width="1.2"/>
+<rect x="719.5" y="96.0" width="29.6" height="26.0" rx="3" fill="#3d2e1a" stroke="#c4832a" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="757.1" y="114.0" font-size="12" fill="#ecdfc8" text-anchor="start" font-weight="bold">75% − 15% = 0.60</text>
+<text x="588.0" y="166.0" font-size="13" fill="#ecdfc8" text-anchor="end" font-weight="normal">Twincast</text>
+<text x="588.0" y="182.0" font-size="11" fill="#8c7860" text-anchor="end" font-weight="normal">11% of all decks play it</text>
+<rect x="600.0" y="152.0" width="92.4" height="26.0" rx="3" fill="#45a066" stroke="none" stroke-width="1.2"/>
+<rect x="692.4" y="152.0" width="10.9" height="26.0" rx="3" fill="#3d2e1a" stroke="#c4832a" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="711.3" y="170.0" font-size="12" fill="#ecdfc8" text-anchor="start" font-weight="bold">52% − 5% = 0.46</text>
+<text x="588.0" y="222.0" font-size="13" fill="#ecdfc8" text-anchor="end" font-weight="normal">Pia, Aether Ascetic</text>
+<text x="588.0" y="238.0" font-size="11" fill="#8c7860" text-anchor="end" font-weight="normal">23% of all decks play it</text>
+<rect x="600.0" y="208.0" width="88.2" height="26.0" rx="3" fill="#45a066" stroke="none" stroke-width="1.2"/>
+<rect x="688.2" y="208.0" width="22.7" height="26.0" rx="3" fill="#3d2e1a" stroke="#c4832a" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="718.9" y="226.0" font-size="12" fill="#ecdfc8" text-anchor="start" font-weight="bold">55% − 11% = 0.44</text>
+<text x="588.0" y="278.0" font-size="13" fill="#ecdfc8" text-anchor="end" font-weight="normal">Whir of Invention</text>
+<text x="588.0" y="294.0" font-size="11" fill="#8c7860" text-anchor="end" font-weight="normal">38% of all decks play it</text>
+<rect x="600.0" y="264.0" width="51.9" height="26.0" rx="3" fill="#45a066" stroke="none" stroke-width="1.2"/>
+<rect x="651.9" y="264.0" width="37.7" height="26.0" rx="3" fill="#3d2e1a" stroke="#c4832a" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="697.7" y="282.0" font-size="12" fill="#ecdfc8" text-anchor="start" font-weight="bold">45% − 19% = 0.26</text>
+<text x="450.0" y="340.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">Pia gets more of the votes than Twincast (55% against 52%), but 23% of all Kinnan decks play it and 11% play Twincast,</text>
+<text x="450.0" y="358.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">so Twincast ranks higher: cards to add are what decks like yours play more than usual, not just staples. Your cards they rarely play are cards to cut.</text>
+<text x="450.0" y="384.0" font-size="11" fill="#8c7860" text-anchor="middle" font-weight="normal" font-style="italic">A real Kinnan deck from Moxfield or Archidekt, matched with the commander&#x27;s other public decks.</text>
+</svg>

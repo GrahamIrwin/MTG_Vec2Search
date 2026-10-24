@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" width="900" height="400" font-family="Georgia, 'Times New Roman', serif">
+<defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8c7860"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="#231b15"/>
+<rect x="250.0" y="18.0" width="400.0" height="40.0" rx="20" fill="#2b2119" stroke="#4a3929" stroke-width="1.2"/>
+<text x="450.0" y="44.0" font-size="17" fill="#ecdfc8" text-anchor="middle" font-weight="normal" font-style="italic">“cheap green elves that ramp”</text>
+<line x1="450" y1="62" x2="450" y2="84" stroke="#8c7860" stroke-width="1.6" marker-end="url(#head)"/>
+<text x="312.3" y="108.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">Elf</text>
+<text x="312.3" y="125.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">weight 24.0</text>
+<text x="312.3" y="140.0" font-size="11" fill="#8c7860" text-anchor="middle" font-weight="normal">694 cards</text>
+<text x="496.6" y="108.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">cheap</text>
+<text x="496.6" y="125.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">weight 15.4</text>
+<text x="496.6" y="140.0" font-size="11" fill="#8c7860" text-anchor="middle" font-weight="normal">mana value 0–3</text>
+<text x="632.6" y="108.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">ramp</text>
+<text x="632.6" y="125.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">weight 13.7</text>
+<text x="632.6" y="140.0" font-size="11" fill="#8c7860" text-anchor="middle" font-weight="normal">2,302 cards</text>
+<text x="728.3" y="108.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">green</text>
+<text x="728.3" y="125.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">weight 6.8</text>
+<text x="728.3" y="140.0" font-size="11" fill="#8c7860" text-anchor="middle" font-weight="normal">6,901 cards</text>
+<text x="188.0" y="125.0" font-size="12" fill="#bba586" text-anchor="end" font-weight="normal">query terms</text>
+<text x="776.0" y="125.0" font-size="12" fill="#bba586" text-anchor="start" font-weight="normal">score</text>
+<text x="188.0" y="181.0" font-size="14" fill="#ecdfc8" text-anchor="end" font-weight="normal">Llanowar Elves</text>
+<rect x="202.0" y="160.0" width="220.5" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="312.3" y="181.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="426.5" y="160.0" width="140.1" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="496.6" y="181.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="570.6" y="160.0" width="124.1" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="632.6" y="181.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="698.7" y="160.0" width="59.3" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="728.3" y="181.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<text x="776.0" y="182.0" font-size="16" fill="#ecdfc8" text-anchor="start" font-weight="bold">100%</text>
+<text x="188.0" y="227.0" font-size="14" fill="#ecdfc8" text-anchor="end" font-weight="normal">Elvish Visionary</text>
+<rect x="202.0" y="206.0" width="220.5" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="312.3" y="227.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="426.5" y="206.0" width="140.1" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="496.6" y="227.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="570.6" y="206.0" width="124.1" height="32.0" rx="5" fill="none" stroke="#4a3929" stroke-width="1.2" stroke-dasharray="4 3"/>
+<rect x="698.7" y="206.0" width="59.3" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="728.3" y="227.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<text x="776.0" y="228.0" font-size="16" fill="#ecdfc8" text-anchor="start" font-weight="bold">77%</text>
+<text x="188.0" y="273.0" font-size="14" fill="#ecdfc8" text-anchor="end" font-weight="normal">Cultivate</text>
+<rect x="202.0" y="252.0" width="220.5" height="32.0" rx="5" fill="none" stroke="#4a3929" stroke-width="1.2" stroke-dasharray="4 3"/>
+<rect x="426.5" y="252.0" width="140.1" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="496.6" y="273.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="570.6" y="252.0" width="124.1" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="632.6" y="273.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="698.7" y="252.0" width="59.3" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="728.3" y="273.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<text x="776.0" y="274.0" font-size="16" fill="#ecdfc8" text-anchor="start" font-weight="bold">60%</text>
+<text x="188.0" y="319.0" font-size="14" fill="#ecdfc8" text-anchor="end" font-weight="normal">Sol Ring</text>
+<rect x="202.0" y="298.0" width="220.5" height="32.0" rx="5" fill="none" stroke="#4a3929" stroke-width="1.2" stroke-dasharray="4 3"/>
+<rect x="426.5" y="298.0" width="140.1" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="496.6" y="319.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="570.6" y="298.0" width="124.1" height="32.0" rx="5" fill="#2c3a2b" stroke="#45a066" stroke-width="1.2"/>
+<text x="632.6" y="319.0" font-size="15" fill="#45a066" text-anchor="middle" font-weight="normal">✓</text>
+<rect x="698.7" y="298.0" width="59.3" height="32.0" rx="5" fill="none" stroke="#4a3929" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="776.0" y="320.0" font-size="16" fill="#ecdfc8" text-anchor="start" font-weight="bold">49%</text>
+<text x="450.0" y="362.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">A term&#x27;s weight is (1 + ln(34,232 cards ÷ cards with it))², so rare terms count for more: Elf (694 cards) counts 3.5× green.</text>
+<text x="450.0" y="382.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">A card scores the share of the query&#x27;s weight it covers. Extra features the query didn&#x27;t ask for don&#x27;t count against it; ties go to the more popular card.</text>
+</svg>

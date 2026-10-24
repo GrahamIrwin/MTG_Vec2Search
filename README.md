@@ -13,7 +13,14 @@ time, a few KB after that).
 
 **Live site:** https://grahamirwin.github.io/MTG_Vec2Search/
 
+![Searching “cheap green elves that ramp”: the terms it matched, and Llanowar Elves, Elvish Mystic and other cheap green mana elves, each a 100% match](docs/images/screenshot-search.webp)
+
 ## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/pipeline-dark.svg">
+  <img alt="Scryfall, Archidekt and Moxfield, edhtop16 and price archives feed the scripts, which keep their data in data/ and the releases and build site/; GitHub Pages serves it, and the browser does the work" src="docs/images/pipeline-light.svg">
+</picture>
 
 1. `build_index.py` downloads Scryfall's `oracle_cards`, `oracle_tags` and
    `default_cards` (every printing, for the cheapest price) bulk data and turns
@@ -57,6 +64,14 @@ time, a few KB after that).
    "under $5", "less than 3 euros" or "budget" (under US$1) in a query sets
    the price limit; prices are each card's cheapest printing.
 
+   For “cheap green elves that ramp”, Elf is the rarest term (694 cards), so it counts for the most; a
+   card scores the share of the query's weight it covers:
+
+   <picture>
+     <source media="(prefers-color-scheme: dark)" srcset="docs/images/search-dark.svg">
+     <img alt="The query's four groups, Elf (weight 24.0), cheap (15.4), ramp (13.7) and green (6.8), and four cards: Llanowar Elves covers all (100%), Elvish Visionary all but ramp (77%), Cultivate all but Elf (60%), Sol Ring only cheap and ramp (49%)" src="docs/images/search-light.svg">
+   </picture>
+
    Prices are shown in the visitor's currency: guessed from their time zone
    (then browser language), changeable in the top corner, and converted from
    Scryfall's USD prices with [Frankfurter](https://frankfurter.dev).
@@ -93,11 +108,27 @@ time, a few KB after that).
    - In the browser (`site/deck.js`), decks are compared by cosine similarity
      over the cards they play, each weighted by how rare it is among that
      commander's decks (IDF), so Sol Ring and Command Tower count for almost
-     nothing. The 25 most similar decks vote on **cards to consider**, by
-     similarity, minus half of how often any deck with that commander plays the
-     card, so the list is what decks like yours play more than usual rather than
+     nothing. The decks most like yours (those at least 30% as alike as the
+     closest, 10 to 100 of them) vote on **cards to add**, by similarity, minus
+     half of how often any deck with that commander plays the card, so the list is what decks like yours play more than usual rather than
      staples. **Cards to cut** are yours that similar decks rarely play, shown
      with their images like the cards to add.
+
+     <picture>
+       <source media="(prefers-color-scheme: dark)" srcset="docs/images/shared-cards-dark.svg">
+       <img alt="Two Kinnan decks that share only six cards almost every deck plays (Sol Ring, Birds of Paradise, ...) are under 1% alike; two that share three cards few decks play are 22% alike" src="docs/images/shared-cards-light.svg">
+     </picture>
+
+     <picture>
+       <source media="(prefers-color-scheme: dark)" srcset="docs/images/card-weights-dark.svg">
+       <img alt="How much sharing a card counts against the share of Kinnan decks that play it: Sol Ring (98%) counts 0, Sylvan Library (28%) 1.6, Lightning Greaves (5%) 8.5, Nature's Lore (1%) 19.5, Skullclamp (0.2%) 40.4" src="docs/images/card-weights-light.svg">
+     </picture>
+
+     <picture>
+       <source media="(prefers-color-scheme: dark)" srcset="docs/images/recommend-dark.svg">
+       <img alt="A Kinnan deck's 100 most alike decks vote for the cards they play that it doesn't: Pia gets more of the votes than Twincast, but more Kinnan decks play Pia, so Twincast ranks higher" src="docs/images/recommend-light.svg">
+     </picture>
+
    - A commander with tournament results can be matched with its cEDH tournament lists instead
      (buttons beside "compared with": `decks=tournament`, or `decks=topcut` for only those that
      made the top cut, each with `MIN_AVERAGE_DECKS` decks or more): `tournamentPool()` turns
@@ -112,6 +143,8 @@ time, a few KB after that).
    - A commander with too few decks is compared with the commander whose
      signature cards the deck plays the most of. That same match powers "decks
      like yours with other commanders".
+
+   ![Deck recommendations for a Kinnan deck compared with top-cut tournament decks: cards to add, each with how many of the 100 most alike decks play it and how its decks did in tournaments](docs/images/screenshot-deck.webp)
 
    Card-overlap similarity was checked against a "functional" similarity over
    the search terms above (tags, keywords, types) by hiding 10 cards of real
@@ -159,6 +192,23 @@ time, a few KB after that).
    commander's own), so Teysa is known for aristocrats even though all her
    builds are. Each links to Trends, filtered to commanders known for it.
 
+   ![Kinnan, Bonder Prodigy's page: its builds and brackets, and the average deck of its top-cut tournament decks](docs/images/screenshot-commander.webp)
+
+   Kinnan's 1,153 public decks fall into five builds, each a region of decks that play alike cards:
+
+   <picture>
+     <source media="(prefers-color-scheme: dark)" srcset="docs/images/builds-dark.svg">
+     <img alt="A map of Kinnan's public decks, one panel per build: Tutor artifact (33%), Pitch spell (30%), Mana dork (18%), Top deck manipulation (10%) and Removal destroy (9%), each in its own region" src="docs/images/builds-light.svg">
+   </picture>
+
+   And what the average deck's Top cut changes: the cards whose play rates differ most between Kinnan's
+   public decks and its top-cut tournament decks.
+
+   <picture>
+     <source media="(prefers-color-scheme: dark)" srcset="docs/images/public-vs-topcut-dark.svg">
+     <img alt="Top-cut Kinnan decks play Tezzeret the Seeker, Transmute Artifact and Grim Monolith far more than public decks, and Shang-Chi, Gene Pollinator and Badgermole Cub far less" src="docs/images/public-vs-topcut-light.svg">
+   </picture>
+
    Decks can also be narrowed to a **bracket**, the one each deck's builder
    gave it (most Moxfield decks have one, few Archidekt ones), alone or with a
    build. The build and bracket are in the address bar
@@ -198,6 +248,13 @@ time, a few KB after that).
      a list). New cards are listed either way, faded when there's too little
      to go on. Decks with a card winning more doesn't prove the card wins
      more: good players pick up new cards first.
+
+
+   <picture>
+     <source media="(prefers-color-scheme: dark)" srcset="docs/images/shrinkage-dark.svg">
+     <img alt="What a real difference in win rate shows as, by the games its decks played: a real 10-point difference shows as about 5 at 100 games and nearly 10 by 1,000; dashed where it's under two standard errors" src="docs/images/shrinkage-light.svg">
+   </picture>
+
    - The headline numbers compare the commander's decks with every deck in
      the period: with draws, an average deck wins about a fifth of its games,
      not a quarter.
@@ -284,6 +341,9 @@ time, a few KB after that).
    say what winning decks play, not that a card wins on its own, and the page
    says so.
 
+
+   ![Tournaments: the last 30 days' best results, breakout and rising commanders, the period's numbers, and every commander ranked by decks](docs/images/screenshot-tournaments.webp)
+
 7. **Prices** (`?prices`) shows the printings whose prices rose and fell the most over 7, 30 or
    90 days or a year, and the reserve list, from the price history below. The finish (nonfoil, or
    foil and etched), a price ("$5 and up": at least that on both days, so a 10-cent card doesn't
@@ -296,6 +356,10 @@ time, a few KB after that).
    The prices to pick are round amounts of the visitor's currency (C$1, C$5, C$20, C$100), each
    the nearest 1, 2 or 5 times a power of ten to US$1, $5, $20 and $100. Foil printings' tiles
    shimmer like the foil in a card's details, which open on the foil price.
+
+
+   ![Smothering Tithe's details: its price, up 158% since 2023, and every day's price since its Commander Masters printing](docs/images/screenshot-prices.webp)
+
    - `build_prices.py site` writes `site/prices/`. A printing's price there is the median of its
      last 3 days within a week, so one odd day doesn't make it rise or fall. `movers-<days>.json`
      keeps the 150 biggest rises and falls of each finish and band of prices (from 50 cents to
@@ -470,7 +534,10 @@ and `node --test` (Node 24).
 - `tests/`: the scripts' and the site's self-checks
 - `data/`: Scryfall downloads, the deck corpus, tournament results and price history (local, gitignored;
   the corpora live on the `deck-corpus` and `price-history` releases)
-- `docs/`: background reading (vector space search)
+- `docs/`: background reading (vector space search), and the README's images (`docs/images/`):
+  `python docs/figures/make_figures.py` redraws the diagrams and charts from the locally built site
+  (with the site's own code, so the numbers match it; needs matplotlib and scikit-learn), and
+  `python docs/figures/screenshots.py` retakes the screenshots while `scripts/serve.py` runs (Playwright)
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
 - `site/deck.js`: decklist parsing, similar decks, recommendations, builds, trends and tournament results
