@@ -296,6 +296,19 @@ export function averageDeck(shard, members, lands) {
   };
 }
 
+// The cards two groups of decks play most differently (public decks and tournament ones): a and b
+// are {plays: Map card -> decks playing it, decks: how many}. Cards at least `least` of either
+// group plays, n each way. Returns { more, less }: [{card, a, b, aDecks, bDecks}] (a, b: shares),
+// the ones b plays more, by the most more first, and the ones it plays less, by the most less first
+export function playedDifferently(a, b, { least = 0.15, n = 6 } = {}) {
+  const rows = [...new Set([...a.plays.keys(), ...b.plays.keys()])].map(card => {
+    const aDecks = a.plays.get(card) ?? 0, bDecks = b.plays.get(card) ?? 0;
+    return { card, aDecks, bDecks, a: aDecks / a.decks, b: bDecks / b.decks };
+  }).filter(r => Math.max(r.a, r.b) >= least);
+  const by = sign => rows.filter(r => sign * (r.b - r.a) > 0).sort((x, y) => sign * ((y.b - y.a) - (x.b - x.a)) || x.card - y.card);
+  return { more: by(1).slice(0, n), less: by(-1).slice(0, n) };
+}
+
 // The Scryfall Tagger tags (shard.tags) whose cards these decks play the most more of than all
 // this commander's decks do, per deck, relative to how many they play anyway. A tag mostly on
 // the same cards as a better one ("tutor" after "tutor-to") is skipped. Returns tag names.

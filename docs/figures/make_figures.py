@@ -23,8 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "images")
 FONT = "Georgia, 'Times New Roman', serif"
 
-# The site's colors (site/index.html), plus two richer marks for charts (checked for color blindness
-# with the dataviz palette validator: they differ in lightness too, and always come with labels)
+# The site's colors (site/index.html), plus two richer marks for charts (the site's --vs-public and
+# --vs-tourney, checked for color blindness: they differ in lightness too, and always come with labels)
 THEMES = {
     "light": dict(bg="#faf4e6", panel="#f1e7d2", panel2="#e7dabe", ink="#2b1e14", soft="#6a5440", faint="#8f7a63",
                   rule="#d5c19b", accent="#26804a", accent_soft="#dfe7d6", amber="#c07a12", amber_soft="#f3e1bf",
@@ -175,7 +175,7 @@ def card_weights(k):
 
 def shared_cards(t, d):
     """9. Two decks that share staples barely look alike; two that share rare picks do"""
-    k = d["kinnan"]
+    k = d["commander"]
     n, cards, weight = k["decks"], k["cards"], card_weights(k)
     norm = float(np.median([sum(weight[p] for p in deck) for deck in k["deckCards"]]))
     spells = [p for p, c in enumerate(cards) if not c["land"]]
@@ -184,7 +184,7 @@ def shared_cards(t, d):
 
     s = Svg(900, 350, t)
     s.text(450, 32, f'Two {k["name"]} decks that share these cards, and nothing else:', 15, anchor="middle", weight="bold")
-    for col, (picks, head) in enumerate([(staples, "6 cards almost every deck plays"), (rare, "3 cards few decks play")]):
+    for col, (picks, head) in enumerate([(staples, "The 6 cards the most decks play"), (rare, "3 cards few decks play")]):
         x = 30 + col * 440
         s.text(x + 200, 66, head, 14, t["soft"], anchor="middle", weight="bold")
         for i, p in enumerate(picks):
@@ -205,10 +205,14 @@ def shared_cards(t, d):
 
 def recommend_vote(t, d):
     """10. The decks most like yours vote for the cards they play that yours doesn't, staples discounted"""
-    k = d["kinnan"]
+    k = d["commander"]
     ex = k["example"]
-    shown = sorted([a for a in ex["adds"] if a["name"] in ("Botanical Sanctum", "Twincast", "Pia, Aether Ascetic",
-                                                             "Whir of Invention")], key=lambda a: -a["score"])
+    short = k["name"].split(",")[0]
+    adds = ex["adds"]  # best first
+    # The pair the discount turns around most: the lower-ranked card got more of the votes
+    higher, lower = max(((a, b) for i, a in enumerate(adds) for b in adds[i + 1:] if b["share"] > a["share"]),
+                        key=lambda pair: pair[1]["share"] - pair[0]["share"])
+    shown = sorted({a["name"]: a for a in [adds[0], adds[1], higher, lower]}.values(), key=lambda a: -a["score"])
     s = Svg(900, 400, t)
     box(s, 20, 150, 150, 70, "Your deck", f'{ex["cards"]} cards, {k["name"].split(",")[0]}')
     s.arrow(174, 185, 220, 185)
@@ -220,7 +224,7 @@ def recommend_vote(t, d):
     s.text(311, 300, f'… the {ex["neighbors"]} most alike decks', 12, t["soft"], anchor="middle", italic=True)
     s.arrow(400, 185, 440, 185)
     # Each card: its share of the votes, less a discount for how many of all the decks play it
-    x0, scale = 600, 200
+    x0, scale = 600, 170
     s.text(446, 34, "Cards they play that yours doesn't", 14, weight="bold")
     s.rect(446, 48, 12, 12, t["accent"], None, rx=2)
     s.text(464, 58, "share of the votes, more alike decks counting more", 11, t["soft"])
@@ -236,12 +240,12 @@ def recommend_vote(t, d):
         s.rect(x0 + net, y + 4, cut, 26, t["amber_soft"], t["amber"], rx=3, dash=True)
         s.text(x0 + net + cut + 8, y + 22, f'{a["share"]:.0%} − {k["discount"] * a["everywhere"]:.0%} = {a["score"]:.2f}', 12,
                weight="bold")
-    s.text(450, 340, f'Pia gets more of the votes than Twincast ({shown[2]["share"]:.0%} against {shown[1]["share"]:.0%}), '
-           f'but {shown[2]["everywhere"]:.0%} of all Kinnan decks play it and {shown[1]["everywhere"]:.0%} play Twincast,',
-           12, t["soft"], anchor="middle")
-    s.text(450, 358, "so Twincast ranks higher: cards to add are what decks like yours play more than usual, not just "
-           "staples. Your cards they rarely play are cards to cut.", 12, t["soft"], anchor="middle")
-    s.text(450, 384, "A real Kinnan deck from Moxfield or Archidekt, matched with the commander's other public decks.",
+    s.text(450, 340, f'{lower["name"]} gets more of the votes than {higher["name"]} ({lower["share"]:.0%} against '
+           f'{higher["share"]:.0%}), but {lower["everywhere"]:.0%} of all {short} decks play it and {higher["everywhere"]:.0%} '
+           f'play {higher["name"]},', 12, t["soft"], anchor="middle")
+    s.text(450, 358, f'so {higher["name"]} ranks higher: cards to add are what decks like yours play more than usual, not '
+           "just staples. Your cards they rarely play are cards to cut.", 12, t["soft"], anchor="middle")
+    s.text(450, 384, f"A real {short} deck from Moxfield or Archidekt, matched with the commander's other public decks.",
            11, t["faint"], anchor="middle", italic=True)
     return s.render()
 
@@ -280,10 +284,14 @@ def deck_map(k):
 
 def builds_chart(t, mode, d, xy):
     """11. The commander's decks, one panel per build the site finds, the build's decks colored"""
-    k = d["kinnan"]
+    k = d["commander"]
     n = k["decks"]
     panels = [("All decks", None)] + [(b["name"], set(b["members"])) for b in k["builds"]]
-    fig, axes = plt.subplots(2, 3, figsize=(9, 6.2))
+    cols = 3 if len(panels) > 4 else 2  # 5 or 6 panels: 3 a row; 3 or 4: 2 a row
+    rows = math.ceil(len(panels) / cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(9, 3.1 * rows if cols == 3 else 4.4 * rows), squeeze=False)
+    for ax in axes.flat[len(panels):]:
+        ax.set_visible(False)
     for ax, (name, members) in zip(axes.flat, panels):
         ax.set_xticks([]), ax.set_yticks([])
         for side in ax.spines.values():
@@ -307,7 +315,7 @@ def builds_chart(t, mode, d, xy):
 
 def weights_chart(t, mode, d):
     """12. How much sharing a card counts, by how many of the commander's decks play it"""
-    k = d["kinnan"]
+    k = d["commander"]
     n, cards, weight = k["decks"], k["cards"], card_weights(k)
     fig, ax = plt.subplots(figsize=(9, 4.4))
     share = np.logspace(math.log10(1 / n), 0, 200)
@@ -340,10 +348,11 @@ def weights_chart(t, mode, d):
 
 def shrinkage_chart(t, mode, d):
     """13. What a real difference in win rate shows as, by how many games the card's decks played"""
-    k = d["kinnan"]
+    k = d["commander"]
     rate, total, prior = k["rate"], k["games"], k["priorGames"]
     fig, ax = plt.subplots(figsize=(9, 4.4))
-    games = np.logspace(1, 4, 300)
+    # Up to half the commander's games: past that, its games without the card run short
+    games = np.logspace(1, math.log10(total / 2), 300)
     for diff, color in zip((0.02, 0.05, 0.10), t["ramp"]):
         shown = diff * games / (games + prior) * 100
         evidence = diff / np.sqrt(2 * rate * (1 - rate) * (1 / games + 1 / (total - games)))
@@ -354,51 +363,23 @@ def shrinkage_chart(t, mode, d):
         ax.annotate(f"really +{diff * 100:.0f} pts", (games[-1], shown[-1]), xytext=(6, -4), textcoords="offset points",
                     fontsize=10, color=t["ink"])
     ax.set_xscale("log")
-    ax.set_xticks([10, 100, 1000, 10000], ["10", "100", "1,000", "10,000"])
+    ticks = [x for x in (10, 100, 1000, 10000) if x < total / 2]
+    ax.set_xticks(ticks, [f"{x:,}" for x in ticks])
     ax.set_xlabel("Tournament games played by the decks with the card (log scale)")
     ax.set_ylabel("Difference the site shows (pts)")
     ax.set_ylim(0, 11)
     ax.grid(axis="y")
     ax.set_title("A card few decks play needs a big difference to show one", loc="left", fontsize=13)
-    fig.text(0.01, -0.04, f"Both sides are pulled toward the commander's win rate ({rate:.1%} for Kinnan) by {prior} games' "
+    fig.text(0.01, -0.04, f"Both sides are pulled toward the commander's win rate ({rate:.1%} for {k['name'].split(',')[0]}) by {prior} games' "
              "worth. Dashed: under 2 standard errors, shown faded on the site.", fontsize=10, color=t["soft"])
     fig.tight_layout()
     save_chart(fig, "shrinkage", mode)
 
 
-def public_vs_topcut_chart(t, mode, d):
-    """14. The cards whose play rates differ most between public decks and top-cut tournament decks"""
-    k = d["kinnan"]
-    n, top = k["decks"], k["topCutDecks"]
-    rows = [(c["name"], c["plays"] / n, c["topCut"] / top) for c in k["cards"]
-            if max(c["plays"] / n, c["topCut"] / top) >= 0.15]
-    rows.sort(key=lambda r: r[2] - r[1])
-    rows = rows[:5] + rows[-7:]
-    fig, ax = plt.subplots(figsize=(9, 5.4))
-    for y, (name, pub, cut) in enumerate(rows):
-        ax.plot([pub * 100, cut * 100], [y, y], color=t["rule"], linewidth=2, zorder=1)
-        ax.scatter([pub * 100], [y], s=60, facecolors=t["bg"], edgecolors=t["amber"], linewidths=2, zorder=2)
-        ax.scatter([cut * 100], [y], s=60, color=t["accent"], zorder=3)
-    ax.set_yticks(range(len(rows)), [r[0] for r in rows])
-    ax.axhline(4.5, color=t["rule"], linewidth=0.8, linestyle=(0, (4, 3)))
-    ax.set_xlim(0, 100)
-    ax.set_xticks(range(0, 101, 20), [f"{x}%" for x in range(0, 101, 20)])
-    ax.set_xlabel("Share of decks that play the card")
-    ax.grid(axis="x")
-    ax.scatter([], [], s=60, facecolors=t["bg"], edgecolors=t["amber"], linewidths=2, label=f"Public decks ({n:,})")
-    ax.scatter([], [], s=60, color=t["accent"], label=f"Top-cut tournament decks ({top:,})")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.4, -0.12), ncol=2, frameon=False, fontsize=10)
-    ax.text(102, 8, "Top-cut decks\nplay more", ha="left", va="center", fontsize=10, color=t["soft"], clip_on=False)
-    ax.text(102, 2, "Top-cut decks\nplay less", ha="left", va="center", fontsize=10, color=t["soft"], clip_on=False)
-    ax.set_title(f"{k['name']}: what top-cut decks play more, and less, than public ones", loc="left", fontsize=13)
-    fig.tight_layout()
-    save_chart(fig, "public-vs-topcut", mode)
-
-
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     data = site_data()
-    xy = deck_map(data["kinnan"])
+    xy = deck_map(data["commander"])
     for mode, theme in THEMES.items():
         save_svg("pipeline", mode, pipeline(theme))
         save_svg("search", mode, search_coverage(theme, data))
@@ -408,5 +389,4 @@ if __name__ == "__main__":
         builds_chart(theme, mode, data, xy)
         weights_chart(theme, mode, data)
         shrinkage_chart(theme, mode, data)
-        public_vs_topcut_chart(theme, mode, data)
     print("Wrote", OUT)

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
+  findBuilds, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
 } from "../site/deck.js";
 
@@ -309,4 +309,16 @@ test("a package of cards: the decks playing all of them against those playing no
   assert.equal(nine.none.decks, 2);
   // A card no deck plays: nothing to compare
   assert.equal(packageResults(lists, [42], 3).lift, null);
+});
+
+test("playedDifferently: the cards tournament decks play most more, and less, than public ones", () => {
+  // 100 public decks, 50 tournament decks
+  const pub = { decks: 100, plays: new Map([[1, 20], [2, 80], [3, 50], [4, 10], [5, 5]]) };
+  const top = { decks: 50, plays: new Map([[1, 40], [2, 10], [3, 26], [6, 30], [5, 4]]) };
+  const { more, less } = playedDifferently(pub, top, { n: 2 });
+  // 1: 20% → 80%, 6: 0% → 60%, 3: 50% → 52%; 2: 80% → 20%, 4: 10% → 0% (under 15% both: left out)
+  assert.deepEqual(more.map(r => r.card), [1, 6]);
+  assert.deepEqual(less.map(r => r.card), [2]);
+  assert.deepEqual(more[0], { card: 1, aDecks: 20, bDecks: 40, a: 0.2, b: 0.8 });
+  assert.equal(playedDifferently(pub, top).more.length, 3); // and 3, once there's room
 });

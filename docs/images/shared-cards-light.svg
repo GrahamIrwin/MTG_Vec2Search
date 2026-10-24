@@ -1,47 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 350" width="900" height="350" font-family="Georgia, 'Times New Roman', serif">
 <defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8f7a63"/></marker></defs>
 <rect width="100%" height="100%" rx="10" fill="#faf4e6"/>
-<text x="450.0" y="32.0" font-size="15" fill="#2b1e14" text-anchor="middle" font-weight="bold">Two Kinnan, Bonder Prodigy decks that share these cards, and nothing else:</text>
-<text x="230.0" y="66.0" font-size="14" fill="#6a5440" text-anchor="middle" font-weight="bold">6 cards almost every deck plays</text>
+<text x="450.0" y="32.0" font-size="15" fill="#2b1e14" text-anchor="middle" font-weight="bold">Two Derevi, Empyrial Tactician decks that share these cards, and nothing else:</text>
+<text x="230.0" y="66.0" font-size="14" fill="#6a5440" text-anchor="middle" font-weight="bold">The 6 cards the most decks play</text>
 <rect x="30.0" y="80.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
 <text x="40.0" y="97.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Sol Ring</text>
-<text x="298.0" y="97.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">98% of decks</text>
-<text x="420.0" y="97.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.00</text>
+<text x="298.0" y="97.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">83% of decks</text>
+<text x="420.0" y="97.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.03</text>
 <rect x="30.0" y="110.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
 <text x="40.0" y="127.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Birds of Paradise</text>
-<text x="298.0" y="127.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">97% of decks</text>
-<text x="420.0" y="127.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.00</text>
+<text x="298.0" y="127.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">67% of decks</text>
+<text x="420.0" y="127.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.16</text>
 <rect x="30.0" y="140.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
-<text x="40.0" y="157.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Llanowar Elves</text>
-<text x="298.0" y="157.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">96% of decks</text>
-<text x="420.0" y="157.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.00</text>
+<text x="40.0" y="157.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Swords to Plowshares</text>
+<text x="298.0" y="157.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">65% of decks</text>
+<text x="420.0" y="157.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.18</text>
 <rect x="30.0" y="170.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
-<text x="40.0" y="187.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Elvish Mystic</text>
-<text x="298.0" y="187.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">93% of decks</text>
-<text x="420.0" y="187.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.00</text>
+<text x="40.0" y="187.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Bloom Tender</text>
+<text x="298.0" y="187.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">55% of decks</text>
+<text x="420.0" y="187.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.36</text>
 <rect x="30.0" y="200.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
 <text x="40.0" y="217.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Arcane Signet</text>
-<text x="298.0" y="217.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">93% of decks</text>
-<text x="420.0" y="217.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.00</text>
+<text x="298.0" y="217.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">53% of decks</text>
+<text x="420.0" y="217.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.41</text>
 <rect x="30.0" y="230.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
-<text x="40.0" y="247.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Mox Amber</text>
-<text x="298.0" y="247.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">90% of decks</text>
-<text x="420.0" y="247.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.01</text>
+<text x="40.0" y="247.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Noble Hierarch</text>
+<text x="298.0" y="247.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">51% of decks</text>
+<text x="420.0" y="247.0" font-size="12" fill="#8f7a63" text-anchor="end" font-weight="normal">counts 0.45</text>
 <text x="230.0" y="278.0" font-size="22" fill="#2b1e14" text-anchor="middle" font-weight="bold">under 1% alike</text>
 <text x="670.0" y="66.0" font-size="14" fill="#6a5440" text-anchor="middle" font-weight="bold">3 cards few decks play</text>
 <rect x="470.0" y="80.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
-<text x="480.0" y="97.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Lightning Greaves</text>
-<text x="738.0" y="97.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">5% of decks</text>
-<text x="860.0" y="97.0" font-size="12" fill="#26804a" text-anchor="end" font-weight="normal">counts 8.54</text>
+<text x="480.0" y="97.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Commander&#x27;s Sphere</text>
+<text x="738.0" y="97.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">3% of decks</text>
+<text x="860.0" y="97.0" font-size="12" fill="#26804a" text-anchor="end" font-weight="normal">counts 12.00</text>
 <rect x="470.0" y="110.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
-<text x="480.0" y="127.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Thought Vessel</text>
-<text x="738.0" y="127.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">5% of decks</text>
-<text x="860.0" y="127.0" font-size="12" fill="#26804a" text-anchor="end" font-weight="normal">counts 8.84</text>
+<text x="480.0" y="127.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Brainstorm</text>
+<text x="738.0" y="127.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">6% of decks</text>
+<text x="860.0" y="127.0" font-size="12" fill="#26804a" text-anchor="end" font-weight="normal">counts 7.97</text>
 <rect x="470.0" y="140.0" width="400.0" height="24.0" rx="5" fill="#f1e7d2" stroke="#d5c19b" stroke-width="1.2"/>
-<text x="480.0" y="157.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Beast Within</text>
-<text x="738.0" y="157.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">6% of decks</text>
-<text x="860.0" y="157.0" font-size="12" fill="#26804a" text-anchor="end" font-weight="normal">counts 8.36</text>
-<text x="670.0" y="278.0" font-size="22" fill="#2b1e14" text-anchor="middle" font-weight="bold">22% alike</text>
-<text x="450.0" y="318.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">A shared card counts ln(1,153 decks ÷ decks that play it)². Two decks are as alike as their shared cards&#x27; total over their own</text>
-<text x="450.0" y="336.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">(cosine similarity, here with two typical Kinnan decks): sharing Sol Ring says nothing about a deck; sharing a rare pick says a lot.</text>
+<text x="480.0" y="157.0" font-size="13" fill="#2b1e14" text-anchor="start" font-weight="normal">Chromatic Lantern</text>
+<text x="738.0" y="157.0" font-size="12" fill="#6a5440" text-anchor="end" font-weight="normal">5% of decks</text>
+<text x="860.0" y="157.0" font-size="12" fill="#26804a" text-anchor="end" font-weight="normal">counts 9.23</text>
+<text x="670.0" y="278.0" font-size="22" fill="#2b1e14" text-anchor="middle" font-weight="bold">4% alike</text>
+<text x="450.0" y="318.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">A shared card counts ln(3,132 decks ÷ decks that play it)². Two decks are as alike as their shared cards&#x27; total over their own</text>
+<text x="450.0" y="336.0" font-size="12" fill="#6a5440" text-anchor="middle" font-weight="normal">(cosine similarity, here with two typical Derevi decks): sharing Sol Ring says nothing about a deck; sharing a rare pick says a lot.</text>
 </svg>

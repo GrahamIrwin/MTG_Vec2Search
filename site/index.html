@@ -31,6 +31,7 @@
       --shadow-md: 0 2px 4px rgb(60 40 20 / .10), 0 10px 24px -8px rgb(60 40 20 / .28);
       --grain: .07;
       --backdrop: rgb(30 20 10 / .55);
+      --vs-public: #c07a12; --vs-tourney: #26804a; /* public against tournament decks (checked for color blindness) */
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
@@ -45,6 +46,7 @@
       --shadow-md: 0 2px 4px rgb(0 0 0 / .35), 0 14px 30px -10px rgb(0 0 0 / .7);
       --grain: .05;
       --backdrop: rgb(5 3 2 / .7);
+      --vs-public: #c4832a; --vs-tourney: #45a066;
     }
 
     /* ---------- Base ---------- */
@@ -490,6 +492,29 @@
     .commander-art .pair img { width: 100%; }
     .theme-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 2px; }
     .sub-heading { font-size: 19px; margin: 26px 0 4px; }
+    /* Public decks against tournament decks: a row per card, a dot for each on a 0-100% track */
+    .vs-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 4px; font-size: 15px; color: var(--ink-soft); }
+    .vs-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+    .vs-legend .public::before { border: 2px solid var(--vs-public); background: var(--paper); }
+    .vs-legend .tourney::before { background: var(--vs-tourney); border: 2px solid var(--vs-tourney); }
+    .vs-rows { list-style: none; margin: 6px 0 0; padding: 0; }
+    .vs-rows li { display: grid; grid-template-columns: minmax(0, 13em) 1fr 6.5em; align-items: center; gap: 12px; padding: 3px 0; }
+    .vs-rows .term { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vs-rows .group { display: block; margin: 10px 0 2px; font-size: 14px; color: var(--ink-soft); letter-spacing: .08em; text-transform: uppercase; }
+    .vs-track { position: relative; height: 20px; margin: 0 7px; background: linear-gradient(to right, var(--rule) 1px, transparent 1px) 0 0 / 25% 100%; }
+    .vs-track .span { position: absolute; top: 9px; height: 2px; background: var(--rule); }
+    .vs-track .dot { position: absolute; top: 4px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; }
+    .vs-track .public { border: 2px solid var(--vs-public); background: var(--paper); }
+    .vs-track .tourney { background: var(--vs-tourney); }
+    .vs-rows .shares { font-size: 15px; color: var(--ink-soft); font-variant-numeric: tabular-nums; text-align: right; }
+    .vs-rows .scale { padding: 0; }
+    .vs-rows .scale .vs-track { height: auto; background: none; display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-faint); }
+    /* A phone: the card and its shares on one line, its track under them */
+    @media (max-width: 560px) {
+      .vs-rows li { grid-template-columns: 1fr auto; gap: 2px 8px; }
+      .vs-rows .vs-track { grid-column: 1 / -1; grid-row: 2; }
+      .vs-rows .scale .vs-track { grid-row: 1; }
+    }
     /* Tournament results */
     .result-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; margin: 16px 0 4px; }
     .stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; }
@@ -1062,6 +1087,12 @@
                 <button id="download-average" class="btn-quiet" type="button">Download .txt</button>
                 <a id="compare-average" class="btn-quiet" href="?deck">Compare your deck with it</a>
                 <span class="muted">Ready to paste into Moxfield, Archidekt or Deck recommendations.</span>
+              </div>
+              <div id="average-vs" hidden>
+                <h3 class="sub-heading" id="average-vs-heading"></h3>
+                <p class="muted deck-lede" id="average-vs-lede"></p>
+                <div class="vs-legend"><span class="tourney" id="average-vs-tourney"></span><span class="public" id="average-vs-public"></span></div>
+                <ul class="vs-rows" id="average-vs-rows"></ul>
               </div>
               <div id="average"></div>
             </details>

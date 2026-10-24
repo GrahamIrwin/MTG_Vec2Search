@@ -32,8 +32,8 @@ const searchExample = {
   }),
 };
 
-// Kinnan, Bonder Prodigy: its builds, how much each card weighs, and public decks against top-cut ones
-const KEY = "1360";
+// Derevi, Empyrial Tactician: its builds, how much each card weighs, and public decks against top-cut ones
+const KEY = "2961";
 const shard = decodeShard(read(`decks/${KEY}.json`));
 const n = shard.decks.length;
 const landBit = 1 << index.types.indexOf("Land");
@@ -73,7 +73,7 @@ const [, games, wins] = results.totals[w];
 
 console.log(JSON.stringify({
   search: searchExample,
-  kinnan: {
+  commander: {
     name: names[+KEY], decks: n, topCutDecks: topCut.length,
     // each deck's cards (positions in cards), for the map of builds, and which are lands
     cards: shard.cards.map((c, p) => ({ name: names[c], popularity: c, plays: shard.plays[p], land: lands.has(p),

@@ -116,17 +116,17 @@ time, a few KB after that).
 
      <picture>
        <source media="(prefers-color-scheme: dark)" srcset="docs/images/shared-cards-dark.svg">
-       <img alt="Two Kinnan decks that share only six cards almost every deck plays (Sol Ring, Birds of Paradise, ...) are under 1% alike; two that share three cards few decks play are 22% alike" src="docs/images/shared-cards-light.svg">
+       <img alt="Two Derevi decks that share only the six cards the most decks play (Sol Ring, Birds of Paradise, ...) are under 1% alike; two that share three cards few decks play (Commander's Sphere, Brainstorm, Chromatic Lantern) are 4% alike" src="docs/images/shared-cards-light.svg">
      </picture>
 
      <picture>
        <source media="(prefers-color-scheme: dark)" srcset="docs/images/card-weights-dark.svg">
-       <img alt="How much sharing a card counts against the share of Kinnan decks that play it: Sol Ring (98%) counts 0, Sylvan Library (28%) 1.6, Lightning Greaves (5%) 8.5, Nature's Lore (1%) 19.5, Skullclamp (0.2%) 40.4" src="docs/images/card-weights-light.svg">
+       <img alt="How much sharing a card counts against the share of Derevi decks that play it: Sol Ring (83%) counts 0, Path to Exile (35%) 1.1, Thought Vessel (6%) 7.9, Garruk's Uprising (0.8%) 23.0, Rishkar's Expertise (0.2%) 39.2" src="docs/images/card-weights-light.svg">
      </picture>
 
      <picture>
        <source media="(prefers-color-scheme: dark)" srcset="docs/images/recommend-dark.svg">
-       <img alt="A Kinnan deck's 100 most alike decks vote for the cards they play that it doesn't: Pia gets more of the votes than Twincast, but more Kinnan decks play Pia, so Twincast ranks higher" src="docs/images/recommend-light.svg">
+       <img alt="A Derevi deck's 100 most alike decks vote for the cards they play that it doesn't: Wild Growth gets more of the votes than Archivist of Oghma, but twice as many Derevi decks play Wild Growth, so Archivist of Oghma ranks higher" src="docs/images/recommend-light.svg">
      </picture>
 
    - A commander with tournament results can be matched with its cEDH tournament lists instead
@@ -144,7 +144,7 @@ time, a few KB after that).
      signature cards the deck plays the most of. That same match powers "decks
      like yours with other commanders".
 
-   ![Deck recommendations for a Kinnan deck compared with top-cut tournament decks: cards to add, each with how many of the 100 most alike decks play it and how its decks did in tournaments](docs/images/screenshot-deck.webp)
+   ![Deck recommendations for a Derevi deck compared with top-cut tournament decks: cards to add, each with how many of the most alike top-cut decks play it](docs/images/screenshot-deck.webp)
 
    Card-overlap similarity was checked against a "functional" similarity over
    the search terms above (tags, keywords, types) by hiding 10 cards of real
@@ -192,22 +192,23 @@ time, a few KB after that).
    commander's own), so Teysa is known for aristocrats even though all her
    builds are. Each links to Trends, filtered to commanders known for it.
 
-   ![Kinnan, Bonder Prodigy's page: its builds and brackets, and the average deck of its top-cut tournament decks](docs/images/screenshot-commander.webp)
+   ![Derevi, Empyrial Tactician's page: its builds and brackets, and the average deck of its top-cut tournament decks](docs/images/screenshot-commander.webp)
 
-   Kinnan's 1,153 public decks fall into five builds, each a region of decks that play alike cards:
+   Derevi's 3,132 public decks fall into four builds, each a region of decks that play alike cards:
 
    <picture>
      <source media="(prefers-color-scheme: dark)" srcset="docs/images/builds-dark.svg">
-     <img alt="A map of Kinnan's public decks, one panel per build: Tutor artifact (33%), Pitch spell (30%), Mana dork (18%), Top deck manipulation (10%) and Removal destroy (9%), each in its own region" src="docs/images/builds-light.svg">
+     <img alt="A map of Derevi's public decks, one panel per build: Manaless value (34%), Untapper creature (33%), Synergy flying (19%) and Symmetrical (13%), each in its own region" src="docs/images/builds-light.svg">
    </picture>
 
-   And what the average deck's Top cut changes: the cards whose play rates differ most between Kinnan's
-   public decks and its top-cut tournament decks.
+   With Tournament decks or Top cut picked, the average deck also shows **what those decks play
+   differently** from the public decks of the build and bracket picked: the cards whose share of
+   decks differs most (`playedDifferently()` in `site/deck.js`), the 6 they play most more and the 6
+   most less, among the cards at least 15% of either plays, each with a dot for each on a 0–100%
+   track and its two shares. Both sets of decks are already loaded for the average deck, so it's
+   only counting.
 
-   <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="docs/images/public-vs-topcut-dark.svg">
-     <img alt="Top-cut Kinnan decks play Tezzeret the Seeker, Transmute Artifact and Grim Monolith far more than public decks, and Shang-Chi, Gene Pollinator and Badgermole Cub far less" src="docs/images/public-vs-topcut-light.svg">
-   </picture>
+   ![What Derevi's top-cut decks play differently: far more Mindbreak Trap, Mana Vault, Force of Will, Mental Misstep, Silence and The One Ring than its public decks, and almost none of Seaside Citadel, Glacial Fortress, Counterspell and Hinterland Harbor](docs/images/screenshot-topcut.webp)
 
    Decks can also be narrowed to a **bracket**, the one each deck's builder
    gave it (most Moxfield decks have one, few Archidekt ones), alone or with a

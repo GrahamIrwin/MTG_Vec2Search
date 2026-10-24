@@ -5,7 +5,7 @@ import {
 import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.js";
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
-  findBuilds, playCounts, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
+  findBuilds, playCounts, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
   cardResults, packageResults, MIN_RESULT_DECKS,
 } from "./deck.js";
@@ -1307,6 +1307,36 @@ async function showCommander(key) {
     decks: decks.map(([, , , topCut, ...gaps]) => { let p = 0; return { topCut, cards: gaps.map(gap => (p += gap)) }; }),
     lands: new Set(cards.flatMap((c, p) => (index.columns.types[c] & landBit ? [p] : []))),
   })).catch(err => { tournamentShard = null; throw err; }));
+  // The cards these tournament decks play most differently from the build's public decks (and
+  // bracket's), each a row with a dot for each on a 0–100% track
+  function showAverageVs(g, from, members, counts) {
+    const plays = (cards, k) => new Map(cards.flatMap((c, p) => (k[p] ? [[c, k[p]]] : [])));
+    const pub = { plays: plays(shard.cards, playCounts(shard, g.members)), decks: g.members.length };
+    const { more, less } = playedDifferently(pub, { plays: plays(from.cards, counts), decks: members.length });
+    const these = averageFrom === "topcut" ? "top-cut decks" : "tournament decks";
+    const publicName = `public decks${g.all ? "" : ` (${g.name})`}`;
+    const decksOf = k => `${k.toLocaleString()} ${k === 1 ? "deck" : "decks"}`;
+    const pct = x => (x > 0 && x < 0.005 ? "<1%" : percent(x)); // one deck in 231 isn't none
+    $("average-vs-heading").textContent = `What ${these} play differently`;
+    $("average-vs-lede").textContent = `The cards whose share of decks differs most between ${lead}'s ${these} and its `
+      + `${publicName}, among those at least 15% of either play. Each card's shares: public → ${averageFrom === "topcut" ? "top cut" : "tournament"}.`;
+    $("average-vs-tourney").textContent = `${these[0].toUpperCase()}${these.slice(1)} (${members.length.toLocaleString()})`;
+    $("average-vs-public").textContent = `${publicName[0].toUpperCase()}${publicName.slice(1)} (${g.members.length.toLocaleString()})`;
+    const row = r => el("li", { title: `${names[r.card]}: ${pct(r.a)} of ${publicName} (${decksOf(r.aDecks)}), `
+        + `${pct(r.b)} of ${these} (${decksOf(r.bDecks)})` },
+      cardButton(r.card, names),
+      el("div", { className: "vs-track" },
+        el("span", { className: "span", style: `left:${Math.min(r.a, r.b) * 100}%;width:${Math.abs(r.b - r.a) * 100}%` }),
+        el("span", { className: "dot public", style: `left:${r.a * 100}%` }),
+        el("span", { className: "dot tourney", style: `left:${r.b * 100}%` })),
+      el("span", { className: "shares", textContent: `${pct(r.a)} → ${pct(r.b)}` }));
+    const group = (label, rows) => (rows.length ? [el("li", { className: "group", textContent: label }), ...rows.map(row)] : []);
+    const scale = el("li", { className: "scale", ariaHidden: "true" }, el("span"),
+      el("div", { className: "vs-track" }, ...["0%", "50%", "100%"].map(x => el("span", { textContent: x }))), el("span"));
+    $("average-vs-rows").replaceChildren(scale, ...group(`${these} play more`, more), ...group(`${these} play less`, less));
+    if (!more.length && !less.length) $("average-vs-lede").textContent = `No card at least 15% of either plays differs between ${lead}'s ${these} and its ${publicName}.`;
+  }
+
   let averageShown;
   async function showAverage(g) {
     const shown = averageShown = {};
@@ -1334,6 +1364,8 @@ async function showCommander(key) {
     }
     const counts = playCounts(from, members);
     const share = p => counts[p] / members.length;
+    $("average-vs").hidden = averageFrom === "public";
+    if (averageFrom !== "public") showAverageVs(g, from, members, counts);
     const average = averageDeck(from, members, landsOf);
     const basics = Math.max(0, 100 - leaders.length - average.spells.length - average.lands.length);
     const kinds = colors.length ? colors.map(c => BASIC_OF[c]) : ["Wastes"];
@@ -1455,7 +1487,9 @@ async function showCommander(key) {
     average: "As many spells and nonbasic lands as these decks play on average, picking the cards they play most, then "
       + "basic lands, split evenly between the colors, to make 100 cards. Every deck counts the same. Public decks: the "
       + "build and bracket picked above. Tournament decks: every cEDH tournament list of the last 2 years, wherever it "
-      + `placed; Top cut: only those that made their event's top cut. Each needs ${MIN_AVERAGE_DECKS} decks or more.`,
+      + `placed; Top cut: only those that made their event's top cut. Each needs ${MIN_AVERAGE_DECKS} decks or more. `
+      + "With either, the cards those decks play most differently from the public decks: the 6 whose share of decks "
+      + "rose most and the 6 it fell most, among cards at least 15% of either plays.",
     decklists: "Public decks from Moxfield and Archidekt, newest first, with their cards.",
   };
   const showViews = () => {

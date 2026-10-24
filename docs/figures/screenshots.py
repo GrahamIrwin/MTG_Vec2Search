@@ -14,13 +14,14 @@ SITE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "images")
 WIDTH = 1280
 
-# A public Kinnan deck from the site's own deck file, as a pasted decklist
-KINNAN_DECK = """async () => {
+# A public Derevi deck from the site's own deck file, as a pasted decklist
+DEREVI = 2961
+DECK = """async () => {
   const names = await (await fetch('index/names.json')).json();
-  const shard = await (await fetch('decks/1360.json')).json();
+  const shard = await (await fetch('decks/2961.json')).json();
   let p = 0;
   const cards = shard.decks[5][3].map(gap => shard.cards[p += gap]);
-  return ['1 Kinnan, Bonder Prodigy *CMDR*', ...cards.map(c => '1 ' + names[c])].join(String.fromCharCode(10));
+  return ['1 Derevi, Empyrial Tactician *CMDR*', ...cards.map(c => '1 ' + names[c])].join(String.fromCharCode(10));
 }"""
 
 
@@ -54,9 +55,9 @@ with sync_playwright() as p:
     rows = at(page.locator("#results .card").nth(6))
     save(page, "screenshot-search", {"x": 0, "y": 0, "width": WIDTH, "height": rows["y"] + rows["height"] + 16})
 
-    # 2. Deck recommendations for a Kinnan deck, matched with top-cut tournament decks
+    # 2. Deck recommendations for a Derevi deck, matched with top-cut tournament decks
     page.goto(f"{SITE}/?deck&decks=topcut")
-    page.fill("#decklist", page.evaluate(KINNAN_DECK))
+    page.fill("#decklist", page.evaluate(DECK))
     page.click("#deck-form button[type=submit]")
     page.wait_for_selector("#deck-results:not([hidden]) #adds .card")
     settle(page)
@@ -65,11 +66,14 @@ with sync_playwright() as p:
     save(page, "screenshot-deck", {"x": 0, "y": top - 16, "width": WIDTH, "height": first["y"] + first["height"] + 16 - top + 16})
 
     # 3. A commander page: builds, brackets and the top-cut average deck
-    page.goto(f"{SITE}/?commander=1360&view=average&avg=topcut")
+    page.goto(f"{SITE}/?commander={DEREVI}&view=average&avg=topcut")
     page.wait_for_selector("#average .card")
     settle(page, 4000)
-    first = at(page.locator("#average .card").first)
-    save(page, "screenshot-commander", {"x": 0, "y": 200, "width": WIDTH, "height": first["y"] + first["height"] + 16 - 200})
+    head = at(page.locator("#average-vs"))
+    save(page, "screenshot-commander", {"x": 0, "y": 200, "width": WIDTH, "height": head["y"] - 200})
+    # and what its top-cut decks play differently from its public ones
+    vs = at(page.locator("#average-vs"))
+    save(page, "screenshot-topcut", {"x": vs["x"] - 24, "y": vs["y"] - 8, "width": vs["width"] + 48, "height": vs["height"] + 24})
 
     # 4. Tournaments: the last 30 days' highlights, the period's numbers and the commanders' table
     page.goto(f"{SITE}/?tournaments")
