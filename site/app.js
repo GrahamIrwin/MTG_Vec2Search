@@ -888,6 +888,7 @@ const showMissingMore = typedGallery($("missing-more-types"), $("missing-more"),
 const PAGE_COMMANDERS = 30;
 const SIGNATURE_SHOWN = 60;
 const PAGE_LISTS = 20;
+const MIN_AVERAGE_DECKS = 10; // tournament decks (or top cuts) for an average of them
 const BRACKETS = ["Any", "1 Exhibition", "2 Core", "3 Upgraded", "4 Optimized", "5 cEDH"];
 const BASIC_OF = { W: "Plains", U: "Island", B: "Swamp", R: "Mountain", G: "Forest" };
 const commanderMessage = text => {
@@ -1233,39 +1234,6 @@ async function showCommander(key) {
     showCombos(g);
     showCommanderTrends(g, counts);
 
-    // The average deck: as many spells and nonbasic lands as these decks play on average, then
-    // basic lands, split evenly between the colors, to make 100 cards
-    const average = averageDeck(shard, g.members, lands);
-    const basics = Math.max(0, 100 - leaders.length - average.spells.length - average.lands.length);
-    const kinds = colors.length ? colors.map(c => BASIC_OF[c]) : ["Wastes"];
-    const basicCounts = kinds.map((b, i) => [names.indexOf(b), Math.floor(basics / kinds.length) + (i < basics % kinds.length)])
-      .filter(([, k]) => k);
-    $("average-lede").textContent = `${average.spells.length} spells and ${average.lands.length + basics} lands (${basics} basic).`;
-    const picks = [...average.spells, ...average.lands].map(p => ({ card: shard.cards[p], detail: detail(p), bar: share(p), ...cedh(shard.cards[p]) }))
-      .concat(basicCounts.map(([card, k]) => ({ card, detail: `× ${k}`, bar: null, copies: k })));
-    const byType = new Map();
-    for (const pick of picks) byType.set(typeOf(pick.card), [...(byType.get(typeOf(pick.card)) ?? []), pick]);
-    const sections = [...TYPE_ORDER, "Other"].filter(t => byType.has(t)).map(t => [t, byType.get(t)]);
-    const listText = () => [...leaders.map(c => `1 ${names[c]} *CMDR*`),
-      ...sections.flatMap(([, list]) => list.map(a => `${a.copies ?? 1} ${names[a.card]}`))].join("\n") + "\n";
-    $("copy-average").textContent = "Copy list";
-    $("copy-average").onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(listText());
-        $("copy-average").textContent = "Copied";
-      } catch {
-        $("copy-average").textContent = "Couldn't copy";
-      }
-    };
-    $("compare-average").href = "?" + new URLSearchParams({ deck: "", from: `avg.${key}`,
-      cards: [...average.spells, ...average.lands].map(p => shard.cards[p].toString(36)).join("."), ...(!all && { of: g.name }) });
-    $("download-average").onclick = () => {
-      const a = el("a", { download: `${lead}${all ? "" : ` (${g.name})`} average deck.txt`,
-        href: URL.createObjectURL(new Blob([listText()], { type: "text/plain" })) });
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href));
-    };
-
     // Decklists, newest first, each opening to its cards
     let shown = 0;
     $("lists").replaceChildren();
@@ -1287,10 +1255,85 @@ async function showCommander(key) {
     $("more-lists").onclick = moreLists;
     moreLists();
 
+    return showAverage(g); // after the rest, as it's the most to load
+  }
 
-    // The average deck's cards, by type (after the rest, as it's the most to load)
+  // The average deck, of the build's public decks (and bracket), or of every tournament deck, or
+  // those that made the top cut (?avg=): as many spells and nonbasic lands as those decks play on
+  // average, then basic lands, split evenly between the colors, to make 100 cards
+  const tourney = results?.totals.at(-1); // [decks, ...] over every window, top cuts at 4
+  const averageFroms = [["public", "Public decks"], ...(tourney ? [["tournament", "Tournament decks"], ["topcut", "Top cut"]] : [])];
+  let averageFrom = averageFroms.some(([s]) => s === params.get("avg")) ? params.get("avg") : "public";
+  let tournamentShard; // the commander's tournament decks, shaped like a shard for averageDeck
+  const getTournamentShard = () => (tournamentShard ??= getJson(`decks/results/lists/${key}.json`).then(({ cards, decks }) => ({
+    cards,
+    decks: decks.map(([, , , topCut, ...gaps]) => { let p = 0; return { topCut, cards: gaps.map(gap => (p += gap)) }; }),
+    lands: new Set(cards.flatMap((c, p) => (index.columns.types[c] & landBit ? [p] : []))),
+  })).catch(err => { tournamentShard = null; throw err; }));
+  let averageShown;
+  async function showAverage(g) {
+    const shown = averageShown = {};
+    const n = { public: g.members.length, tournament: tourney?.[0], topcut: tourney?.[4] };
+    if (n[averageFrom] < MIN_AVERAGE_DECKS) averageFrom = "public";
+    setParams({ avg: averageFrom === "public" ? null : averageFrom });
+    chipRow($("average-from"), averageFroms.map(([s, label]) => {
+      const few = s !== "public" && n[s] < MIN_AVERAGE_DECKS;
+      return [s, withCount(label, n[s]), few, few ? `Too few to average: ${MIN_AVERAGE_DECKS} decks or more` : ""];
+    }), averageFrom, s => { averageFrom = s; showAverage(current); });
+    $("average-from").hidden = averageFroms.length < 2;
+
+    let from = shard, members = g.members, landsOf = lands, name = g.all ? "" : g.name;
+    if (averageFrom !== "public") {
+      try {
+        from = await getTournamentShard();
+      } catch {
+        $("average-lede").textContent = "Couldn't load the tournament decks. Please try again.";
+        return;
+      }
+      if (averageShown !== shown) return;
+      members = from.decks.flatMap((d, i) => (averageFrom === "topcut" && d.topCut !== 2 ? [] : [i]));
+      landsOf = from.lands;
+      name = averageFrom === "topcut" ? "tournament decks that made the top cut" : "tournament decks";
+    }
+    const counts = playCounts(from, members);
+    const share = p => counts[p] / members.length;
+    const average = averageDeck(from, members, landsOf);
+    const basics = Math.max(0, 100 - leaders.length - average.spells.length - average.lands.length);
+    const kinds = colors.length ? colors.map(c => BASIC_OF[c]) : ["Wastes"];
+    const basicCounts = kinds.map((b, i) => [names.indexOf(b), Math.floor(basics / kinds.length) + (i < basics % kinds.length)])
+      .filter(([, k]) => k);
+    const decksOf = `${members.length.toLocaleString()} ${averageFrom === "public" ? "public" : "cEDH tournament"} decks`;
+    $("average-lede").textContent = (averageFrom === "public" ? `From ${decksOf}`
+      : `From ${decksOf} of the last ${periodName(results.windows.at(-1))}${averageFrom === "topcut" ? " that made the top cut" : ""}, any build or bracket`)
+      + `: ${average.spells.length} spells and ${average.lands.length + basics} lands (${basics} basic).`;
+    const picks = [...average.spells, ...average.lands].map(p => ({ card: from.cards[p], detail: played(counts[p], share(p)), bar: share(p), ...cedh(from.cards[p]) }))
+      .concat(basicCounts.map(([card, k]) => ({ card, detail: `× ${k}`, bar: null, copies: k })));
+    const byType = new Map();
+    for (const pick of picks) byType.set(typeOf(pick.card), [...(byType.get(typeOf(pick.card)) ?? []), pick]);
+    const sections = [...TYPE_ORDER, "Other"].filter(t => byType.has(t)).map(t => [t, byType.get(t)]);
+    const listText = () => [...leaders.map(c => `1 ${names[c]} *CMDR*`),
+      ...sections.flatMap(([, list]) => list.map(a => `${a.copies ?? 1} ${names[a.card]}`))].join("\n") + "\n";
+    $("copy-average").textContent = "Copy list";
+    $("copy-average").onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(listText());
+        $("copy-average").textContent = "Copied";
+      } catch {
+        $("copy-average").textContent = "Couldn't copy";
+      }
+    };
+    $("compare-average").href = "?" + new URLSearchParams({ deck: "", from: `avg.${key}`,
+      cards: [...average.spells, ...average.lands].map(p => from.cards[p].toString(36)).join("."), ...(name && { of: name }) });
+    $("download-average").onclick = () => {
+      const a = el("a", { download: `${lead}${name ? ` (${name})` : ""} average deck.txt`,
+        href: URL.createObjectURL(new Blob([listText()], { type: "text/plain" })) });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href));
+    };
+
+    // Its cards, by type
     const averageInfos = await Promise.all(sections.map(([, list]) => Promise.all(list.map(a => cardInfo(a.card)))));
-    if (current !== g) return; // another build was picked while loading
+    if (averageShown !== shown) return; // another build, or other decks, picked while loading
     $("average").replaceChildren(...sections.flatMap(([t, list], s) => [
       el("h3", {}, typeLabel(t), el("small", { textContent: list.reduce((k, a) => k + (a.copies ?? 1), 0) })),
       el("div", { className: "gallery" }, ...list.map((a, i) => cardTile(a.card, averageInfos[s][i], a.detail, a.bar, i, a))),
@@ -1373,7 +1416,9 @@ async function showCommander(key) {
       + "compared among decks of the same build, as tuned and with as many Game Changers, so cards don't go together "
       + `just for being in the same kind of deck. Staples every deck plays and ${lead}'s precon are left out.`,
     average: "As many spells and nonbasic lands as these decks play on average, picking the cards they play most, then "
-      + "basic lands, split evenly between the colors, to make 100 cards.",
+      + "basic lands, split evenly between the colors, to make 100 cards. Every deck counts the same. Public decks: the "
+      + "build and bracket picked above. Tournament decks: every cEDH tournament list of the last 2 years, wherever it "
+      + `placed; Top cut: only those that made their event's top cut. Each needs ${MIN_AVERAGE_DECKS} decks or more.`,
     decklists: "Public decks from Moxfield and Archidekt, newest first, with their cards.",
   };
   const showViews = () => {
