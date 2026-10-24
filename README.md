@@ -259,8 +259,8 @@ time, a few KB after that).
      a card is picked.
    - **Made the cut**: among the decks in events with a top cut, the cards whose share of decks
      differs most between those that made it and those that missed it (`cutGroups()` and
-     `playedDifferently()`), the 6 they play most more and the 6 most less, among cards at least 15%
-     of either plays, over the period picked. Each card has a dot for each on a 0–100% track and its
+     `playedDifferently()`): what they play more, and less, the biggest gap first, 6 at a time
+     (**Show more** for the next), among cards at least 15% of either plays, over the period picked. Each card has a dot for each on a 0–100% track and its
      two shares; pointing at, tapping or tabbing to a dot pops up its share and number of decks (dots
      too close to point at apart share one). With a few hundred decks a small gap can be chance, so
      a difference under two standard errors is faded. It reads `results/lists/` too, so it's

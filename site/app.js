@@ -836,15 +836,15 @@ async function findSimilar(key) {
     const enough = groups?.every(g => g.decks >= MIN_AVERAGE_DECKS);
     $("deck-cut").hidden = !enough;
     if (enough) {
-      const its = playedDifferently(...groups, { only: c => yours.has(c), n: 4 });
+      const its = playedDifferently(...groups, { only: c => yours.has(c), n: Infinity });
       const missing = playedDifferently(...groups, { only: c => !yours.has(c) && !commanders.includes(c)
-        && (identity[c] & ~colors) === 0, n: 6 }).more;
+        && (identity[c] & ~colors) === 0, n: Infinity }).more;
       $("deck-cut-lede").textContent = `Your cards whose share of decks differs most between ${lead} decks that made their `
         + `event's top cut and those that missed it, in the last ${tournament.period}, and the cards the ones that made it `
         + "play more that yours doesn't. Faded: could well be chance.";
       $("deck-cut-legend").replaceChildren(...vsLegend(groups));
-      $("deck-cut-rows").replaceChildren(...vsRows(groups, [["In your deck", [...its.more, ...its.less]],
-        ["Not in your deck", missing]], names));
+      $("deck-cut-rows").replaceChildren(...vsRows(groups, [["Your cards they play more", its.more],
+        ["Your cards they play less", its.less], ["Not in your deck: they play more", missing]], names));
     }
   }
 
@@ -1556,9 +1556,21 @@ function vsRows(groups, sections, names) {
   };
   const scale = el("li", { className: "scale", ariaHidden: "true" }, el("span"),
     el("div", { className: "vs-track" }, ...["0%", "50%", "100%"].map(x => el("span", { textContent: x }))), el("span"));
-  return [scale, ...sections.flatMap(([label, rows]) => (rows.length
-    ? [el("li", { className: "group", textContent: label }), ...rows.map(row)] : []))];
+  // Each section VS_PAGE rows at a time, a "Show more" under it for the next
+  const section = ([label, rows]) => {
+    if (!rows.length) return [];
+    let shown = Math.min(VS_PAGE, rows.length);
+    const more = el("li", { className: "more", hidden: shown >= rows.length },
+      el("button", { type: "button", className: "btn-quiet", textContent: "Show more", onclick: () => {
+        more.before(...rows.slice(shown, shown + VS_PAGE).map(row));
+        shown += VS_PAGE;
+        more.hidden = shown >= rows.length;
+      } }));
+    return [el("li", { className: "group", textContent: label }), ...rows.slice(0, shown).map(row), more];
+  };
+  return [scale, ...sections.flatMap(section)];
 }
+const VS_PAGE = 6;
 
 // === A commander's cEDH tournament results (decks/results/<key>.json, from edhtop16) ===
 const RESULT_PERIODS = { 90: "3 months", 180: "6 months", 365: "year", 730: "2 years" };
@@ -1672,7 +1684,7 @@ function showResults(key, results, names, released, onPeriod) {
       $("topcut-rows").replaceChildren();
       return;
     }
-    const { more, less } = playedDifferently(...groups);
+    const { more, less } = playedDifferently(...groups, { n: Infinity });
     $("topcut-lede").textContent = `The cards whose share of decks differs most between ${lead} decks that made their `
       + `event's top cut and those that missed it, in the last ${period()}. Faded: could well be chance.`;
     $("topcut-rows").replaceChildren(...vsRows(groups, [["Decks that made the cut play more", more],
