@@ -1,8 +1,9 @@
-"""Self-check for the deck corpus and site/decks/: python test_build_decks.py"""
+"""Self-check for the deck corpus and site/decks/: python tests/test_build_decks.py"""
 import gzip
 import io
 import json
 import os
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -10,6 +11,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import date
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))  # the scripts tested
 import build_decks
 from build_decks import build, load_corpus, precon_sets, save_corpus, slim_deck, slim_moxfield
 

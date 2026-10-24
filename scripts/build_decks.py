@@ -2,13 +2,13 @@
 and cEDH tournament results from edhtop16 into results.jsonl.gz, and turn them into site/decks/,
 the data behind "Find similar decks" and the commander pages.
 
-    python build_decks.py crawl --hours 5     # resumable: stop and restart any time
-    python build_decks.py crawl --site moxfield --hours 5
-    python build_decks.py crawl --top 3500 --per-commander 20 --rate 3   # fill in popular commanders
-    python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000
-    python build_decks.py results --hours 1   # resumable: the last two years' tournaments, newest first
-    python build_decks.py share               # merge with the release and upload (a crawl does this itself)
-    python build_decks.py build               # after build_index.py (uses its card numbers)
+    python scripts/build_decks.py crawl --hours 5     # resumable: stop and restart any time
+    python scripts/build_decks.py crawl --site moxfield --hours 5
+    python scripts/build_decks.py crawl --top 3500 --per-commander 20 --rate 3   # fill in popular commanders
+    python scripts/build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000
+    python scripts/build_decks.py results --hours 1   # resumable: the last two years' tournaments, newest first
+    python scripts/build_decks.py share               # merge with the release and upload (a crawl does this itself)
+    python scripts/build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
 import base64
@@ -30,7 +30,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 
-from build_index import by_popularity, load_cards, load_oracle_tags, load_printings, write_json
+from build_index import ROOT, by_popularity, in_data, load_cards, load_oracle_tags, load_printings, write_json
 
 ARCHIDEKT = "https://archidekt.com/api"
 MOXFIELD = "https://api2.moxfield.com"
@@ -426,7 +426,7 @@ def share(corpus, state, path=CORPUS, state_path=STATE, results_path=RESULTS):
         return True
     except (OSError, RuntimeError) as e:  # OSError: gh isn't installed
         print(f"Couldn't share it ({e}). Everything is saved here; to try again:\n"
-              "  python build_decks.py share", flush=True)
+              "  python scripts/build_decks.py share", flush=True)
         return False
 
 
@@ -579,7 +579,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
     if upload:
         share(corpus, state, path, state_path)
     else:
-        print("Share it with the site (merged with the release first): python build_decks.py share", flush=True)
+        print("Share it with the site (merged with the release first): python scripts/build_decks.py share", flush=True)
 
 
 # === Build site/decks/ ===
@@ -649,7 +649,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #              per window]. Most of its cards; a filter fetches just the identities it keeps.
 #   card-commanders/<block>.json  for each of a block of CARD_BLOCK cards, the commanders in
 #              trends.json that play it, flat: [commander number, decks playing it ever, ...]
-OUT_DIR = os.path.join("site", "decks")
+OUT_DIR = os.path.join(ROOT, "site", "decks")
 RESULT_WINDOWS = [90, 180, 365, 730]  # days back: the periods commander pages show tournament results for
 MIN_RESULT_DECKS = 2  # a card fewer of a commander's tournament decks play says nothing yet
 MIN_POOLED_DECKS = 10  # tournament decks playing a card for the Tournaments tab to list it
@@ -1209,6 +1209,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
 
 
 if __name__ == "__main__":
+    in_data()
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("crawl", help="download decks from Archidekt or Moxfield into the corpus")

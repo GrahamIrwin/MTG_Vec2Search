@@ -2,18 +2,18 @@
 dollars and euros), on the price-history release (too big for git). Additive: a day already in it
 is never replaced.
 
-    python build_prices.py snapshot    # add the day's prices from default_cards.jsonl.gz (the daily crawl does this)
-    python build_prices.py backfill    # add every older day we can find: the Wayback Machine's copies of
+    python scripts/build_prices.py snapshot    # add the day's prices from default_cards.jsonl.gz (the daily crawl does this)
+    python scripts/build_prices.py backfill    # add every older day we can find: the Wayback Machine's copies of
                                        # Scryfall's bulk files and MTGJSON's price files, Hugging Face datasets
                                        # of them, and MTGJSON's last 90 days
-    python build_prices.py share       # merge with the release and upload (snapshot and backfill do this
+    python scripts/build_prices.py share       # merge with the release and upload (snapshot and backfill do this
                                        # unless given --no-upload)
-    python build_prices.py site        # write site/prices/ (after build_index.py: it uses its card numbers)
-    python build_prices.py goldfish --hours 24   # fetch daily histories to fill the days between ours
+    python scripts/build_prices.py site        # write site/prices/ (after build_index.py: it uses its card numbers)
+    python scripts/build_prices.py goldfish --hours 24   # fetch daily histories to fill the days between ours
                                                  # (resumable: stop and run it again any time)
-    python build_prices.py goldfish --hours 24 --workers 3   # the same, 3 at a time (each its own file, merged after)
-    python build_prices.py goldfish --stop       # stop a crawl that's running (or Ctrl+C it)
-    python build_prices.py goldfish --least 1    # printings under MIN_MOVER cents too (the default leaves them out)
+    python scripts/build_prices.py goldfish --hours 24 --workers 3   # the same, 3 at a time (each its own file, merged after)
+    python scripts/build_prices.py goldfish --stop       # stop a crawl that's running (or Ctrl+C it)
+    python scripts/build_prices.py goldfish --least 1    # printings under MIN_MOVER cents too (the default leaves them out)
 
 The file's first line is {"days": {day: where its prices came from}, "sources": [files imported]}.
 Then a line per printing (Scryfall id), with a series per price: [[day, cents], ...], a point only
@@ -47,8 +47,8 @@ import zlib
 from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 
-from build_index import (HEADERS, PRINTINGS_FILE, SCRYFALL_BULK_LIST_URL, by_popularity, card_type, fetch, load_cards,
-                         load_oracle_tags, write_json)
+from build_index import (HEADERS, PRINTINGS_FILE, ROOT, SCRYFALL_BULK_LIST_URL, by_popularity, card_type, fetch, in_data,
+                         load_cards, load_oracle_tags, write_json)
 
 HISTORY = "prices.jsonl.gz"
 RELEASE = "price-history"
@@ -59,7 +59,7 @@ MTGJSON_FIELDS = {"tcgplayer": {"normal": "usd", "foil": "usd_foil", "etched": "
 MTGJSON = "https://mtgjson.com/api/v5"
 WAYBACK = "http://web.archive.org"
 HF = "https://huggingface.co"
-SITE = os.path.join("site", "prices")
+SITE = os.path.join(ROOT, "site", "prices")
 EPOCH = date(1993, 1, 1)  # app.js counts days from it
 WINDOWS = (7, 30, 90, 365)  # days back the Prices page compares with
 US = ("usd", "usd_foil", "usd_etched")  # the site shows US prices, in the visitor's currency
@@ -284,7 +284,7 @@ def snapshot(path=PRINTINGS_FILE):
         updated = next(i for i in json.load(r)["data"] if i["type"] == "default_cards")["updated_at"]
     made = datetime.fromisoformat(updated)
     if datetime.fromtimestamp(os.path.getmtime(path), timezone.utc) < made:
-        sys.exit(f"{path} is older than Scryfall's latest; download it again first (python build_index.py)")
+        sys.exit(f"{path} is older than Scryfall's latest; download it again first (python scripts/build_index.py)")
     hist = load()
     with gzip.open(path, "rt", encoding="utf-8") as f:
         new = add_day(hist, made.date().isoformat(), "scryfall", scryfall_snapshot(json.loads(line) for line in f))
@@ -373,7 +373,7 @@ def backfill():
 # (goldfish.jsonl, a line per printing and finish as it's fetched) and only used scaled to meet ours.
 GOLDFISH = "https://www.mtggoldfish.com"
 GOLDFISH_FILE = "goldfish.jsonl"
-GOLDFISH_SETS = "goldfish_sets.json"  # Scryfall set code -> its set code, from its set pages
+GOLDFISH_SETS = os.path.join(ROOT, "scripts", "goldfish_sets.json")  # Scryfall set code -> its set code, from its set pages
 GOLDFISH_STOP = "goldfish.stop"  # there: the crawl stops after the printing it's on (goldfish --stop)
 GOLDFISH_DELAY = 2.0  # seconds between requests
 GOLDFISH_HEADERS = {"User-Agent": "MTG_Vec2Search/1.0 (+https://github.com/GrahamIrwin/MTG_Vec2Search)"}
@@ -1059,11 +1059,12 @@ def share(path=HISTORY, goldfish=GOLDFISH_FILE):
         return True
     except (OSError, RuntimeError) as e:  # OSError: gh isn't installed
         print(f"Couldn't share it ({e}). Everything is saved here; to try again:\n"
-              "  python build_prices.py share", flush=True)
+              "  python scripts/build_prices.py share", flush=True)
         return False
 
 
 if __name__ == "__main__":
+    in_data()
     sys.stdout.reconfigure(encoding="utf-8")  # card names (꞉) in a log file Windows would write in cp1252
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd not in ("snapshot", "backfill", "share", "site", "goldfish"):
@@ -1100,6 +1101,6 @@ if __name__ == "__main__":
     elif cmd == "backfill":
         backfill()
     if "--no-upload" in sys.argv:
-        print("Not uploaded (--no-upload). To upload: python build_prices.py share")
+        print("Not uploaded (--no-upload). To upload: python scripts/build_prices.py share")
     else:
         sys.exit(0 if share() else 1)

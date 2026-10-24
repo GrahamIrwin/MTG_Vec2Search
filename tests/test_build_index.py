@@ -1,4 +1,8 @@
-"""Self-check for card vectorization: python test_build_index.py"""
+"""Self-check for card vectorization: python tests/test_build_index.py"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))  # the scripts tested
 from build_index import build_term_space, card_type, keyword_matcher, token_features, vectorize_card
 
 card = {

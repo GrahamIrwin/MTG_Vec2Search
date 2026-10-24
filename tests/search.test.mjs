@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   parseQuery, buildIndex, search, nameSearch, mainTerms, decodePosting, parsePrice, isBudget, sortResults,
   randomSearches,
-} from "./site/search.js";
+} from "../site/search.js";
 
 const terms = ["W", "R", "G", "Creature", "Instant", "Land", "Artifact", "Flying", "Ward", "Elf", "Dragon",
   "Spirit", "draw", "Card Advantage", "tag:ramp", "Token Creation", "CMC_0", "CMC_1", "CMC_2", "CMC_3",

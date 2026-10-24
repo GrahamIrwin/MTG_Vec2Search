@@ -353,17 +353,17 @@ then about two and a half hours on each site), then redeploys the site so Trends
 stays current. To grow it faster, crawl locally:
 
 ```
-gh release download deck-corpus             # decks.jsonl.gz, crawl_state.json, results.jsonl.gz
-python build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any time
-python build_index.py                       # Moxfield needs default_cards.jsonl.gz first
-python build_decks.py crawl --site moxfield --hours 24
+gh release download deck-corpus --dir data          # decks.jsonl.gz, crawl_state.json, results.jsonl.gz
+python scripts/build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any time
+python scripts/build_index.py                       # Moxfield needs default_cards.jsonl.gz first
+python scripts/build_decks.py crawl --site moxfield --hours 24
 ```
 
 When a crawl stops (Ctrl+C, or its hours run out) it uploads the corpus, crawl
 state and tournament results to the release (and starts a deploy, so the site
 has them), after first merging in any decks and tournaments the release has
 that it doesn't (the daily crawl's, say), so an upload never loses any.
-`--no-upload` skips that; `python build_decks.py share` does it on its own. The
+`--no-upload` skips that; `python scripts/build_decks.py share` does it on its own. The
 daily crawl uploads the same way, since a local crawl may have uploaded while it
 ran: replacing the release's files outright would lose what arrived meanwhile.
 
@@ -373,10 +373,10 @@ time: they share the corpus file, and Archidekt answers 429 (everything pauses)
 past about 3 requests a second.
 
 ```
-python build_decks.py crawl --top 3500 --per-commander 5 --rate 2    # enough for every commander first
-python build_decks.py crawl --top 3500 --per-commander 20 --rate 2   # then more
-python build_decks.py crawl --only "Atraxa, Praetors' Voice" --per-commander 3000 --rate 2   # one commander's newest 3,000
-python build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000   # just its bracket 5 decks
+python scripts/build_decks.py crawl --top 3500 --per-commander 5 --rate 2    # enough for every commander first
+python scripts/build_decks.py crawl --top 3500 --per-commander 20 --rate 2   # then more
+python scripts/build_decks.py crawl --only "Atraxa, Praetors' Voice" --per-commander 3000 --rate 2   # one commander's newest 3,000
+python scripts/build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000   # just its bracket 5 decks
 ```
 
 ## Price history
@@ -387,7 +387,7 @@ and euros (Cardmarket). The Prices tab and card details read it (see **Prices** 
 
 - **Crawl decks** adds the day's prices from Scryfall's `default_cards` every day
   (`build_prices.py snapshot`), dated by when Scryfall made the file.
-- `python build_prices.py backfill` adds every older day it can find: the Wayback Machine's copies of
+- `python scripts/build_prices.py backfill` adds every older day it can find: the Wayback Machine's copies of
   Scryfall's bulk files (a day each, 2023 on; older ones are cut off or have no prices), of
   MTGJSON's `AllPrices` (90 days each, from late 2021 and early 2023), its `cardPrices.csv` and
   MTGJSON 4's `AllPrintings` (a day each, back to November 2020), then MTGJSON's current 90 days.
@@ -399,15 +399,15 @@ and euros (Cardmarket). The Prices tab and card details read it (see **Prices** 
   (`pip install pyarrow`); nothing else does.
 - Where Scryfall and MTGJSON both have a week, their prices match (the same median, 97% of US
   prices within 10%).
-- **Estimates between our days**: `python build_prices.py goldfish --hours 24` fetches another
+- **Estimates between our days**: `python scripts/build_prices.py goldfish --hours 24` fetches another
   price guide's daily history (back to 2010) of every printing at 50 cents or more (`--least 1`:
   every printing with a price) and the whole reserve list, the reserve list first, then the
   priciest, one request every 2 seconds, into
   `goldfish.jsonl` (a line per printing and finish as it arrives: stop and run it again any time;
-  `python build_prices.py goldfish --stop` stops a crawl running elsewhere, or Ctrl+C it).
+  `python scripts/build_prices.py goldfish --stop` stops a crawl running elsewhere, or Ctrl+C it).
   `--workers 3` runs 3 side by side, each taking every third printing into its own
   `goldfish.<n>.jsonl`, merged in when they stop; each still waits 2 seconds between requests.
-  It finds each printing by the guide's set codes (`goldfish_sets.json`, from its set pages, by
+  It finds each printing by the guide's set codes (`scripts/goldfish_sets.json`, from its set pages, by
   name or else by code) and, for a name printed more than once in a set, the card's page. Sets
   it has no page of (The List, promo sets, Fallout) and printings not found that way are looked
   for on the card's own page (by a set of it there, ours, or its search), which lists every
@@ -446,22 +446,31 @@ Archidekt deck pages, one per request, cached for 10 minutes.
 Python 3.11+ (standard library only):
 
 ```
-python build_index.py              # download data + build site/index/ (~1 min)
-gh release download deck-corpus --pattern decks.jsonl.gz
-gh release download deck-corpus --pattern results.jsonl.gz   # tournament results (optional)
-python build_decks.py build        # site/decks/, for Find similar decks
-gh release download price-history --pattern prices.jsonl.gz
-python build_prices.py site        # site/prices/, for Prices and price charts
-python serve.py                    # http://localhost:8000, changes show on a plain refresh
+python scripts/build_index.py              # download data + build site/index/ (~1 min)
+gh release download deck-corpus --dir data --pattern decks.jsonl.gz
+gh release download deck-corpus --dir data --pattern results.jsonl.gz   # tournament results (optional)
+python scripts/build_decks.py build        # site/decks/, for Find similar decks
+gh release download price-history --dir data --pattern prices.jsonl.gz
+python scripts/build_prices.py site        # site/prices/, for Prices and price charts
+python scripts/serve.py                    # http://localhost:8000, changes show on a plain refresh
 ```
 
-Tests: `python test_build_index.py`, `python test_build_decks.py`, `python test_build_prices.py` and `node --test` (Node 24).
+The scripts run from anywhere: they read and write their data in `data/` (not in git) and build
+into `site/`.
+
+Tests: `python tests/test_build_index.py`, `python tests/test_build_decks.py`, `python tests/test_build_prices.py`
+and `node --test` (Node 24).
 
 ## Files
 
-- `build_index.py`: downloads data from Scryfall, vectorizes the cards, writes the index
-- `build_decks.py`: crawls Archidekt and Moxfield decks and edhtop16's tournament results, writes the per-commander deck files
-- `build_prices.py`: keeps the price history of every printing (daily from Scryfall, backfilled from archives)
+- `scripts/build_index.py`: downloads data from Scryfall, vectorizes the cards, writes the index
+- `scripts/build_decks.py`: crawls Archidekt and Moxfield decks and edhtop16's tournament results, writes the per-commander deck files
+- `scripts/build_prices.py`: keeps the price history of every printing (daily from Scryfall, backfilled from archives)
+- `scripts/serve.py`: serves `site/` locally
+- `tests/`: the scripts' and the site's self-checks
+- `data/`: Scryfall downloads, the deck corpus, tournament results and price history (local, gitignored;
+  the corpora live on the `deck-corpus` and `price-history` releases)
+- `docs/`: background reading (vector space search)
 - `site/index.html`, `site/app.js`: the page
 - `site/search.js`: query parsing and ranking
 - `site/deck.js`: decklist parsing, similar decks, recommendations, builds, trends and tournament results

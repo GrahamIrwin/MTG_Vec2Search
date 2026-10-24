@@ -1,4 +1,4 @@
-"""Serve site/ at http://localhost:8000 for working on it: python serve.py [port]
+"""Serve site/ at http://localhost:8000 for working on it: python scripts/serve.py [port]
 
 Every file is checked with the server on each load (no-cache), so a changed app.js shows on a plain
 refresh; the live site gets that from its deploys' script versions instead. It also takes bursts of
@@ -6,6 +6,7 @@ requests (a gallery of card images and chunks) that python -m http.server's queu
 """
 import functools
 import http.server
+import os
 import sys
 
 
@@ -17,5 +18,6 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
 
 http.server.ThreadingHTTPServer.request_queue_size = 256
 port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+site = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site")
 print(f"http://localhost:{port}", flush=True)
-http.server.ThreadingHTTPServer(("", port), functools.partial(NoCache, directory="site")).serve_forever()
+http.server.ThreadingHTTPServer(("", port), functools.partial(NoCache, directory=site)).serve_forever()

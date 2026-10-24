@@ -4,7 +4,7 @@ import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, distinctive, averageDeck, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
-} from "./site/deck.js";
+} from "../site/deck.js";
 
 const NAMES = ["Sol Ring", "Atraxa, Praetors' Voice", "Delver of Secrets // Insectile Aberration", "Island",
   "Lim-Dûl's Vault", "Swords to Plowshares", "Krenko, Mob Boss"];
@@ -174,7 +174,7 @@ test("combos for a primer: cards as [[links]], what comes first, steps and resul
 });
 
 test("deck link worker: Moxfield and Archidekt decks become plain decklists", async () => {
-  const { default: worker } = await import("./worker/deck-link.js");
+  const { default: worker } = await import("../worker/deck-link.js");
   const realFetch = globalThis.fetch;
   const card = (name, quantity = 1, set, cn, finish = "nonFoil") => ({ quantity, finish, card: { name, set, cn } });
   const responses = {

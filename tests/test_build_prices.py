@@ -1,11 +1,13 @@
-"""Self-check for the price history: python test_build_prices.py"""
+"""Self-check for the price history: python tests/test_build_prices.py"""
 import gzip
 import json
 import os
 import random
+import sys
 import tempfile
 from datetime import date
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))  # the scripts tested
 from build_prices import (add_day, estimator, load, merge, mtgjson4_days, mtgjson_csv, mtgjson_days, on, save,
                           scryfall_snapshot, site_data)
 

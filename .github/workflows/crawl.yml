@@ -23,23 +23,23 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
-      - run: gh release download deck-corpus
-      - run: python3 -c "import build_index; build_index.download_bulk_data()" # card names for commanders, printings for Moxfield
+      - run: gh release download deck-corpus --dir data
+      - run: python3 -c "import sys; sys.path.insert(0, 'scripts'); import build_index; build_index.in_data(); build_index.download_bulk_data()" # card names for commanders, printings for Moxfield
       # The day's price of every printing, added to the history on the price-history release
       # (downloaded first, so the day is added to the end of it rather than merged in on upload)
       - run: |
-          gh release download price-history --pattern prices.jsonl.gz || echo "No price history yet"
-          python3 build_prices.py snapshot
+          gh release download price-history --dir data --pattern prices.jsonl.gz || echo "No price history yet"
+          python3 scripts/build_prices.py snapshot
         continue-on-error: true
       # A day's tournaments take a few minutes; a failure here still lets the decks crawl
-      - run: python3 build_decks.py results --hours 0.25
+      - run: python3 scripts/build_decks.py results --hours 0.25
         continue-on-error: true
       # Half the time on each site. The upload step runs even after a failed crawl: a failed crawl
       # keeps what it fetched (each deck is saved as it arrives)
-      - run: python3 build_decks.py crawl --hours 2.4 --no-upload
+      - run: python3 scripts/build_decks.py crawl --hours 2.4 --no-upload
       - if: ${{ !cancelled() }}
-        run: python3 build_decks.py crawl --site moxfield --hours 2.4 --no-upload
+        run: python3 scripts/build_decks.py crawl --site moxfield --hours 2.4 --no-upload
       # Merged with the release first: a local crawl may have uploaded since this one downloaded it.
       # Then a deploy
       - if: ${{ !cancelled() }}
-        run: python3 build_decks.py share
+        run: python3 scripts/build_decks.py share

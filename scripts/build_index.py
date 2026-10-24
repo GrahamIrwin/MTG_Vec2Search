@@ -1,6 +1,6 @@
 """Download the latest Scryfall card data and build site/index/, the search index.
 
-Run this whenever a new set comes out:  python build_index.py
+Run this whenever a new set comes out:  python scripts/build_index.py
 (GitHub Actions also runs it weekly and redeploys the site.)
 """
 import gzip
@@ -13,6 +13,16 @@ from collections import Counter
 from datetime import date
 
 # === Settings ===
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the repository
+DATA = os.path.join(ROOT, "data")  # downloads, crawls and corpora (not in git): the scripts run in it
+
+
+def in_data():
+    """Work in data/, where every data file is read and written by its bare name (as the releases name them)."""
+    os.makedirs(DATA, exist_ok=True)
+    os.chdir(DATA)
+
+
 SCRYFALL_BULK_LIST_URL = "https://api.scryfall.com/bulk-data"
 # oracle_cards = one entry per unique card (vs. default_cards = every printing)
 BULK_TYPE = "oracle_cards"
@@ -249,7 +259,7 @@ def load_printings():
 #   released.json  first release date per card (days since 1993-01-01), only fetched to sort by date
 #   s/<set>.json   the cards printed in each set (numbered as in meta's sets), fetched to filter by set
 # Cards are in popularity order (EDHREC rank), so the top results sit in the first chunks.
-OUT_DIR = os.path.join("site", "index")
+OUT_DIR = os.path.join(ROOT, "site", "index")
 CHUNK = 256
 FILTER_TYPES = [t for t in TYPES if t != "Legendary"]
 NO_PRICE = -1
@@ -340,5 +350,6 @@ def build_index(cards, updated, tags, printings):
 
 
 if __name__ == "__main__":
+    in_data()
     updated = download_bulk_data()
     build_index(load_cards(), updated, load_oracle_tags(), load_printings())
