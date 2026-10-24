@@ -311,14 +311,19 @@ test("a package of cards: the decks playing all of them against those playing no
   assert.equal(packageResults(lists, [42], 3).lift, null);
 });
 
-test("playedDifferently: the cards tournament decks play most more, and less, than public ones", () => {
-  // 100 public decks, 50 tournament decks
-  const pub = { decks: 100, plays: new Map([[1, 20], [2, 80], [3, 50], [4, 10], [5, 5]]) };
-  const top = { decks: 50, plays: new Map([[1, 40], [2, 10], [3, 26], [6, 30], [5, 4]]) };
-  const { more, less } = playedDifferently(pub, top, { n: 2 });
+test("playedDifferently: the cards decks that made the cut play most more, and less, than those that missed it", () => {
+  // 100 decks missed the cut, 50 made it
+  const missed = { decks: 100, plays: new Map([[1, 20], [2, 80], [3, 50], [4, 10], [5, 5]]) };
+  const made = { decks: 50, plays: new Map([[1, 40], [2, 10], [3, 26], [6, 30], [5, 4]]) };
+  const { more, less } = playedDifferently(missed, made, { n: 2 });
   // 1: 20% → 80%, 6: 0% → 60%, 3: 50% → 52%; 2: 80% → 20%, 4: 10% → 0% (under 15% both: left out)
   assert.deepEqual(more.map(r => r.card), [1, 6]);
   assert.deepEqual(less.map(r => r.card), [2]);
-  assert.deepEqual(more[0], { card: 1, aDecks: 20, bDecks: 40, a: 0.2, b: 0.8 });
-  assert.equal(playedDifferently(pub, top).more.length, 3); // and 3, once there's room
+  const { evidence, ...one } = more[0];
+  assert.deepEqual(one, { card: 1, aDecks: 20, bDecks: 40, a: 0.2, b: 0.8 });
+  assert.ok(evidence > 6); // 20% against 80% of these many decks is no chance
+  assert.ok(Math.abs(playedDifferently(missed, made).more.find(r => r.card === 3).evidence) < 1); // 50% against 52% could be
+  assert.equal(playedDifferently(missed, made).more.length, 3); // and 3, once there's room
+  // Only some cards: a deck's own, say
+  assert.deepEqual(playedDifferently(missed, made, { only: c => c !== 1 }).more.map(r => r.card), [6, 3]);
 });

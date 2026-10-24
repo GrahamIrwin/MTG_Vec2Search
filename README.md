@@ -201,18 +201,6 @@ time, a few KB after that).
      <img alt="A map of Derevi's public decks, one panel per build: Manaless value (34%), Untapper creature (33%), Synergy flying (19%) and Symmetrical (13%), each in its own region" src="docs/images/builds-light.svg">
    </picture>
 
-   With Tournament decks or Top cut picked, the average deck also shows **what those decks play
-   differently** from the public decks of the build and bracket picked: the cards whose share of
-   decks differs most (`playedDifferently()` in `site/deck.js`), the 6 they play most more and the 6
-   most less, among the cards at least 15% of either plays. Each card has three dots on a 0–100%
-   track, its share of the public decks, of every tournament deck and of the top-cut ones, so a card
-   every cEDH deck plays (the two tournament dots together) stands apart from one the decks that made
-   the cut lean on more. Pointing at, tapping or tabbing to a dot pops up its share and deck count
-   (dots too close to point at apart share one). Both sets of decks are already loaded for the
-   average deck, so it's only counting.
-
-   ![What Derevi's top-cut decks play differently: far more Mindbreak Trap, Mana Vault, Force of Will, Mental Misstep, Silence and The One Ring than its public decks, and almost none of Seaside Citadel, Glacial Fortress, Counterspell and Hinterland Harbor](docs/images/screenshot-topcut.webp)
-
    Decks can also be narrowed to a **bracket**, the one each deck's builder
    gave it (most Moxfield decks have one, few Archidekt ones), alone or with a
    build. The build and bracket are in the address bar
@@ -269,10 +257,23 @@ time, a few KB after that).
      the same way (`packageResults`). It needs each tournament deck's cards, so
      `results/lists/<file name>.json` holds them one by one, fetched only when
      a card is picked.
+   - **Made the cut**: among the decks in events with a top cut, the cards whose share of decks
+     differs most between those that made it and those that missed it (`cutGroups()` and
+     `playedDifferently()`), the 6 they play most more and the 6 most less, among cards at least 15%
+     of either plays, over the period picked. Each card has a dot for each on a 0–100% track and its
+     two shares; pointing at, tapping or tabbing to a dot pops up its share and number of decks (dots
+     too close to point at apart share one). With a few hundred decks a small gap can be chance, so
+     a difference under two standard errors is faded. It reads `results/lists/` too, so it's
+     only counting once that's loaded.
+
+   ![Made the cut for Derevi over 6 months: decks that made the cut play more Flare of Denial, Shifting Woodland and Worldly Tutor than those that missed it, and less Minamo, Swan Song and Mox Diamond](docs/images/screenshot-topcut.webp)
+
    - Picking **bracket 5** notes each card's tournament result on the page's
      card tiles. **Deck recommendations** gets a **tournament check** when the
-     deck's commander has results (your cards whose decks win less, and cards
-     whose decks win more that you don't play), and notes on cards to add and
+     deck's commander has results (your cards whose decks win less, cards
+     whose decks win more that you don't play, and **made the cut, or missed it**: your cards whose
+     share of decks differs most between those that made the cut and those that missed it, and the
+     cards the ones that made it play more that yours doesn't), and notes on cards to add and
      cut. A card's details say how its decks did, with that commander and
      across commanders.
 5. **Trends** (`?trends`) shows rising and most popular commanders and cards,

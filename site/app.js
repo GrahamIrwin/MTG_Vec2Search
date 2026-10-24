@@ -665,9 +665,12 @@ async function showAgainst(target, mine, ownKey) {
 // to match a deck with: each named for its record, its number in the lists file as its id
 let deckPool = params.get("decks") ?? "public"; // public, tournament or topcut
 const poolFiles = new Map();
-async function tournamentPool(key, topCut) {
+const listsFile = key => {
   if (!poolFiles.has(key)) poolFiles.set(key, getJson(`decks/results/lists/${key}.json`).catch(err => { poolFiles.delete(key); throw err; }));
-  const [{ cards, decks }, { windows }] = await Promise.all([poolFiles.get(key), getJson(`decks/results/${key}.json`)]);
+  return poolFiles.get(key);
+};
+async function tournamentPool(key, topCut) {
+  const [{ cards, decks }, { windows }] = await Promise.all([listsFile(key), getJson(`decks/results/${key}.json`)]);
   return decodeShard({ cards, decks: decks.flatMap(([w, games, wins, cut, ...gaps], i) => (topCut && cut !== 2 ? []
     : [[i, `Won ${wins} of ${games} games${cut === 2 ? ", made the top cut" : ""}`, periodName(windows[w]), gaps]])) });
 }
@@ -825,6 +828,24 @@ async function findSimilar(key) {
     $("missing-more-lede").textContent = more.length ? "Decks with these have a higher win rate than decks without them."
       : "Every card with a clearly higher win rate is already in your deck.";
     await Promise.all([showMineLess(less.map(x => resultTile(x, decksThere))), showMissingMore(more.map(x => resultTile(x, decksThere)))]);
+
+    // Made the cut, for this deck: its cards whose share of decks differs most between those that made
+    // their event's top cut and those that missed it, and the cards those that made it play more that
+    // it doesn't (in its colors)
+    const groups = await listsFile(key).then(lists => cutGroups(lists, tw), () => null);
+    const enough = groups?.every(g => g.decks >= MIN_AVERAGE_DECKS);
+    $("deck-cut").hidden = !enough;
+    if (enough) {
+      const its = playedDifferently(...groups, { only: c => yours.has(c), n: 4 });
+      const missing = playedDifferently(...groups, { only: c => !yours.has(c) && !commanders.includes(c)
+        && (identity[c] & ~colors) === 0, n: 6 }).more;
+      $("deck-cut-lede").textContent = `Your cards whose share of decks differs most between ${lead} decks that made their `
+        + `event's top cut and those that missed it, in the last ${tournament.period}, and the cards the ones that made it `
+        + "play more that yours doesn't. Faded: could well be chance.";
+      $("deck-cut-legend").replaceChildren(...vsLegend(groups));
+      $("deck-cut-rows").replaceChildren(...vsRows(groups, [["In your deck", [...its.more, ...its.less]],
+        ["Not in your deck", missing]], names));
+    }
   }
 
   // The similar decks, each opening to the cards they play that yours doesn't
@@ -1311,56 +1332,6 @@ async function showCommander(key) {
   // bracket's), each a row with a dot on a 0–100% track for its share of the public decks, of every
   // tournament deck and of the top-cut ones (the middle dot tells a card every cEDH deck plays from one
   // the decks that made the cut lean on more)
-  const OVERLAP = 0.04; // dots this close (of the 0–100% track) share a pop-up
-  function showAverageVs(g, from) {
-    const plays = (cards, k) => new Map(cards.flatMap((c, p) => (k[p] ? [[c, k[p]]] : [])));
-    const of = (s, members) => ({ plays: plays(s.cards, playCounts(s, members)), decks: members.length });
-    const all = from.decks.map((_, i) => i);
-    const cut = all.filter(i => from.decks[i].topCut === 2);
-    const publicName = `public decks${g.all ? "" : ` (${g.name})`}`;
-    const groups = [{ key: "public", name: publicName, ...of(shard, g.members) },
-      { key: "tournament", name: "tournament decks", ...of(from, all) },
-      ...(cut.length >= MIN_AVERAGE_DECKS ? [{ key: "topcut", name: "top-cut decks", ...of(from, cut) }] : [])];
-    const picked = groups.find(x => x.key === averageFrom);
-    const { more, less } = playedDifferently(groups[0], picked);
-    const these = picked.name;
-    const decksOf = k => `${k.toLocaleString()} ${k === 1 ? "deck" : "decks"}`;
-    const pct = x => (x > 0 && x < 0.005 ? "<1%" : percent(x)); // one deck in 231 isn't none
-    const share = (x, card) => (x.plays.get(card) ?? 0) / x.decks;
-    const label = x => `${x.name[0].toUpperCase()}${x.name.slice(1)} (${x.decks.toLocaleString()})`;
-    $("average-vs-heading").textContent = `What ${these} play differently`;
-    $("average-vs-lede").textContent = `The cards whose share of decks differs most between ${lead}'s ${these} and its `
-      + `${publicName}, among those at least 15% of either play. Each card's shares: `
-      + `${groups.map(x => ({ public: "public", tournament: "tournament", topcut: "top cut" })[x.key]).join(" → ")}.`;
-    $("average-vs-legend").replaceChildren(...groups.map(x => el("span", { className: x.key, textContent: label(x) })));
-    const row = r => {
-      const shares = groups.map(x => share(x, r.card));
-      const low = Math.min(...shares), high = Math.max(...shares);
-      return el("li", {},
-        cardButton(r.card, names),
-        // the tournament dot is drawn last and smallest, so it shows even on top of the top-cut one
-        el("div", { className: "vs-track" },
-          el("span", { className: "span", style: `left:${low * 100}%;width:${(high - low) * 100}%` }),
-          ...[0, 2, 1].filter(i => i < groups.length).map(i => {
-            // pointing at (or tapping, or tabbing to) a dot pops up its share, and those of the dots on top of
-            // it (too close to point at apart, on a phone), kept inside the track at its ends
-            const tip = groups.flatMap((x, j) => (Math.abs(shares[j] - shares[i]) < OVERLAP
-              ? [`${label(x).replace(/ \(.*/, "")}: ${pct(shares[j])} (${decksOf(x.plays.get(r.card) ?? 0)})`] : [])).join("\n");
-            const side = shares[i] < 0.35 ? " tip-start" : shares[i] > 0.65 ? " tip-end" : ""; // opens inward
-            const dot = el("span", { className: `dot ${groups[i].key}${side}`, style: `left:${shares[i] * 100}%`, tabIndex: 0,
-              ariaLabel: `${names[r.card]}, ${tip.replaceAll("\n", ", ")}` });
-            dot.dataset.tip = tip;
-            return dot;
-          })),
-        el("span", { className: "shares", textContent: shares.map(pct).join(" → ") }));
-    };
-    const group = (label, rows) => (rows.length ? [el("li", { className: "group", textContent: label }), ...rows.map(row)] : []);
-    const scale = el("li", { className: "scale", ariaHidden: "true" }, el("span"),
-      el("div", { className: "vs-track" }, ...["0%", "50%", "100%"].map(x => el("span", { textContent: x }))), el("span"));
-    $("average-vs-rows").replaceChildren(scale, ...group(`${these} play more`, more), ...group(`${these} play less`, less));
-    if (!more.length && !less.length) $("average-vs-lede").textContent = `No card at least 15% of either plays differs between ${lead}'s ${these} and its ${publicName}.`;
-  }
-
   let averageShown;
   async function showAverage(g) {
     const shown = averageShown = {};
@@ -1388,8 +1359,6 @@ async function showCommander(key) {
     }
     const counts = playCounts(from, members);
     const share = p => counts[p] / members.length;
-    $("average-vs").hidden = averageFrom === "public";
-    if (averageFrom !== "public") showAverageVs(g, from);
     const average = averageDeck(from, members, landsOf);
     const basics = Math.max(0, 100 - leaders.length - average.spells.length - average.lands.length);
     const kinds = colors.length ? colors.map(c => BASIC_OF[c]) : ["Wastes"];
@@ -1502,8 +1471,10 @@ async function showCommander(key) {
     tournaments: "cEDH tournaments of 16 players or more. Points are 5 for a win and 1 for a draw. Each card's decks are "
       + "measured against the commander's other decks, so the commander's own strength doesn't count: ▲ and ▼ are how "
       + "many points higher or lower their win rate is, allowing for how few decks play it. It's the decks that won, so a "
-      + "card can stand for a style of build. Faded: too few decks to be sure yet. Pilots: who played its decks, and how "
-      + "it does without the ones who won the most.",
+      + "card can stand for a style of build. Faded: too few decks to be sure yet. Made the cut: among decks in events "
+      + "with a top cut, the cards whose share of decks differs most between those that made it and those that missed it "
+      + "(cards at least 15% of either plays), faded when the difference is under 2 standard errors. Pilots: who played "
+      + "its decks, and how it does without the ones who won the most.",
     combos: "Combos from Commander Spellbook that these decks play every card of; combos that differ in one card are "
       + "shown as one, with each choice's decks. Packages: cards these decks play together far more often than chance, "
       + "compared among decks of the same build, as tuned and with as many Game Changers, so cards don't go together "
@@ -1511,10 +1482,7 @@ async function showCommander(key) {
     average: "As many spells and nonbasic lands as these decks play on average, picking the cards they play most, then "
       + "basic lands, split evenly between the colors, to make 100 cards. Every deck counts the same. Public decks: the "
       + "build and bracket picked above. Tournament decks: every cEDH tournament list of the last 2 years, wherever it "
-      + `placed; Top cut: only those that made their event's top cut. Each needs ${MIN_AVERAGE_DECKS} decks or more. `
-      + "With either, the cards those decks play most differently from the public decks: the 6 whose share of decks "
-      + "rose most and the 6 it fell most, among cards at least 15% of either plays, each with its share of the public, "
-      + "tournament and top-cut decks (point at a dot for its number of decks).",
+      + `placed; Top cut: only those that made their event's top cut. Each needs ${MIN_AVERAGE_DECKS} decks or more.`,
     decklists: "Public decks from Moxfield and Archidekt, newest first, with their cards.",
   };
   const showViews = () => {
@@ -1536,6 +1504,60 @@ async function showCommander(key) {
   await showBuild();
   commanderMessage("");
   $("commander-page").hidden = false;
+}
+
+// === Made the cut against missed it ===
+// A commander's tournament decks (results/lists/<key>.json) from events with a top cut, in the period
+// (w: a window's number; a deck counts in its narrowest window and every longer one), split by whether
+// they made the cut: [missed, made], each {key, name, plays: Map card -> decks playing it, decks}
+function cutGroups(lists, w) {
+  const groups = [{ key: "missed", name: "missed the cut" }, { key: "made", name: "made the cut" }]
+    .map(g => ({ ...g, plays: new Map(), decks: 0 }));
+  for (const [narrowest, , , cut, ...gaps] of lists.decks) {
+    if (narrowest > w || !cut) continue;
+    const g = groups[cut - 1];
+    g.decks++;
+    let p = 0;
+    for (const gap of gaps) {
+      const card = lists.cards[p += gap];
+      g.plays.set(card, (g.plays.get(card) ?? 0) + 1);
+    }
+  }
+  return groups;
+}
+const OVERLAP = 0.04; // dots this close (of the 0–100% track) share a pop-up
+const shareText = x => (x > 0 && x < 0.005 ? "<1%" : percent(x)); // one deck in 231 isn't none
+const decksText = k => `${k.toLocaleString()} ${k === 1 ? "deck" : "decks"}`;
+const groupLabel = g => `${g.name[0].toUpperCase()}${g.name.slice(1)} (${g.decks.toLocaleString()})`;
+const vsLegend = groups => groups.map(g => el("span", { className: g.key, textContent: groupLabel(g) }));
+// The items of a .vs-rows list: a 0–100% scale, then for each of sections ([label, rows], rows as
+// playedDifferently's) a heading and a row per card: its name, a dot for its share of each group's
+// decks, and the shares. A row whose difference could well be chance (under 2 standard errors) is faded.
+function vsRows(groups, sections, names) {
+  const row = r => {
+    const shares = groups.map(g => (g.plays.get(r.card) ?? 0) / g.decks);
+    const low = Math.min(...shares), high = Math.max(...shares);
+    return el("li", { className: Math.abs(r.evidence) < SIGNAL ? "faint" : "" },
+      cardButton(r.card, names),
+      el("div", { className: "vs-track" },
+        el("span", { className: "span", style: `left:${low * 100}%;width:${(high - low) * 100}%` }),
+        ...groups.map((g, i) => {
+          // pointing at (or tapping, or tabbing to) a dot pops up its share, and those of the dots on top
+          // of it (too close to point at apart, on a phone), opening toward the middle of the track
+          const tip = groups.flatMap((x, j) => (Math.abs(shares[j] - shares[i]) < OVERLAP
+            ? [`${groupLabel(x).replace(/ \(.*/, "")}: ${shareText(shares[j])} (${decksText(x.plays.get(r.card) ?? 0)})`] : [])).join("\n");
+          const side = shares[i] < 0.35 ? " tip-start" : shares[i] > 0.65 ? " tip-end" : "";
+          const dot = el("span", { className: `dot ${g.key}${side}`, style: `left:${shares[i] * 100}%`, tabIndex: 0,
+            ariaLabel: `${names[r.card]}, ${tip.replaceAll("\n", ", ")}` });
+          dot.dataset.tip = tip;
+          return dot;
+        })),
+      el("span", { className: "shares", textContent: shares.map(shareText).join(" → ") }));
+  };
+  const scale = el("li", { className: "scale", ariaHidden: "true" }, el("span"),
+    el("div", { className: "vs-track" }, ...["0%", "50%", "100%"].map(x => el("span", { textContent: x }))), el("span"));
+  return [scale, ...sections.flatMap(([label, rows]) => (rows.length
+    ? [el("li", { className: "group", textContent: label }), ...rows.map(row)] : []))];
 }
 
 // === A commander's cEDH tournament results (decks/results/<key>.json, from edhtop16) ===
@@ -1620,10 +1642,42 @@ function showResults(key, results, names, released, onPeriod) {
   const period = () => periodName(results.windows[w]);
   // Its parts, one at a time: a link with a package to test opens on that
   let part = params.has("package") ? "test" : "cards";
-  const showParts = () => showSections($("results-panel"), $("results-parts"),
-    [["cards", "Cards"], ["finishes", "Best finishes"], ["pilots", "Pilots"], ["test", "Test a package"]], part,
-    p => { part = p; showParts(); }, "part");
+  const showParts = () => {
+    showSections($("results-panel"), $("results-parts"), [["cards", "Cards"], ["topcut", "Made the cut"],
+      ["finishes", "Best finishes"], ["pilots", "Pilots"], ["test", "Test a package"]], part, p => { part = p; showParts(); }, "part");
+    showCut();
+  };
   showParts();
+
+  // Made the cut: the cards the decks that made their event's top cut play most differently from those
+  // that missed it, over the period (the decks one by one, fetched the first time it's shown)
+  async function showCut() {
+    if (part !== "topcut") return;
+    const shownW = w;
+    $("topcut-lede").textContent = "Loading the tournament decks…";
+    let data;
+    try {
+      data = await getLists();
+    } catch {
+      $("topcut-lede").textContent = "Couldn't load the tournament decks. Please try again.";
+      return;
+    }
+    if (shownW !== w || part !== "topcut") return; // another period or part picked meanwhile
+    const groups = cutGroups(data, w);
+    const few = groups.find(g => g.decks < MIN_AVERAGE_DECKS);
+    $("topcut-legend").replaceChildren(...(few ? [] : vsLegend(groups)));
+    if (few) {
+      $("topcut-lede").textContent = `Too few ${lead} decks ${few.name} in the last ${period()} to compare `
+        + `(${decksText(few.decks)}; ${MIN_AVERAGE_DECKS} or more). Try a longer period.`;
+      $("topcut-rows").replaceChildren();
+      return;
+    }
+    const { more, less } = playedDifferently(...groups);
+    $("topcut-lede").textContent = `The cards whose share of decks differs most between ${lead} decks that made their `
+      + `event's top cut and those that missed it, in the last ${period()}. Faded: could well be chance.`;
+    $("topcut-rows").replaceChildren(...vsRows(groups, [["Decks that made the cut play more", more],
+      ["Decks that made the cut play less", less]], names));
+  }
 
   // A package of cards to test (one or more; in the URL): the decks one by one, fetched the first time
   let pkg = (params.get("package") ?? "").split(".").filter(Boolean).map(Number).filter(c => names[c] !== undefined);
@@ -1692,7 +1746,7 @@ function showResults(key, results, names, released, onPeriod) {
   function show() {
     setParams({ results: w === first ? null : results.windows[w] });
     chipRow($("results-windows"), results.windows.map((days, i) => [i, withCount(`Last ${periodName(days)}`, results.totals[i][0])]),
-      w, i => { w = i; show(); showPackage(); onPeriod(); });
+      w, i => { w = i; show(); showPackage(); showCut(); onPeriod(); });
 
     // The headline: how its decks do against every deck in these tournaments
     const [decks, games, wins, cutDecks, cuts, draws = 0] = results.totals[w];

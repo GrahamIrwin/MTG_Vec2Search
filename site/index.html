@@ -31,7 +31,7 @@
       --shadow-md: 0 2px 4px rgb(60 40 20 / .10), 0 10px 24px -8px rgb(60 40 20 / .28);
       --grain: .07;
       --backdrop: rgb(30 20 10 / .55);
-      --vs-public: #c07a12; --vs-tourney: #26804a; /* public against tournament decks (checked for color blindness) */
+      --vs-missed: #c07a12; --vs-made: #26804a; /* decks that missed the top cut, and made it (checked for color blindness) */
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
@@ -46,7 +46,7 @@
       --shadow-md: 0 2px 4px rgb(0 0 0 / .35), 0 14px 30px -10px rgb(0 0 0 / .7);
       --grain: .05;
       --backdrop: rgb(5 3 2 / .7);
-      --vs-public: #c4832a; --vs-tourney: #45a066;
+      --vs-missed: #c4832a; --vs-made: #45a066;
     }
 
     /* ---------- Base ---------- */
@@ -492,28 +492,25 @@
     .commander-art .pair img { width: 100%; }
     .theme-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 2px; }
     .sub-heading { font-size: 19px; margin: 26px 0 4px; }
-    /* Public decks against tournament decks: a row per card, a dot for each on a 0-100% track */
+    /* Decks that missed the top cut against those that made it: a row per card, a dot for each on a 0-100% track */
     .vs-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 4px; font-size: 15px; color: var(--ink-soft); }
     .vs-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
-    .vs-legend .public::before { border: 2px solid var(--vs-public); background: var(--paper); }
-    .vs-legend .topcut::before { background: var(--vs-tourney); border: 2px solid var(--vs-tourney); }
-    .vs-legend .tournament::before { width: 8px; height: 8px; margin: 0 8px 0 2px; background: var(--ink-soft); }
+    .vs-legend .missed::before { border: 2px solid var(--vs-missed); background: var(--paper); }
+    .vs-legend .made::before { background: var(--vs-made); border: 2px solid var(--vs-made); }
     .vs-rows { list-style: none; margin: 6px 0 0; padding: 0; }
-    .vs-rows li { display: grid; grid-template-columns: minmax(0, 13em) 1fr 10em; align-items: center; gap: 12px; padding: 3px 0; }
+    .vs-rows li { display: grid; grid-template-columns: minmax(0, 13em) 1fr 7em; align-items: center; gap: 12px; padding: 3px 0; }
     .vs-rows .term { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .vs-rows .group { display: block; margin: 10px 0 2px; font-size: 14px; color: var(--ink-soft); letter-spacing: .08em; text-transform: uppercase; }
     .vs-track { position: relative; height: 20px; margin: 0 7px; background: linear-gradient(to right, var(--rule) 1px, transparent 1px) 0 0 / 25% 100%; }
     .vs-track .span { position: absolute; top: 9px; height: 2px; background: var(--rule); }
     .vs-track .dot { position: absolute; top: 4px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; }
-    .vs-track .public { border: 2px solid var(--vs-public); background: var(--paper); }
-    .vs-track .topcut { background: var(--vs-tourney); }
-    .vs-track .tournament { top: 6px; width: 8px; height: 8px; margin-left: -4px; background: var(--ink-soft); box-shadow: 0 0 0 1.5px var(--paper); }
+    .vs-track .missed { border: 2px solid var(--vs-missed); background: var(--paper); }
+    .vs-track .made { background: var(--vs-made); }
+    .vs-rows li.faint > :not(.vs-track), .vs-rows li.faint .span { opacity: .5; } /* could well be chance */
+    .vs-rows li.faint .dot:not(:hover):not(:focus) { opacity: .5; }
     /* A dot's share pops up over it when pointed at, tapped or tabbed to; a wider target than the dot */
     .vs-track .dot { cursor: default; z-index: 1; }
     .vs-track .dot::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
-    /* the small tournament dot often sits on the top-cut one: only its own size, so the one under it can still
-       be pointed at around it */
-    .vs-track .dot.tournament::before { inset: 0; }
     .vs-track .dot:hover, .vs-track .dot:focus-visible { z-index: 3; outline: none; box-shadow: 0 0 0 3px var(--focus); }
     .vs-track .dot[data-tip]:hover::after, .vs-track .dot[data-tip]:focus::after {
       content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
@@ -905,6 +902,12 @@
             <div class="chips type-filter" id="missing-more-types" role="group" aria-label="Card type"></div>
             <div class="gallery" id="missing-more"></div>
             <div class="more-wrap"><button id="more-missing-more" class="btn-quiet" type="button" hidden>Show more</button></div>
+            <div id="deck-cut" hidden>
+              <h3 class="sub-heading">Made the cut, or missed it</h3>
+              <p class="muted deck-lede" id="deck-cut-lede"></p>
+              <div class="vs-legend" id="deck-cut-legend"></div>
+              <ul class="vs-rows" id="deck-cut-rows"></ul>
+            </div>
           </details>
           </div>
           <div data-view="similar">
@@ -1050,6 +1053,11 @@
                 <div class="gallery" id="wins-less"></div>
                 <div class="more-wrap"><button id="more-wins-less" class="btn-quiet" type="button" hidden>Show more</button></div>
               </div>
+              <div data-part="topcut">
+                <p class="muted deck-lede" id="topcut-lede"></p>
+                <div class="vs-legend" id="topcut-legend"></div>
+                <ul class="vs-rows" id="topcut-rows"></ul>
+              </div>
               <div data-part="finishes">
                 <p class="muted deck-lede" id="finishes-lede"></p>
                 <ol class="deck-list finish-list" id="finishes"></ol>
@@ -1103,12 +1111,6 @@
                 <button id="download-average" class="btn-quiet" type="button">Download .txt</button>
                 <a id="compare-average" class="btn-quiet" href="?deck">Compare your deck with it</a>
                 <span class="muted">Ready to paste into Moxfield, Archidekt or Deck recommendations.</span>
-              </div>
-              <div id="average-vs" hidden>
-                <h3 class="sub-heading" id="average-vs-heading"></h3>
-                <p class="muted deck-lede" id="average-vs-lede"></p>
-                <div class="vs-legend" id="average-vs-legend"></div>
-                <ul class="vs-rows" id="average-vs-rows"></ul>
               </div>
               <div id="average"></div>
             </details>

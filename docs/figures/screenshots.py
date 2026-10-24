@@ -69,11 +69,18 @@ with sync_playwright() as p:
     page.goto(f"{SITE}/?commander={DEREVI}&view=average&avg=topcut")
     page.wait_for_selector("#average .card")
     settle(page, 4000)
-    head = at(page.locator("#average-vs"))
-    save(page, "screenshot-commander", {"x": 0, "y": 200, "width": WIDTH, "height": head["y"] - 200})
-    # and what its top-cut decks play differently from its public ones
-    vs = at(page.locator("#average-vs"))
-    save(page, "screenshot-topcut", {"x": vs["x"] - 24, "y": vs["y"] - 8, "width": vs["width"] + 48, "height": vs["height"] + 24})
+    first = at(page.locator("#average .card").first)
+    save(page, "screenshot-commander", {"x": 0, "y": 200, "width": WIDTH, "height": first["y"] + first["height"] + 16 - 200})
+
+    # 3b. Its tournament results: the cards decks that made the cut play differently from those that missed it
+    page.goto(f"{SITE}/?commander={DEREVI}&view=tournaments")
+    page.wait_for_selector("#results-parts button")
+    page.click("#results-parts button:has-text('Made the cut')")
+    page.wait_for_selector("#topcut-rows li.group")
+    settle(page, 1500)
+    top, rows = at(page.locator("#results-parts")), at(page.locator("#topcut-rows"))
+    save(page, "screenshot-topcut", {"x": rows["x"] - 24, "y": top["y"] - 12, "width": rows["width"] + 48,
+                                     "height": rows["y"] + rows["height"] - top["y"] + 24})
 
     # 4. Tournaments: the last 30 days' highlights, the period's numbers and the commanders' table
     page.goto(f"{SITE}/?tournaments")

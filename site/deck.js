@@ -296,14 +296,19 @@ export function averageDeck(shard, members, lands) {
   };
 }
 
-// The cards two groups of decks play most differently (public decks and tournament ones): a and b
-// are {plays: Map card -> decks playing it, decks: how many}. Cards at least `least` of either
-// group plays, n each way. Returns { more, less }: [{card, a, b, aDecks, bDecks}] (a, b: shares),
-// the ones b plays more, by the most more first, and the ones it plays less, by the most less first
-export function playedDifferently(a, b, { least = 0.15, n = 6 } = {}) {
-  const rows = [...new Set([...a.plays.keys(), ...b.plays.keys()])].map(card => {
+// The cards two groups of decks play most differently (decks that missed the top cut and decks that
+// made it): a and b are {plays: Map card -> decks playing it, decks: how many}. Cards at least `least`
+// of either group plays, and `only` lets through, n each way. Returns { more, less }: [{card, a, b,
+// aDecks, bDecks, evidence}] (a, b: shares; evidence: how many standard errors apart they are, so
+// under 2 could well be chance), the ones b plays more, by the most more first, and the ones it plays
+// less, by the most less first
+export function playedDifferently(a, b, { least = 0.15, n = 6, only = () => true } = {}) {
+  const rows = [...new Set([...a.plays.keys(), ...b.plays.keys()])].filter(only).map(card => {
     const aDecks = a.plays.get(card) ?? 0, bDecks = b.plays.get(card) ?? 0;
-    return { card, aDecks, bDecks, a: aDecks / a.decks, b: bDecks / b.decks };
+    const p = (aDecks + bDecks) / (a.decks + b.decks);
+    const se = Math.sqrt(p * (1 - p) * (1 / a.decks + 1 / b.decks));
+    const row = { card, aDecks, bDecks, a: aDecks / a.decks, b: bDecks / b.decks };
+    return { ...row, evidence: se ? (row.b - row.a) / se : 0 };
   }).filter(r => Math.max(r.a, r.b) >= least);
   const by = sign => rows.filter(r => sign * (r.b - r.a) > 0).sort((x, y) => sign * ((y.b - y.a) - (x.b - x.a)) || x.card - y.card);
   return { more: by(1).slice(0, n), less: by(-1).slice(0, n) };
