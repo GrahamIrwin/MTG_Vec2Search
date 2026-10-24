@@ -98,6 +98,11 @@ time, a few KB after that).
      card, so the list is what decks like yours play more than usual rather than
      staples. **Cards to cut** are yours that similar decks rarely play, shown
      with their images like the cards to add.
+   - A commander with tournament results can be matched with its cEDH tournament lists instead
+     (buttons beside "compared with": `decks=tournament`, or `decks=topcut` for only those that
+     made the top cut, each with `MIN_AVERAGE_DECKS` decks or more): `tournamentPool()` turns
+     `results/lists/<key>.json` into a shard, each list named for its record, so cards to add and
+     cut and the similar decks (each with a Compare link) come from those lists.
    - A pasted Moxfield or Archidekt link is read by `worker/deck-link.js`, a
      small Cloudflare Worker: neither site's API can be called from another
      site's page (CORS). It fetches just that one deck and returns it as a

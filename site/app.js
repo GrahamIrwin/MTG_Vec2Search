@@ -661,6 +661,17 @@ async function showAgainst(target, mine, ownKey) {
   await Promise.all([showAgainstAdds(adds.map(tile)), showAgainstCuts(cuts.map(tile))]);
 }
 
+// A commander's tournament decks (results/lists/), or only those that made the top cut, as a shard
+// to match a deck with: each named for its record, its number in the lists file as its id
+let deckPool = params.get("decks") ?? "public"; // public, tournament or topcut
+const poolFiles = new Map();
+async function tournamentPool(key, topCut) {
+  if (!poolFiles.has(key)) poolFiles.set(key, getJson(`decks/results/lists/${key}.json`).catch(err => { poolFiles.delete(key); throw err; }));
+  const [{ cards, decks }, { windows }] = await Promise.all([poolFiles.get(key), getJson(`decks/results/${key}.json`)]);
+  return decodeShard({ cards, decks: decks.flatMap(([w, games, wins, cut, ...gaps], i) => (topCut && cut !== 2 ? []
+    : [[i, `Won ${wins} of ${games} games${cut === 2 ? ", made the top cut" : ""}`, periodName(windows[w]), gaps]])) });
+}
+
 // key: compare with this commander's decks instead of the deck's own commander
 async function findSimilar(key) {
   const input = $("decklist").value;
@@ -695,13 +706,28 @@ async function findSimilar(key) {
   if (!key) return deckMessage("Couldn't find any decks like this one yet.");
   const count = decks.commanders.find(c => c[0] === key)[1];
   const shard = decodeShard(await getJson(`decks/${key}.json`));
-  const similar = similarDecks(shard, mine);
-  const { adds, cuts, neighbors } = recommend(shard, similar, mine);
+  // Its commander's tournament results (another commander's say nothing about this deck)
+  const tourney = key === ownKey && shard.results ? await getJson(`decks/results/${key}.json`).catch(() => null) : null;
+  // The decks to match it with (?decks=): public ones, or its commander's tournament decks, or those
+  // that made the top cut, when there are MIN_AVERAGE_DECKS of them
+  const totals = tourney?.totals.at(-1);
+  const poolSizes = { public: count, ...(totals && { tournament: totals[0], topcut: totals[4] }) };
+  const pool = poolSizes[deckPool] >= MIN_AVERAGE_DECKS ? deckPool : "public";
+  setParams({ decks: pool === "public" ? null : pool });
+  let matched = shard;
+  if (pool !== "public") {
+    try {
+      matched = await tournamentPool(key, pool === "topcut");
+    } catch {
+      return deckMessage("Couldn't load the tournament decks. Please try again.");
+    }
+  }
+  const poolDecks = { public: "decks", tournament: "tournament decks", topcut: "top-cut tournament decks" }[pool];
+  const similar = similarDecks(matched, mine);
+  const { adds, cuts, neighbors } = recommend(matched, similar, mine);
 
   // Summary: which deck, whose decks it's compared with, and what wasn't recognized
   const lead = commanderNames(key, names);
-  // Its commander's tournament results (another commander's say nothing about this deck)
-  const tourney = key === ownKey && shard.results ? await getJson(`decks/results/${key}.json`).catch(() => null) : null;
   const tw = tourney && firstPeriod(tourney);
   const tested = tourney ? cardResults(tourney, tw) : [];
   tournament = tourney && { lead, period: periodName(tourney.windows[tw]),
@@ -709,8 +735,17 @@ async function findSimilar(key) {
   const summary = [];
   const note = text => summary.push(el("span", { className: "muted", textContent: text }));
   if (deck.site) summary.push(el("span", { className: "term-chip", textContent: `${deck.name} (${deck.site})` }));
-  summary.push(el("span", { className: "label", textContent: "compared with" }),
-    el("a", { className: "term", href: "?" + new URLSearchParams({ commander: key }), textContent: `${count.toLocaleString()} ${lead} decks` }));
+  summary.push(el("span", { className: "label", textContent: "compared with" }));
+  if (totals) { // which of its decks: public, tournament or top cut
+    const box = el("span", { className: "chips type-filter", role: "group", ariaLabel: "Compare with" });
+    chipRow(box, [["public", "Public decks"], ["tournament", "Tournament decks"], ["topcut", "Top cut"]].map(([s, label]) => {
+      const few = poolSizes[s] < MIN_AVERAGE_DECKS;
+      return [s, withCount(label, poolSizes[s]), few, few ? `Too few to compare with: ${MIN_AVERAGE_DECKS} decks or more` : ""];
+    }), pool, s => { deckPool = s; findSimilar(key).then(() => $("deck-results").scrollIntoView()); });
+    summary.push(box);
+  } else {
+    summary.push(el("a", { className: "term", href: "?" + new URLSearchParams({ commander: key }), textContent: `${count.toLocaleString()} ${lead} decks` }));
+  }
   if (ownKey && key !== ownKey && !files.has(ownKey)) {
     note(`There aren't enough ${commanderNames(ownKey, names)} decks yet, so these are the closest commander's.`);
   } else if (!ownKey) {
@@ -733,7 +768,7 @@ async function findSimilar(key) {
   const colors = (commanders.length ? commanders : [...parsed.cards]).reduce((m, c) => m | identity[c], 0);
   const picks = adds.filter(a => (identity[a.card] & ~colors) === 0).slice(0, MAX_ADDS)
     .map(a => ({ card: a.card, type: typeOf(a.card), detail: `in ${a.decks} of ${neighbors} decks`, bar: a.decks / neighbors, ...tournamentNote(a.card) }));
-  $("adds-lede").textContent = `What the ${neighbors} decks most like yours play that yours doesn't, favoring cards they play more than most ${lead} decks do.`;
+  $("adds-lede").textContent = `What the ${neighbors} ${poolDecks} most like yours play that yours doesn't, favoring cards they play more than most ${lead} ${poolDecks} do.`;
   await showAdds(picks);
 
   // Combos: Commander Spellbook's that this commander's decks play, in your deck or one card from it
@@ -769,8 +804,8 @@ async function findSimilar(key) {
   // Cuts only make sense against decks with your own commander: another's never play its cards
   $("cuts-section").hidden = key !== ownKey;
   const rare = cuts.filter(c => c.share < CUT_BELOW).slice(0, SHOW_CUTS);
-  $("cuts-lede").textContent = rare.length ? "Your cards that the most similar decks rarely play, the rarest first."
-    : "None: similar decks play almost all of your cards.";
+  $("cuts-lede").textContent = rare.length ? `Your cards that the most similar ${poolDecks} rarely play, the rarest first.`
+    : `None: similar ${poolDecks} play almost all of your cards.`;
   await showCuts(rare.map(c => ({ card: c.card, type: typeOf(c.card), detail: `in ${percent(c.share)} of similar decks`,
     bar: c.share, ...tournamentNote(c.card) })));
 
@@ -795,16 +830,16 @@ async function findSimilar(key) {
   // The similar decks, each opening to the cards they play that yours doesn't
   const have = new Set(mine);
   const items = foldCopies(similar.filter(r => r.similarity > 0), MAX_DECKS).map((r, i) => {
-    const meta = `${r.shared} cards in common · updated ${r.deck.updated}`
+    const meta = `${r.shared} cards in common · ${pool === "public" ? "updated" : "played in the last"} ${r.deck.updated}`
       + (r.copies ? ` · ${r.copies} near-${r.copies === 1 ? "copy" : "copies"}` : "");
     const details = el("details", {},
       el("summary", {},
         el("span", { className: "sim", textContent: `${Math.round(r.similarity * 100)}%` }),
         el("span", { className: "deck-name", textContent: r.deck.name || "Untitled deck" }),
-        openDeck(r.deck.id),
+        pool === "public" ? openDeck(r.deck.id) : compareLink(key, r.deck.id),
         el("span", { className: "deck-meta", textContent: meta })));
     details.addEventListener("toggle", () => {
-      const theirs = [...r.deck.cards].map(p => shard.cards[p]).filter(c => !have.has(c)).sort((a, b) => a - b);
+      const theirs = [...r.deck.cards].map(p => matched.cards[p]).filter(c => !have.has(c)).sort((a, b) => a - b);
       details.append(el("div", { className: "deck-body" },
         el("p", { textContent: theirs.length ? `${theirs.length} cards they play that you don't, most popular first:` : "They play no cards you don't." }),
         el("div", { className: "term-items" }, ...theirs.map(c => cardButton(c, names)))));
@@ -839,7 +874,9 @@ async function findSimilar(key) {
     against: "Their list against yours: what's in theirs and not yours, and in yours and not theirs, each ranked by how "
       + "the commander's tournament decks with it did against those without.",
     adds: "The decks most like yours (by the cards you share, rare ones counting for more) vote on cards. Cards any "
-      + "deck with this commander plays count for less, so the list is what decks like yours play more than usual.",
+      + "deck with this commander plays count for less, so the list is what decks like yours play more than usual. "
+      + "Tournament decks and Top cut (beside “compared with”) match it with the commander's cEDH tournament lists of "
+      + "the last 2 years, or only those that made the top cut, instead of public decks.",
     cuts: "Your cards that the decks most like yours rarely play.",
     combos: "Combos from Commander Spellbook that this commander's decks play: in your deck, or one card away (a card "
       + "in your colors).",
