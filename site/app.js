@@ -1308,28 +1308,52 @@ async function showCommander(key) {
     lands: new Set(cards.flatMap((c, p) => (index.columns.types[c] & landBit ? [p] : []))),
   })).catch(err => { tournamentShard = null; throw err; }));
   // The cards these tournament decks play most differently from the build's public decks (and
-  // bracket's), each a row with a dot for each on a 0–100% track
-  function showAverageVs(g, from, members, counts) {
+  // bracket's), each a row with a dot on a 0–100% track for its share of the public decks, of every
+  // tournament deck and of the top-cut ones (the middle dot tells a card every cEDH deck plays from one
+  // the decks that made the cut lean on more)
+  const OVERLAP = 0.04; // dots this close (of the 0–100% track) share a pop-up
+  function showAverageVs(g, from) {
     const plays = (cards, k) => new Map(cards.flatMap((c, p) => (k[p] ? [[c, k[p]]] : [])));
-    const pub = { plays: plays(shard.cards, playCounts(shard, g.members)), decks: g.members.length };
-    const { more, less } = playedDifferently(pub, { plays: plays(from.cards, counts), decks: members.length });
-    const these = averageFrom === "topcut" ? "top-cut decks" : "tournament decks";
+    const of = (s, members) => ({ plays: plays(s.cards, playCounts(s, members)), decks: members.length });
+    const all = from.decks.map((_, i) => i);
+    const cut = all.filter(i => from.decks[i].topCut === 2);
     const publicName = `public decks${g.all ? "" : ` (${g.name})`}`;
+    const groups = [{ key: "public", name: publicName, ...of(shard, g.members) },
+      { key: "tournament", name: "tournament decks", ...of(from, all) },
+      ...(cut.length >= MIN_AVERAGE_DECKS ? [{ key: "topcut", name: "top-cut decks", ...of(from, cut) }] : [])];
+    const picked = groups.find(x => x.key === averageFrom);
+    const { more, less } = playedDifferently(groups[0], picked);
+    const these = picked.name;
     const decksOf = k => `${k.toLocaleString()} ${k === 1 ? "deck" : "decks"}`;
     const pct = x => (x > 0 && x < 0.005 ? "<1%" : percent(x)); // one deck in 231 isn't none
+    const share = (x, card) => (x.plays.get(card) ?? 0) / x.decks;
+    const label = x => `${x.name[0].toUpperCase()}${x.name.slice(1)} (${x.decks.toLocaleString()})`;
     $("average-vs-heading").textContent = `What ${these} play differently`;
     $("average-vs-lede").textContent = `The cards whose share of decks differs most between ${lead}'s ${these} and its `
-      + `${publicName}, among those at least 15% of either play. Each card's shares: public → ${averageFrom === "topcut" ? "top cut" : "tournament"}.`;
-    $("average-vs-tourney").textContent = `${these[0].toUpperCase()}${these.slice(1)} (${members.length.toLocaleString()})`;
-    $("average-vs-public").textContent = `${publicName[0].toUpperCase()}${publicName.slice(1)} (${g.members.length.toLocaleString()})`;
-    const row = r => el("li", { title: `${names[r.card]}: ${pct(r.a)} of ${publicName} (${decksOf(r.aDecks)}), `
-        + `${pct(r.b)} of ${these} (${decksOf(r.bDecks)})` },
-      cardButton(r.card, names),
-      el("div", { className: "vs-track" },
-        el("span", { className: "span", style: `left:${Math.min(r.a, r.b) * 100}%;width:${Math.abs(r.b - r.a) * 100}%` }),
-        el("span", { className: "dot public", style: `left:${r.a * 100}%` }),
-        el("span", { className: "dot tourney", style: `left:${r.b * 100}%` })),
-      el("span", { className: "shares", textContent: `${pct(r.a)} → ${pct(r.b)}` }));
+      + `${publicName}, among those at least 15% of either play. Each card's shares: `
+      + `${groups.map(x => ({ public: "public", tournament: "tournament", topcut: "top cut" })[x.key]).join(" → ")}.`;
+    $("average-vs-legend").replaceChildren(...groups.map(x => el("span", { className: x.key, textContent: label(x) })));
+    const row = r => {
+      const shares = groups.map(x => share(x, r.card));
+      const low = Math.min(...shares), high = Math.max(...shares);
+      return el("li", {},
+        cardButton(r.card, names),
+        // the tournament dot is drawn last and smallest, so it shows even on top of the top-cut one
+        el("div", { className: "vs-track" },
+          el("span", { className: "span", style: `left:${low * 100}%;width:${(high - low) * 100}%` }),
+          ...[0, 2, 1].filter(i => i < groups.length).map(i => {
+            // pointing at (or tapping, or tabbing to) a dot pops up its share, and those of the dots on top of
+            // it (too close to point at apart, on a phone), kept inside the track at its ends
+            const tip = groups.flatMap((x, j) => (Math.abs(shares[j] - shares[i]) < OVERLAP
+              ? [`${label(x).replace(/ \(.*/, "")}: ${pct(shares[j])} (${decksOf(x.plays.get(r.card) ?? 0)})`] : [])).join("\n");
+            const side = shares[i] < 0.35 ? " tip-start" : shares[i] > 0.65 ? " tip-end" : ""; // opens inward
+            const dot = el("span", { className: `dot ${groups[i].key}${side}`, style: `left:${shares[i] * 100}%`, tabIndex: 0,
+              ariaLabel: `${names[r.card]}, ${tip.replaceAll("\n", ", ")}` });
+            dot.dataset.tip = tip;
+            return dot;
+          })),
+        el("span", { className: "shares", textContent: shares.map(pct).join(" → ") }));
+    };
     const group = (label, rows) => (rows.length ? [el("li", { className: "group", textContent: label }), ...rows.map(row)] : []);
     const scale = el("li", { className: "scale", ariaHidden: "true" }, el("span"),
       el("div", { className: "vs-track" }, ...["0%", "50%", "100%"].map(x => el("span", { textContent: x }))), el("span"));
@@ -1365,7 +1389,7 @@ async function showCommander(key) {
     const counts = playCounts(from, members);
     const share = p => counts[p] / members.length;
     $("average-vs").hidden = averageFrom === "public";
-    if (averageFrom !== "public") showAverageVs(g, from, members, counts);
+    if (averageFrom !== "public") showAverageVs(g, from);
     const average = averageDeck(from, members, landsOf);
     const basics = Math.max(0, 100 - leaders.length - average.spells.length - average.lands.length);
     const kinds = colors.length ? colors.map(c => BASIC_OF[c]) : ["Wastes"];
@@ -1489,7 +1513,8 @@ async function showCommander(key) {
       + "build and bracket picked above. Tournament decks: every cEDH tournament list of the last 2 years, wherever it "
       + `placed; Top cut: only those that made their event's top cut. Each needs ${MIN_AVERAGE_DECKS} decks or more. `
       + "With either, the cards those decks play most differently from the public decks: the 6 whose share of decks "
-      + "rose most and the 6 it fell most, among cards at least 15% of either plays.",
+      + "rose most and the 6 it fell most, among cards at least 15% of either plays, each with its share of the public, "
+      + "tournament and top-cut decks (point at a dot for its number of decks).",
     decklists: "Public decks from Moxfield and Archidekt, newest first, with their cards.",
   };
   const showViews = () => {

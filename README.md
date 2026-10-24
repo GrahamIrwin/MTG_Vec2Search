@@ -204,9 +204,12 @@ time, a few KB after that).
    With Tournament decks or Top cut picked, the average deck also shows **what those decks play
    differently** from the public decks of the build and bracket picked: the cards whose share of
    decks differs most (`playedDifferently()` in `site/deck.js`), the 6 they play most more and the 6
-   most less, among the cards at least 15% of either plays, each with a dot for each on a 0–100%
-   track and its two shares. Both sets of decks are already loaded for the average deck, so it's
-   only counting.
+   most less, among the cards at least 15% of either plays. Each card has three dots on a 0–100%
+   track, its share of the public decks, of every tournament deck and of the top-cut ones, so a card
+   every cEDH deck plays (the two tournament dots together) stands apart from one the decks that made
+   the cut lean on more. Pointing at, tapping or tabbing to a dot pops up its share and deck count
+   (dots too close to point at apart share one). Both sets of decks are already loaded for the
+   average deck, so it's only counting.
 
    ![What Derevi's top-cut decks play differently: far more Mindbreak Trap, Mana Vault, Force of Will, Mental Misstep, Silence and The One Ring than its public decks, and almost none of Seaside Citadel, Glacial Fortress, Counterspell and Hinterland Harbor](docs/images/screenshot-topcut.webp)
 

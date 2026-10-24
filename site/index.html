@@ -496,16 +496,32 @@
     .vs-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 4px; font-size: 15px; color: var(--ink-soft); }
     .vs-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
     .vs-legend .public::before { border: 2px solid var(--vs-public); background: var(--paper); }
-    .vs-legend .tourney::before { background: var(--vs-tourney); border: 2px solid var(--vs-tourney); }
+    .vs-legend .topcut::before { background: var(--vs-tourney); border: 2px solid var(--vs-tourney); }
+    .vs-legend .tournament::before { width: 8px; height: 8px; margin: 0 8px 0 2px; background: var(--ink-soft); }
     .vs-rows { list-style: none; margin: 6px 0 0; padding: 0; }
-    .vs-rows li { display: grid; grid-template-columns: minmax(0, 13em) 1fr 6.5em; align-items: center; gap: 12px; padding: 3px 0; }
+    .vs-rows li { display: grid; grid-template-columns: minmax(0, 13em) 1fr 10em; align-items: center; gap: 12px; padding: 3px 0; }
     .vs-rows .term { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .vs-rows .group { display: block; margin: 10px 0 2px; font-size: 14px; color: var(--ink-soft); letter-spacing: .08em; text-transform: uppercase; }
     .vs-track { position: relative; height: 20px; margin: 0 7px; background: linear-gradient(to right, var(--rule) 1px, transparent 1px) 0 0 / 25% 100%; }
     .vs-track .span { position: absolute; top: 9px; height: 2px; background: var(--rule); }
     .vs-track .dot { position: absolute; top: 4px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; }
     .vs-track .public { border: 2px solid var(--vs-public); background: var(--paper); }
-    .vs-track .tourney { background: var(--vs-tourney); }
+    .vs-track .topcut { background: var(--vs-tourney); }
+    .vs-track .tournament { top: 6px; width: 8px; height: 8px; margin-left: -4px; background: var(--ink-soft); box-shadow: 0 0 0 1.5px var(--paper); }
+    /* A dot's share pops up over it when pointed at, tapped or tabbed to; a wider target than the dot */
+    .vs-track .dot { cursor: default; z-index: 1; }
+    .vs-track .dot::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
+    /* the small tournament dot often sits on the top-cut one: only its own size, so the one under it can still
+       be pointed at around it */
+    .vs-track .dot.tournament::before { inset: 0; }
+    .vs-track .dot:hover, .vs-track .dot:focus-visible { z-index: 3; outline: none; box-shadow: 0 0 0 3px var(--focus); }
+    .vs-track .dot[data-tip]:hover::after, .vs-track .dot[data-tip]:focus::after {
+      content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+      white-space: pre; padding: 3px 9px; /* a line per dot */ border-radius: 6px; font-size: 14px; line-height: 1.4;
+      background: var(--ink); color: var(--paper); box-shadow: var(--shadow-sm); pointer-events: none;
+    }
+    .vs-track .dot.tip-start[data-tip]::after { left: -4px; transform: none; }
+    .vs-track .dot.tip-end[data-tip]::after { left: auto; right: -4px; transform: none; }
     .vs-rows .shares { font-size: 15px; color: var(--ink-soft); font-variant-numeric: tabular-nums; text-align: right; }
     .vs-rows .scale { padding: 0; }
     .vs-rows .scale .vs-track { height: auto; background: none; display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-faint); }
@@ -1091,7 +1107,7 @@
               <div id="average-vs" hidden>
                 <h3 class="sub-heading" id="average-vs-heading"></h3>
                 <p class="muted deck-lede" id="average-vs-lede"></p>
-                <div class="vs-legend"><span class="tourney" id="average-vs-tourney"></span><span class="public" id="average-vs-public"></span></div>
+                <div class="vs-legend" id="average-vs-legend"></div>
                 <ul class="vs-rows" id="average-vs-rows"></ul>
               </div>
               <div id="average"></div>
