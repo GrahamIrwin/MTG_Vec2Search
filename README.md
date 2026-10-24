@@ -29,7 +29,7 @@ time, a few KB after that).
    picked up automatically. The output, `site/index/`, is split so a search
    only fetches what it uses:
    - `meta.json`: the terms, card counts and tag aliases (for parsing queries)
-   - `columns.json`: per-card colors, types, mana value, formats and price (for filters)
+   - `columns.json`: per-card colors, types (and the one it is listed under: front face, lands first), mana value, formats and price (for filters)
    - `t/<term>.json`: which cards have each term (only the query's terms are fetched)
    - `c/<chunk>.json`: names and image ids, 256 cards each; cards are in
      popularity order, so top results come from the first few chunks

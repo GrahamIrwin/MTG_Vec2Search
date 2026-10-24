@@ -545,7 +545,7 @@ const MAX_DECKS = 30;
 const PAGE_DECKS = 10;
 const SHOW_CUTS = 16;
 const CUT_BELOW = 0.1; // played by under 10% of similar decks
-// A card counts as its first type here: an artifact creature is a creature
+// The order card types are listed in; build_index.py picks each card's (card_type)
 const TYPE_ORDER = ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land"];
 const TYPE_PLURALS = { Sorcery: "Sorceries" };
 const deckMessage = text => {
@@ -566,7 +566,7 @@ function loadDeckData() {
   return deckData;
 }
 const commanderNames = (key, names) => key.split("-").map(n => names[n]).join(" & ");
-const typeOf = card => TYPE_ORDER.find(t => index.columns.types[card] & (1 << index.types.indexOf(t))) ?? "Other";
+const typeOf = card => index.types[index.columns.kind[card]] ?? "Other";
 const cardButton = (card, names, label = names[card]) =>
   el("button", { type: "button", className: "term", textContent: label, onclick: async () => openCard((await cardInfo(card)).id, card) });
 

@@ -1,5 +1,5 @@
 """Self-check for card vectorization: python test_build_index.py"""
-from build_index import build_term_space, keyword_matcher, token_features, vectorize_card
+from build_index import build_term_space, card_type, keyword_matcher, token_features, vectorize_card
 
 card = {
     "name": "Test Dragon", "type_line": "Legendary Creature — Dragon", "cmc": 5, "colors": ["R"],
@@ -26,4 +26,10 @@ assert token_features("Create two 1/1 white Spirit creature tokens with flying."
 assert token_features("Create a 3/3 green and white Elephant creature token.", find_kw, {"Elephant"}) == \
     {"token:G", "token:W", "token:Creature", "token:Elephant"}
 assert token_features("Create a token that's a copy of target creature.", find_kw, set()) == set()
+
+# The type a card is listed under: its front face's, a land first
+assert card_type({"type_line": "Battle — Siege // Creature — Phyrexian Beast"}) == "Battle"  # Invasion of Ikoria
+assert card_type({"type_line": "Enchantment Land — Urza's Saga"}) == "Land"
+assert card_type({"type_line": "Artifact Creature — Golem"}) == "Creature"
+assert card_type({"type_line": "Sorcery // Land"}) == "Sorcery"
 print("ok")

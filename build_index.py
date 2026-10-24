@@ -117,6 +117,16 @@ def load_cards():
     return cards
 
 
+# The type a card is listed under: its front face's, a land first (Urza's Saga, Dryad Arbor),
+# then the first of these (an artifact creature is a creature)
+KIND_ORDER = ["Land", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment"]
+
+
+def card_type(card):
+    front = card.get("type_line", "").split("//")[0].split()
+    return next((t for t in KIND_ORDER if t in front), None)
+
+
 def subtypes(type_line):
     return [s for part in type_line.split("//") if "—" in part for s in part.split("—")[1].split()]
 
@@ -230,7 +240,7 @@ def load_printings():
 # === Step 4: Write the index ===
 # The index is split so a search only downloads what it needs (site/index/):
 #   meta.json      terms, card counts and tag names, for parsing queries (small, always loaded)
-#   columns.json   per-card filter data: colors, types, mana value, formats, price
+#   columns.json   per-card filter data: colors, types (and the one it's listed under), mana value, formats, price
 #   t/<term>.json  the cards with each term (one file per term, fetched when a query uses it)
 #   c/<chunk>.json name + Scryfall id (+ 1 when it has a back face to flip to) for each block of
 #                  CHUNK cards, fetched to show results
@@ -276,13 +286,14 @@ def build_index(cards, updated, tags, printings):
 
     cards = by_popularity(cards)
     postings = [[] for _ in terms]
-    columns = {"identity": [], "types": [], "cmc": [], "legal": [], "price": []}
+    columns = {"identity": [], "types": [], "kind": [], "cmc": [], "legal": [], "price": []}
     for i, c in enumerate(cards):
         for t in vectorize_card(c, index, find_keywords, tags_by_card.get(c.get("oracle_id"), ()), subtype_names):
             postings[t].append(i)
         type_words = set(c.get("type_line", "").replace("//", " ").split())
         columns["identity"].append(sum(1 << j for j, color in enumerate("WUBRG") if color in c.get("color_identity", [])))
         columns["types"].append(sum(1 << j for j, t in enumerate(FILTER_TYPES) if t in type_words))
+        columns["kind"].append(FILTER_TYPES.index(card_type(c)) if card_type(c) else -1)  # index in types
         cmc = c.get("cmc", 0)
         columns["cmc"].append(int(cmc) if cmc == int(cmc) else cmc)
         columns["legal"].append(sum(1 << j for j, f in enumerate(FORMATS)

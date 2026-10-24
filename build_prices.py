@@ -47,7 +47,7 @@ import zlib
 from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 
-from build_index import (HEADERS, PRINTINGS_FILE, SCRYFALL_BULK_LIST_URL, by_popularity, fetch, load_cards,
+from build_index import (HEADERS, PRINTINGS_FILE, SCRYFALL_BULK_LIST_URL, by_popularity, card_type, fetch, load_cards,
                          load_oracle_tags, write_json)
 
 HISTORY = "prices.jsonl.gz"
@@ -74,7 +74,6 @@ ALT_SHOWN = 6
 ALT_LEAST = 0.35  # an alternative has at least this much of the card's tags (weighted, as alternatives())
 ALT_TAG_MOST = 1500  # tags on more cards than this say too little to find alternatives by
 ALT_BLOCK = 256  # cards per prices/alts/ file
-CARD_TYPES = ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land"]
 REPRINT_DAYS = 120  # a printing this new is a reprint, when its card has printings older than
 REPRINT_OLDER = 180  # this many days before it
 REPRINT_BEFORE = 45  # an older printing's price before a reprint: this many days before it came out
@@ -776,7 +775,7 @@ def alternatives(cards, tags, prices):
             for n in held:
                 of[n].add(slug)
     weight = {t: math.log(len(cards) / len(held)) for t, held in have.items()}
-    kind = [next((t for t in CARD_TYPES if t in c.get("type_line", "")), "") for c in cards]
+    kind = [card_type(c) for c in cards]
     colors = [set(c.get("color_identity", [])) for c in cards]
     found = {}
     for n, price in prices.items():
