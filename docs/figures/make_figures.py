@@ -97,7 +97,7 @@ def pipeline(t):
          ("oracle_cards, default_cards", "downloaded fresh"), ("site/index/", "the search index")),
         (("Archidekt, Moxfield", "public Commander decks"), ("build_decks.py crawl", "one request a second"),
          ("decks.jsonl.gz", "deck-corpus release"), ("site/decks/", "commanders, builds, trends")),
-        (("edhtop16", "cEDH tournament results"), ("build_decks.py results", "two years of events"),
+        (("TopDeck.gg", "cEDH tournament results"), ("build_decks.py results", "two years of events"),
          ("results.jsonl.gz", "deck-corpus release"), ("site/decks/results/", "win rates, top cuts")),
         (("Scryfall, price archives", "every printing's price"), ("build_prices.py", "daily snapshots, backfill"),
          ("prices.jsonl.gz", "price-history release"), ("site/prices/", "charts, movers")),

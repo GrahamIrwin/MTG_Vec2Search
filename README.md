@@ -19,7 +19,7 @@ time, a few KB after that).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/pipeline-dark.svg">
-  <img alt="Scryfall, Archidekt and Moxfield, edhtop16 and price archives feed the scripts, which keep their data in data/ and the releases and build site/; GitHub Pages serves it, and the browser does the work" src="docs/images/pipeline-light.svg">
+  <img alt="Scryfall, Archidekt and Moxfield, TopDeck.gg and price archives feed the scripts, which keep their data in data/ and the releases and build site/; GitHub Pages serves it, and the browser does the work" src="docs/images/pipeline-light.svg">
 </picture>
 
 1. `build_index.py` downloads Scryfall's `oracle_cards`, `oracle_tags` and
@@ -212,15 +212,24 @@ time, a few KB after that).
    play it most often, grouped by what those decks are known for.
 
    **Tournament results**, for commanders with cEDH decklists on
-   [edhtop16](https://edhtop16.com) (whose results come from
-   [TopDeck.gg](https://topdeck.gg)), over the last 3, 6, 12 or 24 months:
-   - `build_decks.py results` keeps `results.jsonl.gz`: every tournament of 16
-     players or more from the last two years, each entry's commander, record,
-     standing, decklist link, cards and pilot. It fetches only the tournaments it
-     lacks, newest first (and the last 3 days' again, as results come in),
-     so it can stop and go on. Events without decklists (about 40%) are skipped,
-     and a year takes about 2 hours at 4 events at a time. Events fetched before
-     pilots were kept get just their pilots, a far quicker question.
+   [TopDeck.gg](https://topdeck.gg) (where most cEDH tournaments are run), over the last 3, 6, 12 or
+   24 months:
+   - `build_decks.py results` keeps `results.jsonl.gz`: every EDH tournament of 16 players or more
+     from the last two years with a decklist in it, each entry's commander, record, standing,
+     decklist link, cards and pilot, from [TopDeck.gg's API](https://topdeck.gg/docs/tournaments-v2)
+     (`fetch_results()`). It asks for a week of tournaments at a time, 6 seconds apart, from 3 days
+     before the newest it has (results and decklists come in after an event starts) to today, and
+     saves each week as it arrives, so it can stop and go on; `--days N` fetches the last N days
+     again. It's additive: a tournament it has is only replaced by a copy with as many decklists or
+     more. Entries without a decklist are skipped (they rarely say which commander either).
+   - It needs a TopDeck.gg API key (free, from its developer portal), which the API's terms ask
+     to credit with a visible link (the site's footer and tournament pages have one): in
+     `data/topdeck_key.txt` or the `TOPDECK_API_KEY` environment variable locally, and as the
+     `TOPDECK_API_KEY` repository secret for the daily crawl (`gh secret set TOPDECK_API_KEY`).
+   - The first two years came from [edhtop16](https://edhtop16.com), which gets them from TopDeck
+     too, until it stopped answering outside queries in October 2026. Pilots keep edhtop16's
+     numbers (each entry also has the player's TopDeck profile); a player new since gets the next
+     number, so tournaments should be fetched in one place at a time: the daily crawl.
    - `build_decks.py build` writes `results/<file name>.json` per commander:
      how many decks, games, wins and top cuts its decks had in each period,
      the same for the decks that play each card and for each pilot, and its
@@ -321,7 +330,7 @@ time, a few KB after that).
      (the highest place for the field's size), record against every deck's,
      what they play and how they do on it, and
      every deck they played, from `results/pilots/<block>.json` (64 players a
-     file, by edhtop16's number for them).
+     file, by their number: see `fetch_results()`).
    - **Favorite cards** (`pilot_cards()`): the cards in more of a pilot's decks
      than if their decks were like other decks of the same commanders, from 2
      of their decks or more, with their games won with each card and without.
@@ -533,7 +542,7 @@ and `node --test` (Node 24).
 ## Files
 
 - `scripts/build_index.py`: downloads data from Scryfall, vectorizes the cards, writes the index
-- `scripts/build_decks.py`: crawls Archidekt and Moxfield decks and edhtop16's tournament results, writes the per-commander deck files
+- `scripts/build_decks.py`: crawls Archidekt and Moxfield decks and TopDeck.gg's tournament results, writes the per-commander deck files
 - `scripts/build_prices.py`: keeps the price history of every printing (daily from Scryfall, backfilled from archives)
 - `scripts/serve.py`: serves `site/` locally
 - `tests/`: the scripts' and the site's self-checks
@@ -552,8 +561,8 @@ and `node --test` (Node 24).
 - `.github/workflows/crawl.yml`: daily price snapshot, deck crawl and tournament results, then a deploy
 
 Card data and images come from [Scryfall](https://scryfall.com), decklists from
-[Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com), tournament results
-from [edhtop16](https://edhtop16.com) and [TopDeck.gg](https://topdeck.gg). MTG Vec2Search is
+[Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com), tournament data provided by
+[TopDeck.gg](https://topdeck.gg) (its first two years through [edhtop16](https://edhtop16.com)). MTG Vec2Search is
 unofficial Fan Content permitted under the Fan Content Policy. Not
 approved/endorsed by Wizards. Portions of the materials used are property of
 Wizards of the Coast. ©Wizards of the Coast LLC.

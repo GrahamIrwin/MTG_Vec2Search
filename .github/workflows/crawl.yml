@@ -1,7 +1,7 @@
 name: Crawl decks
 
 # Adds public Commander decks from Archidekt and Moxfield to the deck corpus, and the latest cEDH
-# tournament results from edhtop16, which live on the "deck-corpus" release (too big for git), then
+# tournament results from TopDeck.gg, which live on the "deck-corpus" release (too big for git), then
 # redeploys the site with them (Trends needs fresh decks).
 on:
   schedule:
@@ -31,12 +31,15 @@ jobs:
           gh release download price-history --dir data --pattern prices.jsonl.gz || echo "No price history yet"
           python3 scripts/build_prices.py snapshot
         continue-on-error: true
-      # A day's tournaments take a few minutes; a failure here still lets the decks crawl
+      # The days' tournaments from TopDeck.gg (its API key is a repository secret) take a few minutes. A
+      # failure here marks the run failed, so it's seen, but the decks still crawl and everything uploads
       - run: python3 scripts/build_decks.py results --hours 0.25
-        continue-on-error: true
+        env:
+          TOPDECK_API_KEY: ${{ secrets.TOPDECK_API_KEY }}
       # Half the time on each site. The upload step runs even after a failed crawl: a failed crawl
       # keeps what it fetched (each deck is saved as it arrives)
-      - run: python3 scripts/build_decks.py crawl --hours 2.4 --no-upload
+      - if: ${{ !cancelled() }}
+        run: python3 scripts/build_decks.py crawl --hours 2.4 --no-upload
       - if: ${{ !cancelled() }}
         run: python3 scripts/build_decks.py crawl --site moxfield --hours 2.4 --no-upload
       # Merged with the release first: a local crawl may have uploaded since this one downloaded it.

@@ -36,7 +36,7 @@
 <line x1="459" y1="167" x2="494" y2="167" stroke="#8c7860" stroke-width="1.6" marker-end="url(#head)"/>
 <line x1="704" y1="167" x2="739" y2="167" stroke="#8c7860" stroke-width="1.6" marker-end="url(#head)"/>
 <rect x="20.0" y="220.0" width="200.0" height="62.0" rx="8" fill="#2b2119" stroke="#4a3929" stroke-width="1.2"/>
-<text x="120.0" y="248.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">edhtop16</text>
+<text x="120.0" y="248.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">TopDeck.gg</text>
 <text x="120.0" y="266.0" font-size="12" fill="#bba586" text-anchor="middle" font-weight="normal">cEDH tournament results</text>
 <rect x="265.0" y="220.0" width="190.0" height="62.0" rx="8" fill="#2b2119" stroke="#4a3929" stroke-width="1.2"/>
 <text x="360.0" y="248.0" font-size="14" fill="#ecdfc8" text-anchor="middle" font-weight="bold">build_decks.py results</text>

@@ -1,5 +1,5 @@
 """Crawl public Commander decks from Archidekt and Moxfield into decks.jsonl.gz, the deck corpus,
-and cEDH tournament results from edhtop16 into results.jsonl.gz, and turn them into site/decks/,
+and cEDH tournament results from TopDeck.gg into results.jsonl.gz, and turn them into site/decks/,
 the data behind "Find similar decks" and the commander pages.
 
     python scripts/build_decks.py crawl --hours 5     # resumable: stop and restart any time
@@ -11,7 +11,6 @@ the data behind "Find similar decks" and the commander pages.
     python scripts/build_decks.py build               # after build_index.py (uses its card numbers)
 """
 import argparse
-import base64
 import bisect
 import gzip
 import json
@@ -28,13 +27,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from build_index import ROOT, by_popularity, in_data, load_cards, load_oracle_tags, load_printings, write_json
 
 ARCHIDEKT = "https://archidekt.com/api"
 MOXFIELD = "https://api2.moxfield.com"
-EDHTOP16 = "https://edhtop16.com/api"
 CORPUS = "decks.jsonl.gz"
 HEADERS = {"User-Agent": "MTG_Vec2Search/1.0 (+https://github.com/grahamirwin/MTG_Vec2Search)",
            "Accept": "application/json", "Accept-Encoding": "gzip"}
@@ -55,16 +53,17 @@ _last = {}  # per site: when its next request may go out
 _lock = threading.Lock()
 
 
-def get_json(path, base=ARCHIDEKT, post=None):
-    """GET an Archidekt (or Moxfield) API path, or POST `post` (as JSON) to one, at most one request
-    per DELAY seconds to each site (across threads), retrying on errors."""
-    site = {MOXFIELD: "Moxfield", EDHTOP16: "edhtop16"}.get(base, "Archidekt")
+def get_json(path, base=ARCHIDEKT, post=None, headers=None):
+    """GET an Archidekt (or Moxfield, or TopDeck.gg) API path, or POST `post` (as JSON) to one, at most
+    one request per DELAY seconds to each site (TOPDECK_DELAY to TopDeck), across threads, retrying on
+    errors. headers: more to send (an API key)."""
+    site = {MOXFIELD: "Moxfield", TOPDECK: "TopDeck.gg"}.get(base, "Archidekt")
     sent = post and json.dumps(post).encode()
-    headers = {**HEADERS, "Content-Type": "application/json"} if post else HEADERS
+    headers = {**HEADERS, **({"Content-Type": "application/json"} if post else {}), **(headers or {})}
     for attempt in range(5):
         with _lock:
             now = time.time()  # one reading: a second, later one could make the wait negative
-            _last[base] = max(_last.get(base, 0) + DELAY, now)
+            _last[base] = max(_last.get(base, 0) + (TOPDECK_DELAY if base == TOPDECK else DELAY), now)
             wait = _last[base] - now
         time.sleep(wait)
         try:
@@ -209,25 +208,25 @@ def save_corpus(corpus, path=CORPUS):
     os.replace(path + ".tmp", path)
 
 
-# === Tournament results, from edhtop16 (whose decklists and results come from TopDeck.gg) ===
+# === Tournament results, from TopDeck.gg's API (where cEDH tournaments are run) ===
 # results.jsonl.gz: one cEDH tournament per line, like the deck corpus (the last copy wins):
 #   {id: TopDeck's tournament id, name, date, size: players, top_cut: players in the top cut (0: none),
-#    decklists: how many edhtop16 had when it was fetched (absent in the first ones fetched),
-#    entries: [[commander(s) ("A / B" for partners), standing, wins, losses, draws, decklist link,
-#               [card names], pilot (edhtop16's player number, 0: unknown), pilot's name, their TopDeck
-#               profile id ("": none)]]}, only the
-#               entries edhtop16 has a decklist for
+#    decklists: how many of its players gave one (absent in the first ones fetched),
+#    entries: [[commander(s) ("A / B" for partners, by name), standing, wins, losses, draws, decklist link,
+#               [card names], pilot (our player number, 0: unknown), pilot's name, their TopDeck
+#               profile id ("": none)]]}, only the entries with a decklist
+# The first two years came from edhtop16 (which gets them from TopDeck), whose player numbers are
+# kept: a player new since is numbered after the highest (fetch_results), so tournaments should be
+# fetched in one place at a time (the daily crawl), or two could number a new player apart.
 RESULTS = "results.jsonl.gz"
 RESULT_DAYS = 730
 MIN_EVENT = 16  # players: smaller events are few games against few decks
 REFETCH_DAYS = 3  # recent events are fetched again: results and decklists come in after they start
-FETCHERS = 4  # tournaments fetched at once: each takes edhtop16 a few seconds, and DELAY still spaces the requests
-TOURNAMENTS = """query($since: String, $after: String) {
-  tournaments(first: 1000, sortBy: DATE, after: $after, filters: {minDate: $since, minSize: %d}) {
-    edges { node { TID tournamentDate breakdown { entries } } } pageInfo { hasNextPage endCursor } } }""" % MIN_EVENT
-TOURNAMENT = """query($tid: String!) { tournament(TID: $tid) { name size topCut tournamentDate
-  entries { standing wins losses draws decklist commander { name } maindeck { name } player { id name topdeckProfile } } } }"""
-PILOTS = """query($tid: String!) { tournament(TID: $tid) { entries { standing player { id name topdeckProfile } } } }"""
+QUERY_DAYS = 7  # days of tournaments a query asks for
+TOPDECK = "https://topdeck.gg/api"
+TOPDECK_DELAY = 6.0  # seconds between its queries: whole tournaments at a time, which it limits more tightly
+TOPDECK_KEY = "topdeck_key.txt"  # in data/, if not in the environment's TOPDECK_API_KEY
+COLUMNS = ["name", "id", "decklist", "deckObj", "wins", "losses", "draws"]
 
 
 def piloted(tournament):
@@ -235,97 +234,91 @@ def piloted(tournament):
     return all(len(e) > 9 for e in tournament["entries"])
 
 
-def pilot(player):
-    """[edhtop16's number for a player, their name, their TopDeck profile ("": none)]: its ids are
-    base64 for "Player:<number>"."""
-    if not player:
-        return [0, "", ""]
-    return [int(base64.b64decode(player["id"]).decode().rpartition(":")[2]), (player["name"] or "").strip(),
-            player.get("topdeckProfile") or ""]
+def topdeck_key():
+    """The TopDeck.gg API key (free, from its developer portal): TOPDECK_API_KEY, or data/topdeck_key.txt"""
+    key = os.environ.get("TOPDECK_API_KEY", "").strip()
+    if not key and os.path.exists(TOPDECK_KEY):
+        with open(TOPDECK_KEY, encoding="utf-8") as f:
+            key = f.read().strip()
+    if not key:
+        raise SystemExit("No TopDeck.gg API key: make one (free) at https://topdeck.gg, then put it in "
+                         f"data/{TOPDECK_KEY} or the TOPDECK_API_KEY environment variable")
+    return key
 
 
-def edhtop16(query, **variables):
-    data = get_json("/graphql", EDHTOP16, {"query": query, "variables": variables}) or {}
-    if data.get("errors") or not data.get("data"):
-        raise RuntimeError(f"edhtop16 says: {data.get('errors')}")
-    return data["data"]
+def topdeck_record(t, pilots):
+    """A tournament from TopDeck's API as a results.jsonl.gz record, or None without a decklist in it.
+    pilots: {TopDeck profile id: our player number}; a player new to it is numbered after the highest."""
+    standings = t.get("standings") or []
+    entries = []
+    for standing, s in enumerate(standings, 1):
+        deck = s.get("deckObj") or {}
+        commanders, cards = sorted(deck.get("Commanders") or {}), list(deck.get("Mainboard") or {})
+        if not commanders or not cards:
+            continue
+        who = s.get("id") or ""
+        if who and who not in pilots:
+            pilots[who] = max(pilots.values(), default=0) + 1
+        listed = s.get("decklist") or ""
+        link = listed if re.match(r"https?://", listed) else f"https://topdeck.gg/deck/{t['TID']}/{who}" if who else ""
+        entries.append([" / ".join(commanders), s.get("standing") or standing, s.get("wins") or 0, s.get("losses") or 0,
+                        s.get("draws") or 0, link, cards, pilots.get(who, 0), (s.get("name") or "").strip(), who])
+    if not entries:
+        return None
+    return {"id": t["TID"], "name": (t.get("tournamentName") or "").strip(),
+            "date": datetime.fromtimestamp(t["startDate"], timezone.utc).date().isoformat(), "size": len(standings),
+            "top_cut": t.get("topCut") or 0, "decklists": sum(bool(s.get("decklist")) for s in standings), "entries": entries}
 
 
-def fetch_results(hours=None, path=RESULTS, today=None):
-    """Bring results.jsonl.gz up to date with edhtop16: the tournaments of the last RESULT_DAYS days
-    with MIN_EVENT players or more and some decklists (by its commander breakdown, which the list
-    gives: about 40% have none) that it lacks or that have more or fewer decklists since, newest
-    first, and the last REFETCH_DAYS days' again; then just the pilots of those fetched without them
-    (a far quicker question for edhtop16). FETCHERS at a time; each is saved as it arrives, so it
-    can stop (`hours`, Ctrl+C) and go on later."""
+def fetch_results(hours=None, path=RESULTS, today=None, days=None):
+    """Bring results.jsonl.gz up to date with TopDeck.gg: EDH tournaments of MIN_EVENT players or more
+    with a decklist, QUERY_DAYS at a time, from REFETCH_DAYS before the newest it has (or `days` ago,
+    to fill in older ones; RESULT_DAYS with none) to today. Additive: a tournament it has is replaced
+    only by one with as many decklists or more. Each query's are saved as they arrive, so it can stop
+    (`hours`, Ctrl+C) and go on later. Tournaments over RESULT_DAYS old are dropped."""
+    key = topdeck_key()
     today = today or date.today()
-    since = (today - timedelta(RESULT_DAYS)).isoformat()
-    results = {i: t for i, t in load_corpus(path).items() if t["date"] >= since}
+    oldest = today - timedelta(RESULT_DAYS)
+    results = {i: t for i, t in load_corpus(path).items() if t["date"] >= oldest.isoformat()}
     save_corpus(results, path)  # without tournaments now too old
-    listed, after = [], None
-    while True:
-        page = edhtop16(TOURNAMENTS, since=since, after=after)["tournaments"]
-        listed += [e["node"] for e in page["edges"]]
-        if not page["pageInfo"]["hasNextPage"]:
-            break
-        after = page["pageInfo"]["endCursor"]
-    recent = (today - timedelta(REFETCH_DAYS)).isoformat()
-    decklists = {t["TID"]: sum(b["entries"] for b in t.get("breakdown") or []) for t in listed}
-    todo = sorted((t for t in listed if decklists[t["TID"]] and (
-        t["TID"] not in results or t["tournamentDate"][:10] >= recent
-        or results[t["TID"]].get("decklists", decklists[t["TID"]]) != decklists[t["TID"]])),
-        key=lambda t: t["tournamentDate"], reverse=True)
-    whole = {t["TID"] for t in todo}
-    pilots_only = {i for i, t in results.items() if i not in whole and not piloted(t)}
-    todo += sorted((t for t in listed if t["TID"] in pilots_only), key=lambda t: t["tournamentDate"], reverse=True)
-    print(f"{len(results):,} tournaments in {path}; edhtop16 has {len(listed):,} since {since} "
-          f"({sum(not n for n in decklists.values()):,} without decklists), fetching {len(whole):,} "
-          f"and the pilots of {len(todo) - len(whole):,}", flush=True)
+    pilots = {e[9]: e[7] for t in results.values() for e in t["entries"] if len(e) > 9 and e[9] and e[7]}
+    newest = max((t["date"] for t in results.values()), default=None)
+    start = today - timedelta(days) if days else date.fromisoformat(newest) - timedelta(REFETCH_DAYS) if newest else oldest
+    start = max(start, oldest)
+    queries = -(-((today - start).days + 1) // QUERY_DAYS)
+    print(f"{len(results):,} tournaments in {path}; asking TopDeck.gg for {start} to {today} ({queries:,} "
+          f"{'query' if queries == 1 else 'queries'})", flush=True)
     deadline = time.time() + hours * 3600 if hours else float("inf")
-    start, fetched = time.time(), [0]
-    lock, stop = threading.Lock(), threading.Event()  # Ctrl+C: requests out finish, but nothing more is saved
-    jobs = iter(todo)
+    began, fetched, asked = time.time(), 0, 0
+    midnight = lambda day: int(datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp())
     with open(path, "ab") as out:
-        def work():
-            for t in jobs:
-                if time.time() > deadline or stop.is_set():
-                    return
-                got = edhtop16(PILOTS if t["TID"] in pilots_only else TOURNAMENT, tid=t["TID"])["tournament"]
-                if not got:
-                    continue
-                if t["TID"] in pilots_only:  # each pilot to their entry, by standing
-                    who = {e["standing"]: pilot(e.get("player")) for e in got["entries"]}
-                    record = results[t["TID"]]
-                    record = {**record, "entries": [e[:7] + who.get(e[1], [0, "", ""]) for e in record["entries"]]}
-                else:
-                    record = {
-                        "id": t["TID"], "name": got["name"], "date": got["tournamentDate"][:10], "size": got["size"],
-                        "top_cut": got["topCut"] or 0, "decklists": decklists[t["TID"]],
-                        "entries": [[(e["commander"] or {}).get("name") or "", e["standing"], e["wins"], e["losses"], e["draws"],
-                                     e["decklist"] or "", [c["name"] for c in e["maindeck"]], *pilot(e.get("player"))]
-                                    for e in got["entries"] if e["maindeck"]]}
-                with lock:
-                    if stop.is_set():
-                        return
-                    results[t["TID"]] = record
-                    out.write(gzip.compress((json.dumps(record, separators=(",", ":")) + "\n").encode()))
-                    out.flush()
-                    fetched[0] += 1
-                    print(f"  {record['date']}  {record['name'][:50]:<50}  {record['size']:>4} players, "
-                          f"{len(record['entries']):>4} decklists  [{fetched[0]:,}/{len(todo):,}]", flush=True)
-        threads = [threading.Thread(target=work, daemon=True) for _ in range(FETCHERS)]
-        for thread in threads:
-            thread.start()
         try:
-            for thread in threads:
-                while thread.is_alive():
-                    thread.join(1)  # with a timeout, so Ctrl+C gets through on Windows
+            for first in (start + timedelta(QUERY_DAYS * q) for q in range(queries)):
+                if time.time() > deadline:
+                    break
+                last = min(first + timedelta(QUERY_DAYS - 1), today)
+                got = get_json("/v2/tournaments", TOPDECK, {
+                    "game": "Magic: The Gathering", "format": "EDH", "start": midnight(first),
+                    "end": midnight(last + timedelta(1)) - 1, "participantMin": MIN_EVENT, "columns": COLUMNS,
+                }, headers={"Authorization": key}) or []
+                asked += 1
+                new = 0
+                for t in got:
+                    record = topdeck_record(t, pilots)
+                    old = results.get(record and record["id"])
+                    if not record or old and len(old["entries"]) > len(record["entries"]):
+                        continue  # nothing to go on, or fewer decklists than the copy it has
+                    results[record["id"]] = record
+                    out.write(gzip.compress((json.dumps(record, separators=(",", ":")) + "\n").encode()))
+                    new += 1
+                out.flush()
+                fetched += new
+                print(f"  {first} to {last}: {len(got):,} tournaments, {new:,} with decklists  [{asked:,}/{queries:,}]",
+                      flush=True)
         except KeyboardInterrupt:
-            with lock:  # waits out a tournament being written, and no thread writes another
-                stop.set()
             print("\nStopped. Everything fetched so far is saved.", flush=True)
     save_corpus(results, path)
-    print(f"Done in {duration(time.time() - start)}: fetched {fetched[0]:,} tournaments; {len(results):,} in {path}, "
+    print(f"Done in {duration(time.time() - began)}: {fetched:,} tournaments from TopDeck.gg; {len(results):,} in {path}, "
           f"{sum(len(t['entries']) for t in results.values()):,} decklists.", flush=True)
 
 
@@ -614,7 +607,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #              of the decks that play it (less draws), one window after another; top: the newest finishes in the
 #              top TOP_FINISH, [date, event, players, standing, wins, losses, draws, decklist link,
 #              pilot, pilot's name, the deck's number in results/lists/]; pilots: every pilot of its decks, [pilot, name, totals one window
-#              after another], most decks first (pilot: edhtop16's player number);
+#              after another], most decks first (pilot: our player number, see RESULTS);
 #              field: the totals of every tournament deck (with draws, a deck wins less than a
 #              quarter of its games, so this is what a commander's decks are measured against)
 #   results/lists/<card>.json  a commander's tournament decks one by one, fetched to test a package
@@ -624,7 +617,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 #   results/pilots.json  every pilot, for finding one by name or commander: see pilot_index()
 #   results/pilots/<block>.json  for the pilots numbered in a block of PILOT_BLOCK: {pilot: [name,
 #              [[date, event, players, top cut (players; 0: none), standing, wins, losses, draws, commander file name ("": not
-#              known), commander as edhtop16 writes it, decklist link, its number in results/lists/
+#              known), commander as results.jsonl.gz writes it, decklist link, its number in results/lists/
 #              (-1: none)]], newest first, the cards they like (see pilot_cards), TopDeck profile id]}
 #   results/ranking.json  the pilots with RANKED_DECKS tournament decks or more: windows as above, and
 #              pilots: [pilot, name, totals one window after another], most decks first
@@ -780,7 +773,7 @@ def card_numbers(cards):
 
 
 def commander_key(lead, number):
-    """A commander file name from edhtop16's "A / B", or None for a commander not in the card index"""
+    """A commander file name from a results entry's "A / B", or None for a commander not in the card index"""
     leads = [number.get(n.lower()) for n in lead.split(" / ")] if lead else [None]
     return None if None in leads else "-".join(str(n) for n in sorted(leads))
 
@@ -1224,8 +1217,11 @@ if __name__ == "__main__":
     c.add_argument("--rate", type=float, default=1 / DELAY, help="requests a second (default: %(default)g)")
     c.add_argument("--no-upload", action="store_true",
                    help="don't merge with and upload to the deck-corpus release when the crawl stops")
-    r = sub.add_parser("results", help="download the last two years' cEDH tournament results from edhtop16")
+    r = sub.add_parser("results", help="download the last two years' cEDH tournament results from TopDeck.gg "
+                                       "(needs its API key: see topdeck_key)")
     r.add_argument("--hours", type=float, help="stop after this long")
+    r.add_argument("--days", type=int, help="fetch the tournaments of the last this many days again (to fill in "
+                                             "older ones), not just those since the newest it has")
     sub.add_parser("share", help="merge with the release, upload the corpus, crawl state and results, and deploy")
     sub.add_parser("build", help="write site/decks/ from the corpus")
     args = p.parse_args()
@@ -1235,7 +1231,7 @@ if __name__ == "__main__":
         crawl(args.per_commander, args.only, args.hours, args.top, upload=not args.no_upload, site=args.site,
               bracket=args.bracket)
     elif args.cmd == "results":
-        fetch_results(args.hours)
+        fetch_results(args.hours, days=args.days)
     elif args.cmd == "share":
         state = json.load(open(STATE, encoding="utf-8")) if os.path.exists(STATE) else {}
         sys.exit(0 if share(load_corpus(), state) else 1)

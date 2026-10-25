@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))  # the scripts tested
 import build_decks
@@ -212,41 +212,48 @@ with tempfile.TemporaryDirectory() as tmp:
     assert abs(evidence - 0.1 / (2 * 0.2375 * 0.7625 / 200) ** 0.5) < 1e-9
     assert overall[8][0] == [2, 0, 0.0, 0.0]
 
-    # Results from a fake edhtop16: events without decklists aren't fetched, nor ones fetched before
-    # unless their decklists changed in number (or they're recent), and two years back is the limit
-    listed = [{"TID": "new", "tournamentDate": "2026-09-20T00:00:00Z", "breakdown": [{"entries": 2}]},
-              {"TID": "none", "tournamentDate": "2026-09-01T00:00:00Z", "breakdown": []},
-              {"TID": "same", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 1}]},
-              {"TID": "more", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 3}]},
-              {"TID": "unpiloted", "tournamentDate": "2026-08-01T00:00:00Z", "breakdown": [{"entries": 1}]}]
+    # Results from a fake TopDeck.gg: a week a query, from 3 days before the newest tournament it has;
+    # a player keeps their number and a new one gets the next; entries without a decklist, tournaments
+    # without one, and a copy with fewer decklists than the one it has are left out; two years back is the limit
+    def player(name, who, cards=("Bolt",), commanders=("Lead",), decklist="text"):
+        return {"name": name, "id": who, "wins": 3, "losses": 1, "draws": 0, "decklist": decklist,
+                "deckObj": {"Commanders": {c: {"count": 1} for c in commanders}, "Mainboard": {c: {"count": 1} for c in cards}}}
+    noon = lambda day: int(datetime(2026, 9, day, 12, tzinfo=timezone.utc).timestamp())
+    week = [{"TID": "new", "tournamentName": " Event ", "startDate": noon(30), "topCut": 4, "standings": [
+                player(" Ann ", "td1", commanders=("Tymna", "Kraum")), player("Bo", "tdNew", decklist="https://moxfield.com/decks/x"),
+                {"name": "Cy", "id": "td3", "wins": 1, "losses": 3, "draws": 0, "decklist": None, "deckObj": None}]},
+            {"TID": "none", "tournamentName": "No lists", "startDate": noon(29), "standings": [{"name": "Di", "id": "td4"}]},
+            {"TID": "same", "tournamentName": "Fewer now", "startDate": noon(28), "standings": []}]
     asked = []
 
-    def fake_edhtop16(query, **variables):
-        if "tid" not in variables:
-            return {"tournaments": {"edges": [{"node": t} for t in listed], "pageInfo": {"hasNextPage": False}}}
-        asked.append(variables["tid"])
-        if "maindeck" not in query:  # just the pilots
-            return {"tournament": {"entries": [{"standing": 1, "player": {"id": "UGxheWVyOjk=", "name": "Cy", "topdeckProfile": "tdC"}}]}}
-        played = {"commander": {"name": "Lead"}, "standing": 1, "wins": 3, "losses": 1, "draws": 0, "decklist": "x",
-                  "maindeck": [{"name": "Bolt"}], "player": {"id": "UGxheWVyOjQyNzI=", "name": " Ann ", "topdeckProfile": "td1"}}
-        unlisted = {"commander": None, "standing": 2, "wins": 2, "losses": 2, "draws": 0, "decklist": None, "maindeck": []}
-        return {"tournament": {"name": "Event", "tournamentDate": "2026-09-20T00:00:00Z", "size": 20, "topCut": 4,
-                               "entries": [played, unlisted]}}
+    def fake_get_json(path, base, post=None, headers=None):
+        asked.append((path, base, post, headers))
+        return week if len(asked) == 1 else []
     path = os.path.join(tmp, "results.jsonl.gz")
-    save_corpus({"same": {"id": "same", "date": "2026-08-01", "decklists": 1, "entries": [["Lead", 1, 3, 1, 0, "x", [], 1, "A", ""]]},
-                 "unpiloted": {"id": "unpiloted", "name": "Old", "date": "2026-08-01", "size": 20, "decklists": 1, "entries": [["Lead", 1, 3, 1, 0, "x", []]]},
-                 "more": {"id": "more", "date": "2026-08-01", "decklists": 1, "entries": []},
+    save_corpus({"same": {"id": "same", "date": "2026-09-28", "decklists": 1, "entries": [["Lead", 1, 3, 1, 0, "x", [], 4272, "Ann", "td1"]]},
                  "old": {"id": "old", "date": "2024-01-01", "entries": []}}, path)
-    real_edhtop16, build_decks.edhtop16 = build_decks.edhtop16, fake_edhtop16
+    real_get_json, build_decks.get_json = build_decks.get_json, fake_get_json
+    os.environ["TOPDECK_API_KEY"] = "key"
     try:
         build_decks.fetch_results(path=path, today=date(2026, 10, 4))
     finally:
-        build_decks.edhtop16 = real_edhtop16
-    assert sorted(asked) == ["more", "new", "unpiloted"], asked
+        build_decks.get_json = real_get_json
+        del os.environ["TOPDECK_API_KEY"]
+    assert [(p, b, h) for p, b, _, h in asked] == [("/v2/tournaments", build_decks.TOPDECK, {"Authorization": "key"})] * 2
+    first, second = (post for _, _, post, _ in asked)
+    assert first["start"] == int(datetime(2026, 9, 25, tzinfo=timezone.utc).timestamp()) and first["participantMin"] == 16
+    assert second["end"] == int(datetime(2026, 10, 5, tzinfo=timezone.utc).timestamp()) - 1  # through today
     got = load_corpus(path)
-    assert sorted(got) == ["more", "new", "same", "unpiloted"], got.keys()  # over two years old: dropped
-    assert got["new"]["entries"] == [["Lead", 1, 3, 1, 0, "x", ["Bolt"], 4272, "Ann", "td1"]] and got["new"]["decklists"] == 2
-    assert got["unpiloted"]["entries"] == [["Lead", 1, 3, 1, 0, "x", [], 9, "Cy", "tdC"]]  # just its pilots fetched
+    assert sorted(got) == ["new", "same"], got.keys()  # over two years old: dropped; no decklists: never kept
+    assert got["new"] == {"id": "new", "name": "Event", "date": "2026-09-30", "size": 3, "top_cut": 4, "decklists": 2, "entries": [
+        ["Kraum / Tymna", 1, 3, 1, 0, "https://topdeck.gg/deck/new/td1", ["Bolt"], 4272, "Ann", "td1"],
+        ["Lead", 2, 3, 1, 0, "https://moxfield.com/decks/x", ["Bolt"], 4273, "Bo", "tdNew"]]}, got["new"]
+    assert got["same"]["entries"][0][7] == 4272  # the copy with more decklists stays
+    try:
+        build_decks.topdeck_key()
+        raise AssertionError("no key should stop it")
+    except SystemExit:
+        pass
     with open(os.path.join(out, "trends.json"), encoding="utf-8") as f:
         trends = json.load(f)
     key, made, price, bracket, _ = trends["commanders"][0]

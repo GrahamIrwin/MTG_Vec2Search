@@ -622,7 +622,7 @@ export function risingCards(shard, members, recent) {
     .sort((a, b) => rise(b) - rise(a));
 }
 
-// === Tournament results (decks/results/<commander>.json: cEDH tournaments, from edhtop16) ===
+// === Tournament results (decks/results/<commander>.json: cEDH tournaments, from TopDeck.gg) ===
 // How the tournament decks that play each card did against the commander's other tournament
 // decks, over window w (an index into results.windows), for the cards at least MIN_RESULT_DECKS
 // decks play and at least as many don't. lift: how much more of their games those decks win (0.03

@@ -1572,7 +1572,7 @@ function vsRows(groups, sections, names) {
 }
 const VS_PAGE = 6;
 
-// === A commander's cEDH tournament results (decks/results/<key>.json, from edhtop16) ===
+// === A commander's cEDH tournament results (decks/results/<key>.json, from TopDeck.gg) ===
 const RESULT_PERIODS = { 90: "3 months", 180: "6 months", 365: "year", 730: "2 years" };
 const MIN_PERIOD_DECKS = 150; // the period shown first: the shortest with this many decks
 const SAME = 0.01; // a win rate this close to the field's is about the same
