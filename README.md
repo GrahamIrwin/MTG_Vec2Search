@@ -448,7 +448,10 @@ ran: replacing the release's files outright would lose what arrived meanwhile.
 To fill in commanders the corpus barely has, top up the most played ones (by
 EDHREC rank) to a number of decks each, several at a time. Run one crawl at a
 time: they share the corpus file, and Archidekt answers 429 (everything pauses)
-past about 3 requests a second.
+past about 3 requests a second. Moxfield sometimes lets 8 a second through, but often
+answers 429 at that rate too, so 2 or 3 gets more decks over a long run. For a long local
+crawl, pause the daily one so they don't crawl (and fetch tournaments) side by side:
+`gh workflow disable crawl.yml`, then `gh workflow enable crawl.yml` once it has uploaded.
 
 ```
 python scripts/build_decks.py crawl --top 3500 --per-commander 5 --rate 2    # enough for every commander first
