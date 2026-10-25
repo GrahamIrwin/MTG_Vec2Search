@@ -275,12 +275,11 @@ def fetch_results(hours=None, path=RESULTS, today=None, days=None):
     with a decklist, QUERY_DAYS at a time, from REFETCH_DAYS before the newest it has (or `days` ago,
     to fill in older ones; RESULT_DAYS with none) to today. Additive: a tournament it has is replaced
     only by one with as many decklists or more. Each query's are saved as they arrive, so it can stop
-    (`hours`, Ctrl+C) and go on later. Tournaments over RESULT_DAYS old are dropped."""
+    (`hours`, Ctrl+C) and go on later. Older tournaments stay (the build uses the last RESULT_DAYS days')."""
     key = topdeck_key()
     today = today or date.today()
     oldest = today - timedelta(RESULT_DAYS)
-    results = {i: t for i, t in load_corpus(path).items() if t["date"] >= oldest.isoformat()}
-    save_corpus(results, path)  # without tournaments now too old
+    results = load_corpus(path)
     pilots = {e[9]: e[7] for t in results.values() for e in t["entries"] if len(e) > 9 and e[9] and e[7]}
     newest = max((t["date"] for t in results.values()), default=None)
     start = today - timedelta(days) if days else date.fromisoformat(newest) - timedelta(REFETCH_DAYS) if newest else oldest
@@ -1092,7 +1091,10 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             usual[t] += k / total
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
-    standings = tournament_stats(results or {}, cards, today)
+    # The last RESULT_DAYS days' tournaments: results.jsonl.gz keeps older ones too
+    oldest = (today - timedelta(RESULT_DAYS)).isoformat()
+    results = {i: t for i, t in (results or {}).items() if t["date"] >= oldest}
+    standings = tournament_stats(results, cards, today)
     os.makedirs(os.path.join(out_dir, "results"))
     if standings:
         field = next(iter(standings.values()))["field"]
@@ -1106,7 +1108,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             "cards": kept,
             "stats": [[x for d, n, lift, evidence in overall[c] for x in (d, n, round(lift * 10000), round(evidence * 100))]
                       for c in kept]})
-    histories = pilot_histories(results or {}, cards, standings)
+    histories = pilot_histories(results, cards, standings)
     if histories:
         write_json(os.path.join(out_dir, "results", "pilots.json"), pilot_index(histories))
         liked = pilot_cards(results, cards, standings)

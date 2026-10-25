@@ -215,13 +215,13 @@ time, a few KB after that).
    [TopDeck.gg](https://topdeck.gg) (where most cEDH tournaments are run), over the last 3, 6, 12 or
    24 months:
    - `build_decks.py results` keeps `results.jsonl.gz`: every EDH tournament of 16 players or more
-     from the last two years with a decklist in it, each entry's commander, record, standing,
+     with a decklist in it (the build uses the last two years'; older ones stay in the file), each entry's commander, record, standing,
      decklist link, cards and pilot, from [TopDeck.gg's API](https://topdeck.gg/docs/tournaments-v2)
      (`fetch_results()`). It asks for a week of tournaments at a time, 6 seconds apart, from 3 days
      before the newest it has (results and decklists come in after an event starts) to today, and
      saves each week as it arrives, so it can stop and go on; `--days N` fetches the last N days
-     again. It's additive: a tournament it has is only replaced by a copy with as many decklists or
-     more. Entries without a decklist are skipped (they rarely say which commander either).
+     again. It's additive: nothing it has is dropped, and a tournament is only replaced by a copy
+     with as many decklists or more. Entries without a decklist are skipped (they rarely say which commander either).
    - It needs a TopDeck.gg API key (free, from its developer portal), which the API's terms ask
      to credit with a visible link (the site's footer and tournament pages have one): in
      `data/topdeck_key.txt` or the `TOPDECK_API_KEY` environment variable locally, and as the

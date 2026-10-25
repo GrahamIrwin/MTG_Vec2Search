@@ -214,7 +214,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Results from a fake TopDeck.gg: a week a query, from 3 days before the newest tournament it has;
     # a player keeps their number and a new one gets the next; entries without a decklist, tournaments
-    # without one, and a copy with fewer decklists than the one it has are left out; two years back is the limit
+    # without one, and a copy with fewer decklists than the one it has are left out; nothing it has is dropped
     def player(name, who, cards=("Bolt",), commanders=("Lead",), decklist="text"):
         return {"name": name, "id": who, "wins": 3, "losses": 1, "draws": 0, "decklist": decklist,
                 "deckObj": {"Commanders": {c: {"count": 1} for c in commanders}, "Mainboard": {c: {"count": 1} for c in cards}}}
@@ -244,7 +244,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert first["start"] == int(datetime(2026, 9, 25, tzinfo=timezone.utc).timestamp()) and first["participantMin"] == 16
     assert second["end"] == int(datetime(2026, 10, 5, tzinfo=timezone.utc).timestamp()) - 1  # through today
     got = load_corpus(path)
-    assert sorted(got) == ["new", "same"], got.keys()  # over two years old: dropped; no decklists: never kept
+    assert sorted(got) == ["new", "old", "same"], got.keys()  # over two years old: kept; no decklists: never kept
     assert got["new"] == {"id": "new", "name": "Event", "date": "2026-09-30", "size": 3, "top_cut": 4, "decklists": 2, "entries": [
         ["Kraum / Tymna", 1, 3, 1, 0, "https://topdeck.gg/deck/new/td1", ["Bolt"], 4272, "Ann", "td1"],
         ["Lead", 2, 3, 1, 0, "https://moxfield.com/decks/x", ["Bolt"], 4273, "Bo", "tdNew"]]}, got["new"]
