@@ -33,7 +33,7 @@ const searchExample = {
 };
 
 // Derevi, Empyrial Tactician: its builds, how much each card weighs, and public decks against top-cut ones
-const KEY = "2961";
+const KEY = String(names.indexOf("Derevi, Empyrial Tactician")); // card numbers change as Scryfall's list grows
 const shard = decodeShard(read(`decks/${KEY}.json`));
 const n = shard.decks.length;
 const landBit = 1 << index.types.indexOf("Land");

@@ -4,8 +4,10 @@ Needs the site built locally and served (python scripts/serve.py), and Playwrigh
     python docs/figures/screenshots.py [http://localhost:8000]
 """
 import io
+import json
 import os
 import sys
+import urllib.request
 
 from PIL import Image
 from playwright.sync_api import sync_playwright
@@ -14,11 +16,13 @@ SITE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "images")
 WIDTH = 1280
 
-# A public Derevi deck from the site's own deck file, as a pasted decklist
-DEREVI = 2961
-DECK = """async () => {
+# Derevi's card number in the site's index (it changes as Scryfall's list grows), and a public
+# Derevi deck from the site's own deck file, as a pasted decklist
+with urllib.request.urlopen(f"{SITE}/index/names.json") as res:
+    DEREVI = json.load(res).index("Derevi, Empyrial Tactician")
+DECK = """async key => {
   const names = await (await fetch('index/names.json')).json();
-  const shard = await (await fetch('decks/2961.json')).json();
+  const shard = await (await fetch(`decks/${key}.json`)).json();
   let p = 0;
   const cards = shard.decks[5][3].map(gap => shard.cards[p += gap]);
   return ['1 Derevi, Empyrial Tactician *CMDR*', ...cards.map(c => '1 ' + names[c])].join(String.fromCharCode(10));
@@ -57,7 +61,7 @@ with sync_playwright() as p:
 
     # 2. Deck recommendations for a Derevi deck, matched with top-cut tournament decks
     page.goto(f"{SITE}/?deck&decks=topcut")
-    page.fill("#decklist", page.evaluate(DECK))
+    page.fill("#decklist", page.evaluate(DECK, DEREVI))
     page.click("#deck-form button[type=submit]")
     page.wait_for_selector("#deck-results:not([hidden]) #adds .card")
     settle(page)
