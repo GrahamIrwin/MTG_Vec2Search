@@ -222,12 +222,13 @@ time, a few KB after that).
    whose tournament decks with both win more than those with only this card,
    over the page's results period, clear differences only, e.g. "26% → 38% win
    rate (412 decks play both, 300 only Jeska's Will)"), and a **synergy graph**:
-   the card in the middle, the cards it's played more with around it (thicker
-   lines: more), grey lines between those played together far more often than
-   its other partners are (the decks playing a card mostly share one build, so
-   most of its partners go together a little), red dotted lines between those
-   rarely played together (one or the other: two packages, two color builds),
-   and a "Won" node linked to the cards it wins more with. Picking a card in the
+   the card in the middle and around it the cards played with it clearly more than chance (a
+   correlation of 0.2 or more between being in a deck, the strongest 12; 8 on a phone). Every line is
+   such a correlation, the same width: green for played together, red for rarely together (one or
+   the other: two packages, two color builds), darker for stronger. Between the cards around it, only
+   pairs that stand out from the rest show (the decks playing a card mostly share one build, so most
+   of its partners go together a little). With tournament results, dashed lines join a "Won" node to
+   the cards whose decks win clearly more (green) or less (red) with them. Picking a card in the
    lists or the graph opens it. The page's **Trends** section charts the decks
    made per month, over all of the commander's decks.
 

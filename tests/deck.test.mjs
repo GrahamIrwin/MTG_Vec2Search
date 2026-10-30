@@ -402,16 +402,17 @@ test("a card's tournament results by month, against all the commander's decks; n
   assert.deepEqual(resultsByMonth({ cards: lists.cards, decks: lists.decks }, 7), []);
 });
 
-test("synergy graph: partners around the card, linked pairs side by side, the Won node to the right", () => {
+test("synergy graph: partners around the card, every line a correlation, the Won node to the right", () => {
   // 120 decks, card 100 in the first 60. Among those: 101 and 102 in the even ones, 103 and 104 in
   // every third, 105 in the first 20, 106 in the last 20; each also in 6 of the other 60. 107: every deck.
   const plays = i => i < 60
     ? [0, ...(i % 2 ? [] : [1, 2]), ...(i % 3 ? [] : [3, 4]), ...(i < 20 ? [5] : []), ...(i >= 40 ? [6] : []), 7]
     : [...(i % 10 ? [] : [1, 2, 3, 4, 5, 6]), 7];
   const shard = decodeShard({ cards: range(100, 108), decks: range(0, 120).map(i => [i, "", "", gaps(plays(i))]) });
-  // Tournament decks with 100: those with 105 win far more; 200 isn't a partner but wins more too
-  const lists = { cards: [100, 105, 200], decks: range(0, 40).map(i =>
-    listDeck(0, i < 20 ? 5 : 1, [0, ...(i < 20 ? [1] : []), ...(i < 12 || (i >= 20 && i < 23) ? [2] : [])])) };
+  // Tournament decks with 100: those with 105 win far more, those with 106 far less; 200 wins more too,
+  // but isn't played with 100 enough to be in the graph
+  const lists = { cards: [100, 105, 106, 200], decks: range(0, 40).map(i =>
+    listDeck(0, i < 20 ? 5 : 1, [0, ...(i < 20 ? [1] : [2]), ...(i < 12 || (i >= 20 && i < 23) ? [3] : [])])) };
 
   const graph = synergyGraph(shard, lists, 100, 0, { min: 10 });
   assert.deepEqual(graph, synergyGraph(shard, lists, 100, 0, { min: 10 })); // the same every time
@@ -419,19 +420,25 @@ test("synergy graph: partners around the card, linked pairs side by side, the Wo
   assert.equal(byCard.get(100).kind, "center");
   const ring = graph.nodes.filter(n => n.kind === "partner").map(n => n.card);
   assert.deepEqual([...ring].sort(), [101, 102, 103, 104, 105, 106]);
-  assert.deepEqual(graph.won.map(x => x.card).sort(), [105, 200]);
-  assert.equal(byCard.get(200).kind, "extra");
-  assert.ok(byCard.get(105).lift > 0);
+  assert.deepEqual(graph.won.map(x => x.card).sort(), [105, 106]); // only cards in the graph
+  assert.ok(!byCard.has(200) && !byCard.has(107)); // 107: in every deck, so no more with 100 than without
+  assert.ok(byCard.get(105).lift > 0 && byCard.get(106).lift < 0);
   const wonNode = byCard.get(null);
   assert.equal(wonNode.kind, "won");
-  assert.ok(graph.nodes.every(n => n === wonNode || n.kind === "extra" || n.x < wonNode.x));
-  assert.ok(byCard.get(105).x > byCard.get(100).x); // nearest the Won node
+  assert.ok(graph.nodes.every(n => n === wonNode || n.x < wonNode.x));
+  assert.ok(byCard.get(105).x > byCard.get(100).x && byCard.get(106).x > byCard.get(100).x); // nearest the Won node
+  // Spokes are each partner's correlation with the card: 101 is in half of 100's decks and few others
+  assert.ok(graph.edges.filter(e => e.kind === "spoke").every(e => e.strength >= 0.2 && e.strength <= 1));
+  // Every card correlated clearly enough with it (here 6), the strongest n at most
+  assert.deepEqual(synergyGraph(shard, null, 100, 0).nodes.length, 7);
+  assert.ok(synergyGraph(shard, null, 100, 0, { n: 3 }).nodes.length === 4);
   // Played together: 101 and 102, 103 and 104; 105 and 106 never are, an either/or
   const edge = (a, b) => graph.edges.find(e => (e.a === a && e.b === b) || (e.a === b && e.b === a));
   const linked = (a, b) => !!edge(a, b);
   assert.equal(edge(101, 102).kind, "together");
   assert.equal(edge(103, 104).kind, "together");
   assert.equal(edge(105, 106).kind, "apart");
+  assert.ok(edge(105, 106).strength < 0);
   assert.ok(graph.edges.filter(e => e.kind === "together").length <= 4); // not every pair: each card's strongest
   assert.ok(graph.edges.every(e => (e.kind === "spoke") === (e.a === 100)));
   assert.ok(ring.every(c => linked(100, c)));

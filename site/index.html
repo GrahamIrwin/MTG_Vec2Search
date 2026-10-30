@@ -656,7 +656,7 @@
     /* A card with a commander, in its details: over time, what it's played and wins more with, and a graph of those */
     /* Opened from a commander page: wider, the card staying in view, its details and the rest in tabs */
     #modal.wide { width: min(1180px, calc(100% - 32px)); }
-    #modal.wide .card-sheet-art { position: sticky; top: 0; align-self: start; }
+    @media (min-width: 701px) { #modal.wide .card-sheet-art { position: sticky; top: 0; align-self: start; } }
     .card-details { display: flex; flex-direction: column; gap: 6px; }
     .with-tabs { margin: 12px 0 6px; }
     .with-panel { min-width: 0; }
@@ -672,17 +672,18 @@
     .with-panel .price-chart text { font-size: 14px; }
     .synergy-legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 15px; color: var(--ink-soft); }
     .synergy-legend li { display: flex; align-items: center; gap: 8px; }
-    .synergy-legend svg { width: 34px; height: 10px; flex: none; overflow: visible; }
+    .synergy-legend svg { height: 10px; flex: none; overflow: visible; }
     .synergy svg { display: block; width: 100%; height: auto; touch-action: manipulation; }
-    :is(.synergy, .synergy-legend) .spoke { stroke: var(--link); stroke-linecap: round; opacity: .55; }
-    :is(.synergy, .synergy-legend) .link { stroke: var(--ink-faint); stroke-linecap: round; opacity: .55; }
-    :is(.synergy, .synergy-legend) .apart { stroke: var(--down); stroke-width: 2; stroke-dasharray: 1 5; stroke-linecap: round; }
-    :is(.synergy, .synergy-legend) .won-link { stroke: var(--up); stroke-width: 2; stroke-dasharray: 5 4; stroke-linecap: round; }
+    :is(.synergy, .synergy-legend) line { stroke-width: 3; stroke-linecap: round; }
+    :is(.synergy, .synergy-legend) .pos { stroke: var(--up); }
+    :is(.synergy, .synergy-legend) .neg { stroke: var(--down); }
+    :is(.synergy, .synergy-legend) .won-link { stroke-dasharray: 6 5; stroke-linecap: butt; }
     .synergy .node { cursor: pointer; outline: none; }
     .synergy .node .back { fill: var(--paper-3); }
     .synergy .node .ring { fill: none; stroke: var(--paper); stroke-width: 2; }
     .synergy .node.center .ring { stroke: var(--brass); stroke-width: 3; }
     .synergy .node.wins .ring { stroke: var(--up); stroke-width: 2.5; }
+    .synergy .node.loses .ring { stroke: var(--down); stroke-width: 2.5; }
     .synergy .node.won .back { fill: var(--accent-soft); }
     .synergy .node.won .ring { stroke: var(--up); stroke-width: 2; }
     .synergy .node.won text.inside { fill: var(--up); font-weight: bold; font-size: 16px; }

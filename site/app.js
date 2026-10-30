@@ -531,7 +531,7 @@ async function showCardWith(card) {
 
   const w = tournament?.w;
   // On a phone, fewer cards around it, so their names have room
-  const graphOf = () => synergyGraph(shard, lists, card, w ?? 0, $("modal").clientWidth < 560 ? { n: 6 } : {});
+  const graphOf = () => synergyGraph(shard, lists, card, w ?? 0, $("modal").clientWidth < 560 ? { n: 8 } : {});
   let graph = graphOf();
   // The tabs with something in them; the one picked last, or the first. Charts are drawn once they're
   // showing, at the size they're shown at
@@ -570,6 +570,7 @@ async function showCardWith(card) {
 // A synergy graph (synergyGraph's) in box: each card's art in a circle, named under it; lines from the card
 // to the ones its decks play more with it (thicker: more), between those played together, and from a "Won"
 // node to the cards its decks win more with. Pointing at a card says why it's there; picking it opens it.
+const shade = strength => (0.2 + 0.8 * Math.min(1, Math.abs(strength) / 0.6)).toFixed(2);
 function synergyChart(box, graph, { names, lead }, name) {
   box.replaceChildren();
   if (graph.nodes.length < 3) return;
@@ -577,19 +578,42 @@ function synergyChart(box, graph, { names, lead }, name) {
   const W = Math.max(260, box.clientWidth || 480), narrow = W < 520;
   box.classList.toggle("narrow", narrow);
   const size = narrow ? 19 : 30;
-  const [mx, my] = [size + 18, size + 10];
+  // Names go outward from the ring: beside the cards at its sides (room kept for them), above or below the
+  // rest. On a phone there's no room beside them: every name goes under its card
+  const charW = narrow ? 7.2 : 8.4, sideRoom = narrow ? 0 : 170;
+  const [mx, my] = [size + 12 + sideRoom, size + (narrow ? 22 : 30)];
   const xs = graph.nodes.map(n => n.x), ys = graph.nodes.map(n => n.y);
   const [x0, y0] = [Math.min(...xs), Math.min(...ys)];
   const [rx, ry] = [Math.max(0.1, Math.max(...xs) - x0), Math.max(0.1, Math.max(...ys) - y0)];
   let sx = (W - 2 * mx) / rx, sy = narrow ? 1.7 * sx : sx;
   const fit = Math.min(1, ((narrow ? 520 : 500) - 2 * my - 22) / (ry * sy));
   [sx, sy] = [sx * fit, sy * fit];
-  const H = Math.round(2 * my + 22 + ry * sy); // and room for the names under the bottom row
+  const H = Math.round(2 * my + ry * sy);
   const ox = (W - rx * sx) / 2;
   const at = n => [ox + (n.x - x0) * sx, my + (n.y - y0) * sy];
-  const radius = n => Math.round(size * (n.kind === "center" ? 1.3 : n.kind === "extra" ? 0.8 : 1));
-  const chars = narrow ? 12 : 20;
-  const short = t => (t.length > chars ? t.slice(0, chars - 1).trimEnd() + "…" : t);
+  const radius = n => Math.round(size * (n.kind === "center" ? 1.3 : 1));
+  const short = (t, chars) => (t.length > chars ? t.slice(0, Math.max(1, chars - 1)).trimEnd() + "…" : t);
+  // A name above or below a card has the room between it and the next card on the ring
+  const [cx, cy] = at(graph.nodes[0]);
+  const ring = graph.nodes.filter(n => n.kind === "partner");
+  const ringR = ring.length ? Math.hypot(...at(ring[0]).map((v, i) => v - [cx, cy][i])) : 0;
+  const between = ring.length > 1 ? 2 * ringR * Math.sin(Math.PI / ring.length) : W;
+  const label = (n, x, y, r) => {
+    const full = frontName(names[n.card]);
+    if (n.kind === "center") return svgEl("text", { "text-anchor": "middle", y: r + 18 }, short(full, narrow ? 14 : 22));
+    if (narrow) { // kept inside the edges
+      const shown = short(full, 11), half = shown.length * charW / 2;
+      return svgEl("text", { "text-anchor": "middle", x: Math.min(W - 2 - half - x, Math.max(2 + half - x, 0)).toFixed(1), y: r + 15 }, shown);
+    }
+    const d = Math.hypot(x - cx, y - cy) || 1, cos = (x - cx) / d;
+    // Beside it at the ring's sides; on the right, not toward the Won node
+    if (Math.abs(cos) >= 0.55 && !(cos > 0 && wonNode)) {
+      return svgEl("text", { "text-anchor": cos > 0 ? "start" : "end", x: (cos > 0 ? 1 : -1) * (r + 6), y: 5 },
+        short(full, Math.floor(sideRoom / charW)));
+    }
+    return svgEl("text", { "text-anchor": "middle", y: y < cy - 1 ? -(r + 8) : r + 18 },
+      short(full, Math.max(6, Math.floor((between - 8) / charW))));
+  };
   const byCard = new Map(graph.nodes.filter(n => n.card !== null).map(n => [n.card, n]));
   const wonNode = graph.nodes.find(n => n.kind === "won");
   const root = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group", "aria-label": `Cards ${lead} decks play more with ${name}` });
@@ -600,36 +624,44 @@ function synergyChart(box, graph, { names, lead }, name) {
     defs.append(clip);
   }
   root.append(defs);
+  // Every line the same width: green for together (or winning more), red for apart (or less), the
+  // stronger the more opaque
   const lines = [];
-  const line = (a, b, cls, width) => {
+  const line = (a, b, cls, strength) => {
     const [x1, y1] = at(a), [x2, y2] = at(b);
-    const node = svgEl("line", { class: cls, x1, y1, x2, y2, ...(width && { "stroke-width": width.toFixed(1) }) });
+    const node = svgEl("line", { class: `${cls} ${strength >= 0 ? "pos" : "neg"}`, x1, y1, x2, y2,
+      "stroke-opacity": shade(strength) });
     lines.push([node, a, b]);
     return node;
   };
-  const center = graph.nodes[0];
-  for (const e of graph.edges) {
-    root.append(line(byCard.get(e.a), byCard.get(e.b), e.kind === "together" ? "link" : e.kind,
-      e.kind === "spoke" ? 1.5 + 6 * e.strength : e.kind === "together" ? 1 + 4 * e.strength : 2.5));
-  }
-  const apart = graph.edges.some(e => e.kind === "apart"), together = graph.edges.some(e => e.kind === "together");
-  for (const x of graph.won) root.append(line(wonNode, byCard.get(x.card), "won-link"));
+  for (const e of graph.edges) root.append(line(byCard.get(e.a), byCard.get(e.b), "tie", e.strength));
+  // A win rate 5 points higher or lower shows about as strongly as a correlation of 0.3
+  for (const x of graph.won) root.append(line(wonNode, byCard.get(x.card), "won-link", 6 * x.lift));
 
   const say = n => {
-    if (n.kind === "won") return `Won: ${lead} tournament decks with ${name} win more often when they also play the cards linked to it.`;
+    if (n.kind === "won") return `Won: ${lead} tournament decks with ${name} win more often with the cards it has green lines to, `
+      + "less often with those it has red lines to.";
     if (n.kind === "center") return names[n.card];
     const bits = [n.base !== undefined && `${percent(n.base)} → ${percent(n.with)} of decks with ${name} (${decksText(n.decksWith)})`,
-      n.lift !== undefined && `tournament decks with both win more than those with only ${name}`].filter(Boolean);
+      n.lift !== undefined && `tournament decks with both win ${n.lift > 0 ? "more" : "less"} than those with only ${name}`].filter(Boolean);
     return `${names[n.card]}: ${bits.join("; ")}`;
   };
-  $("synergy-legend").replaceChildren(...[["spoke", `Played more with ${name} (thicker: more)`],
-    together && ["link", "Often played together"], apart && ["apart", "One or the other, rarely both"],
-    wonNode && ["won-link", "Its tournament decks win more with"]].filter(Boolean).map(([cls, text]) => {
-    const sample = svgEl("svg", { viewBox: "0 0 34 10", "aria-hidden": "true" });
-    sample.append(svgEl("line", { class: cls, x1: 2, y1: 5, x2: 32, y2: 5, ...(cls === "spoke" && { "stroke-width": 4 }),
-      ...(cls === "link" && { "stroke-width": 3 }) }));
-    return el("li", {}, sample, text);
-  }));
+  const has = test => graph.edges.some(test);
+  const lifts = graph.won.map(x => x.lift);
+  const sample = (cls, strengths) => {
+    const long = cls === "won-link" ? 28 : 10; // long enough to show its dashes
+    const svg = svgEl("svg", { viewBox: `0 0 ${(long + 2) * strengths.length + 4} 10`, "aria-hidden": "true",
+      style: `width: ${(long + 2) * strengths.length + 4}px` });
+    strengths.forEach((v, i) => svg.append(svgEl("line", { class: `${cls} ${v >= 0 ? "pos" : "neg"}`,
+      x1: 3 + (long + 2) * i, y1: 5, x2: 3 + (long + 2) * i + long, y2: 5, "stroke-opacity": shade(v) })));
+    return svg;
+  };
+  $("synergy-legend").replaceChildren(...[
+    ["tie", [0.15, 0.35, 0.6], "Played together (darker: more often)"],
+    has(e => e.strength < 0) && ["tie", [-0.15, -0.35, -0.6], "Rarely played together (one or the other)"],
+    lifts.some(l => l > 0) && ["won-link", [0.6], "Tournament decks win more with it"],
+    lifts.some(l => l < 0) && ["won-link", [-0.6], "Tournament decks win less with it"],
+  ].filter(Boolean).map(([cls, strengths, text]) => el("li", {}, sample(cls, strengths), text)));
   const note = "Point at a card for its numbers, or pick one to open it.";
   const noteBox = $("synergy-hint");
   const focus = n => {
@@ -648,7 +680,7 @@ function synergyChart(box, graph, { names, lead }, name) {
   focus(null);
   for (const n of graph.nodes) {
     const [x, y] = at(n), r = radius(n);
-    const g = svgEl("g", { class: `node ${n.kind}${n.kind === "partner" && n.lift !== undefined ? " wins" : ""}`,
+    const g = svgEl("g", { class: `node ${n.kind}${n.lift === undefined ? "" : n.lift > 0 ? " wins" : " loses"}`,
       transform: `translate(${x.toFixed(1)},${y.toFixed(1)})` });
     g.append(svgEl("title", {}, say(n)), svgEl("circle", { class: "back", r }));
     if (n.kind === "won") g.append(svgEl("text", { class: "inside", "text-anchor": "middle", y: 5.5 }, "Won"));
@@ -656,10 +688,7 @@ function synergyChart(box, graph, { names, lead }, name) {
       const img = svgEl("image", { x: -r * 1.4, y: -r, width: r * 2.8, height: r * 2, preserveAspectRatio: "xMidYMid slice",
         "clip-path": `url(#syn-clip-${r})` });
       cardInfo(n.card).then(info => img.setAttribute("href", artCrop(info.id)));
-      // Moved in from the edge, so a name there isn't cut off
-      const half = Math.min(chars, frontName(names[n.card]).length) * (narrow ? 3.6 : 4.2);
-      const tx = Math.min(W - 2 - half - x, Math.max(2 + half - x, 0));
-      g.append(img, svgEl("text", { "text-anchor": "middle", x: tx.toFixed(1), y: r + (narrow ? 15 : 18) }, short(frontName(names[n.card]))));
+      g.append(img, label(n, x, y, r));
     }
     g.append(svgEl("circle", { class: "ring", r }));
     if (n.kind !== "center") {

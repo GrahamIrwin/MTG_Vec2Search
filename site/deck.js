@@ -744,25 +744,29 @@ export function winsMoreWith(lists, card, w, { min = MIN_PAIR_DECKS } = {}) {
   }).sort((a, b) => b.lift - a.lift || a.card - b.card);
 }
 
-// A card's synergy graph: the card in the middle, its n strongest played-more-with partners on a ring
-// around it, and a "Won" node (card null) to the right, linked to the cards it wins more with (won:
-// evidence 2 or more, up to MAX_WON; ones that aren't partners stand in a column by it). edges: {a, b,
-// strength, kind}: "spoke", the card to each partner (strength: how far from all decks' share to every
-// deck, (with - base) / (1 - base)); "together", partners played together far more than the card's
-// other partners are (their phi among the decks playing the card, at least LINK and STAND_OUT above the
-// typical pair's: the decks playing a card mostly share one build, so most partners go together
-// somewhat), each partner's TOGETHER_LINKS strongest at most; "apart", partners rarely played together
-// (phi APART or less: an either/or, like two packages or two color builds; strength: -phi), the clearest
-// TOGETHER_LINKS a partner at most. The Won
-// node's links are `won`'s cards. The layout is the same for the same data (no
+// A card's synergy graph: the card in the middle, and on a ring around it the cards played with it
+// clearly more than chance (their phi with it, over all the commander's decks, PARTNER_PHI or more; the
+// strongest n). Every line is a phi, the correlation between two cards being in a deck: positive, played
+// together; negative, rarely. edges: {a, b, strength: phi, kind}: "spoke", the card to each partner;
+// "together", partners played together far more than the card's other partners are (their phi among the
+// decks playing the card, at least LINK and STAND_OUT above the typical pair's: those decks mostly share
+// one build, so most partners go together a little), each partner's TOGETHER_LINKS strongest at most;
+// "apart", partners rarely played together (APART or less: an either/or, like two packages or two color
+// builds), the clearest TOGETHER_LINKS a partner at most. With tournament results, a "Won" node (card
+// null) to the right, linked to the partners whose tournament decks win clearly more or less with them
+// (won: [{card, lift}], evidence 2 or more either way). The layout is the same for the same data (no
 // randomness), in a 0..1 box: partners linked to each other sit side by side, won ones nearest the Won
-// node. nodes: [{card, x, y, kind: "center" | "partner" | "extra" | "won", ...partner row, lift}]
-export const GRAPH_PARTNERS = 8, MAX_WON = 4, LINK = 0.3, STAND_OUT = 0.12, TOGETHER_LINKS = 2, APART = -0.15;
+// node. nodes: [{card, x, y, kind: "center" | "partner" | "won", ...partner row, phi, lift}]
+export const GRAPH_PARTNERS = 12, PARTNER_PHI = 0.2, LINK = 0.3, STAND_OUT = 0.12, TOGETHER_LINKS = 2, APART = -0.15;
 export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link = LINK, min = MIN_PAIR_DECKS } = {}) {
   shard = decoded(shard);
-  const partners = playedMoreWith(shard, card).slice(0, n);
-  const won = (lists ? winsMoreWith(lists, card, w, { min }) : []).filter(x => x.evidence >= 2).slice(0, MAX_WON)
-    .map(({ card, lift }) => ({ card, lift }));
+  const all = shard.decks.length;
+  const withCard = (x, b = x.base * all) => (x.decksWith * all - x.decks * b) / Math.sqrt(x.decks * (all - x.decks) * b * (all - b));
+  const partners = playedMoreWith(shard, card).map(x => ({ ...x, phi: withCard(x) })).filter(x => x.phi >= PARTNER_PHI)
+    .sort((a, b) => b.phi - a.phi || a.card - b.card).slice(0, n);
+  const inRing = new Set(partners.map(x => x.card));
+  const won = (lists ? winsMoreWith(lists, card, w, { min }) : [])
+    .filter(x => inRing.has(x.card) && Math.abs(x.evidence) >= 2).map(({ card, lift }) => ({ card, lift }));
   const m = partners.length, k = partners[0]?.decks ?? 0;
   const pos = partners.map(x => shard.position.get(x.card));
   const together = new Int32Array(m * m);
@@ -775,7 +779,7 @@ export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link =
     const spread = Math.sqrt(a * (k - a) * b * (k - b));
     return spread ? (ab * k - a * b) / spread : 0;
   };
-  const edges = partners.map(x => ({ a: card, b: x.card, strength: (x.with - x.base) / (1 - x.base), kind: "spoke" }));
+  const edges = partners.map(x => ({ a: card, b: x.card, strength: x.phi, kind: "spoke" }));
   const pairs = [];
   for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) pairs.push([phi(i, j), i, j]);
   const typical = [...pairs].sort((p, q) => p[0] - q[0])[pairs.length >> 1]?.[0] ?? 0;
@@ -792,7 +796,7 @@ export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link =
     if (s <= APART && aparts[i] < TOGETHER_LINKS && aparts[j] < TOGETHER_LINKS) {
       aparts[i]++;
       aparts[j]++;
-      edges.push({ a: partners[i].card, b: partners[j].card, strength: -s, kind: "apart" });
+      edges.push({ a: partners[i].card, b: partners[j].card, strength: s, kind: "apart" });
     }
   }
 
@@ -813,18 +817,12 @@ export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link =
       left.delete(next);
     }
   }
-  const cx = won.length ? 0.38 : 0.5, cy = 0.5, r = 0.3, step = 2 * Math.PI / Math.max(m, 1);
+  const cx = won.length ? 0.36 : 0.5, cy = 0.5, r = 0.3, step = 2 * Math.PI / Math.max(m, 1);
   const first = -(partners.filter((_, i) => isWon(i)).length - 1) / 2 * step; // won ones centred on the right
   const nodes = [{ card, x: cx, y: cy, kind: "center" }];
   order.forEach((i, j) => nodes.push({ ...partners[i], x: cx + r * Math.cos(first + j * step), y: cy + r * Math.sin(first + j * step),
     kind: "partner", ...(isWon(i) && { lift: lift.get(partners[i].card) }) }));
-  if (won.length) {
-    nodes.push({ card: null, x: 0.92, y: cy, kind: "won" });
-    // Above and below it, the third and fourth further left, so no line from it runs through another of its cards
-    const spots = [[0.92, 0.22], [0.92, 0.78], [0.74, 0.12], [0.74, 0.88]];
-    won.filter(x => !partners.some(p => p.card === x.card))
-      .forEach((x, j) => nodes.push({ card: x.card, x: spots[j][0], y: spots[j][1], kind: "extra", lift: x.lift }));
-  }
+  if (won.length) nodes.push({ card: null, x: 1, y: cy, kind: "won" });
   return { nodes, edges, won };
 }
 
