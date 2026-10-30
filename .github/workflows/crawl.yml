@@ -23,7 +23,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
-      - run: gh release download deck-corpus --dir data
+      # The corpus (its partitions and card table), crawl state and tournament results; not the backup
+      # of the corpus from before it was split
+      - run: gh release download deck-corpus --dir data --pattern 'decks-[0-9]*.jsonl.gz' --pattern decks-cards.json --pattern crawl_state.json --pattern results.jsonl.gz
       - run: python3 -c "import sys; sys.path.insert(0, 'scripts'); import build_index; build_index.in_data(); build_index.download_bulk_data()" # card names for commanders, printings for Moxfield
       # The day's price of every printing, added to the history on the price-history release
       # (downloaded first, so the day is added to the end of it rather than merged in on upload)

@@ -89,8 +89,8 @@ time, a few KB after that).
 3. **Deck recommendations** compares a Commander deck with public decks from
    [Archidekt](https://archidekt.com) and [Moxfield](https://moxfield.com):
    - `build_decks.py crawl` downloads decks through Archidekt's API (one request a
-     second) into `decks.jsonl.gz`: each deck's commanders and cards, by Scryfall
-     oracle id. It takes the recently updated decks first, then takes turns
+     second) into the deck corpus (see [The deck corpus](#the-deck-corpus)): each deck's
+     commanders and cards. It takes the recently updated decks first, then takes turns
      through every commander, least recently crawled first (ones it has no decks for too).
      `--site moxfield` does the same on Moxfield, whose search finds a commander
      by its own card id (looked up by name) and stops at 10,000 decks, and whose
@@ -100,7 +100,7 @@ time, a few KB after that).
    - Cards banned in Commander now (Scryfall's legality, read on every build) are left out of
      what the decks play, so nothing suggests them (older decks still have Jeweled Lotus).
    - `build_decks.py build` writes `site/decks/`: one file per commander (or
-     partner pair) with its newest 3,000 decks. Each deck is stored as positions
+     partner pair) with its newest 10,000 decks. Each deck is stored as positions
      in that commander's list of cards, most played first, gap-encoded like the
      card index, which comes to about 100 bytes per deck over the wire.
      `index.json` lists every commander with its "signature" cards, the ones
@@ -431,7 +431,7 @@ then about two and a half hours on each site), then redeploys the site so Trends
 stays current. To grow it faster, crawl locally:
 
 ```
-gh release download deck-corpus --dir data          # decks.jsonl.gz, crawl_state.json, results.jsonl.gz
+gh release download deck-corpus --dir data --pattern 'decks-[0-9]*' --pattern decks-cards.json --pattern crawl_state.json --pattern results.jsonl.gz
 python scripts/build_decks.py crawl --hours 24      # stop with Ctrl+C and resume any time
 python scripts/build_index.py                       # Moxfield needs default_cards.jsonl.gz first
 python scripts/build_decks.py crawl --site moxfield --hours 24
@@ -447,7 +447,7 @@ ran: replacing the release's files outright would lose what arrived meanwhile.
 
 To fill in commanders the corpus barely has, top up the most played ones (by
 EDHREC rank) to a number of decks each, several at a time. Run one crawl at a
-time: they share the corpus file, and Archidekt answers 429 (everything pauses)
+time: they share `decks-new.jsonl.gz`, and Archidekt answers 429 (everything pauses)
 past about 3 requests a second. Moxfield sometimes lets 8 a second through, but often
 answers 429 at that rate too, so 2 or 3 gets more decks over a long run. For a long local
 crawl, pause the daily one so they don't crawl (and fetch tournaments) side by side:
@@ -459,6 +459,29 @@ python scripts/build_decks.py crawl --top 3500 --per-commander 20 --rate 2   # t
 python scripts/build_decks.py crawl --only "Atraxa, Praetors' Voice" --per-commander 3000 --rate 2   # one commander's newest 3,000
 python scripts/build_decks.py crawl --only "Derevi, Empyrial Tactician" --bracket 5 --per-commander 1000   # just its bracket 5 decks
 ```
+
+### The deck corpus
+
+The corpus is split by commander into 64 files, `decks-00.jsonl.gz` to `decks-63.jsonl.gz`
+(every deck of a commander or partner pair is in the same one), so no file nears GitHub's 2 GB
+limit for a release asset, and a build holds one at a time (a full build peaks at 3.5 GB of
+memory, from 11 GB with one file). A deck lists its cards as numbers in `decks-cards.json`, a
+list of oracle ids that's only added to, so a card's number never changes: 640,000 decks take
+101 MB, from 746 MB as oracle ids.
+
+A crawl doesn't load the decks, just what it needs to know of each (its id, last update and
+commanders). It appends what it fetches to `decks-new.jsonl.gz`, which `share` and `build` fold
+into the 64 files: of each deck's copies, the one updated last wins. The release's copy of the
+corpus is folded in the same way before an upload. Card numbers that two crawls gave new cards
+differently are matched up then too.
+
+A deck found gone (deleted, made private) keeps its record with `"removed"`: the date it was
+found gone. Builds leave it out, and a newer version brings it back. `build_decks.py delta FILE`
+folds in a file of decks (as the crawl saves them) and notes such as `{"id": …, "removed":
+"2026-10-30"}`, which is how a feed of changes (say, a site's daily export) would come in.
+
+The corpus from before it was split, `decks.jsonl.gz`, is folded in the same way when it's there,
+then kept as `decks-backup.jsonl.gz` (on the release too).
 
 ## Price history
 
@@ -528,7 +551,7 @@ Python 3.11+ (standard library only):
 
 ```
 python scripts/build_index.py              # download data + build site/index/ (~1 min)
-gh release download deck-corpus --dir data --pattern decks.jsonl.gz
+gh release download deck-corpus --dir data --pattern 'decks-[0-9]*' --pattern decks-cards.json
 gh release download deck-corpus --dir data --pattern results.jsonl.gz   # tournament results (optional)
 python scripts/build_decks.py build        # site/decks/, for Find similar decks
 gh release download price-history --dir data --pattern prices.jsonl.gz

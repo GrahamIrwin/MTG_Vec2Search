@@ -27,6 +27,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 
@@ -34,7 +35,6 @@ from build_index import ROOT, by_popularity, in_data, load_cards, load_oracle_ta
 
 ARCHIDEKT = "https://archidekt.com/api"
 MOXFIELD = "https://api2.moxfield.com"
-CORPUS = "decks.jsonl.gz"
 HEADERS = {"User-Agent": "MTG_Vec2Search/1.0 (+https://github.com/grahamirwin/MTG_Vec2Search)",
            "Accept": "application/json", "Accept-Encoding": "gzip"}
 COMMANDER_FORMAT = 3  # Archidekt's deckFormat id for Commander / EDH
@@ -119,7 +119,7 @@ def slim_deck(deck):
         if categories and not in_deck.get(categories[0], True):
             continue
         oracle = (entry.get("card") or {}).get("oracleCard") or {}
-        if not oracle.get("uid"):
+        if not oracle.get("uid") or entry.get("quantity", 1) < 1:  # (a list can say 0 copies)
             continue
         if "Commander" in categories:
             commanders.append(oracle["uid"])
@@ -163,7 +163,7 @@ def slim_moxfield(deck, oracles):
     def board(name):
         for e in ((boards.get(name) or {}).get("cards") or {}).values():
             oracle = oracles.get((e.get("card") or {}).get("scryfall_id"))
-            if oracle:
+            if oracle and e.get("quantity", 1) >= 1:  # (a list can say 0 copies)
                 yield oracle, e.get("quantity", 1)
     commanders = sorted({o for o, _ in board("commanders")})
     cards = {}
@@ -188,8 +188,9 @@ def printing_oracles(printings_file="default_cards.jsonl.gz"):
     return oracles
 
 
-def load_corpus(path=CORPUS):
-    """{deck id: deck}. A deck crawled again after an update is appended, so the last copy wins."""
+def load_corpus(path):
+    """{id: record} from a gzipped JSONL file appended to as records come, so the last copy wins
+    (results.jsonl.gz, and the deck corpus before it was split)."""
     decks = {}
     if os.path.exists(path):
         with gzip.open(path, "rt", encoding="utf-8") as f:
@@ -202,11 +203,163 @@ def load_corpus(path=CORPUS):
     return decks
 
 
-def save_corpus(corpus, path=CORPUS):
-    """One gzip stream, without replaced copies of decks (about half the size)."""
+def save_corpus(corpus, path):
+    """One gzip stream, without replaced copies (about half the size)."""
     with gzip.open(path + ".tmp", "wt", encoding="utf-8") as f:
         f.writelines(json.dumps(d, separators=(",", ":")) + "\n" for d in corpus.values())
     os.replace(path + ".tmp", path)
+
+
+# === The deck corpus ===
+# Split by commander into PARTS gzipped JSONL files, decks-00.jsonl.gz to decks-63.jsonl.gz, so no file
+# nears GitHub's 2 GiB limit for a release asset and a build holds one at a time. A deck is
+# slim_deck's, with its cards as numbers in decks-cards.json, a list of oracle ids (only ever added
+# to, so a card's number never changes; new cards most played first): a card's number once for each
+# copy, sorted. A deck found gone (deleted, made private) keeps its record, with "removed": that date.
+# A crawl appends decks to decks-new.jsonl.gz as they come (cards by oracle id, as slim_deck has them;
+# one gzip member each, so a stopped crawl loses at most the last), and notes: {id, created} (when a
+# deck crawled before those were kept was made) or {id, removed}. compact() folds those in.
+CORPUS = "decks.jsonl.gz"  # the corpus before it was split: one file, cards by oracle id
+BACKUP = "decks-backup.jsonl.gz"  # what CORPUS is renamed once it's folded in
+PARTS, PART = 64, "decks-{:02d}.jsonl.gz"
+CARD_TABLE = "decks-cards.json"
+NEW = "decks-new.jsonl.gz"
+
+
+def part(commanders):
+    """The partition of the decks with these commanders (sorted oracle ids)"""
+    return zlib.crc32(" ".join(commanders).encode()) % PARTS
+
+
+def corpus_files(where="."):
+    """The corpus's files in a directory, oldest first: [(path, its card table; None: cards by oracle id)]"""
+    table = []
+    if os.path.exists(os.path.join(where, CARD_TABLE)):
+        with open(os.path.join(where, CARD_TABLE), encoding="utf-8") as f:
+            table = json.load(f)
+    return [(os.path.join(where, CORPUS), None), *[(os.path.join(where, PART.format(p)), table) for p in range(PARTS)],
+            (os.path.join(where, NEW), None)]
+
+
+def read_lines(path):
+    """A corpus file's lines, none if it isn't there; a line cut off mid-write by a stopped crawl is left out"""
+    if os.path.exists(path):
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            try:
+                for line in f:
+                    if line.endswith("\n"):
+                        yield line
+            except EOFError:
+                pass
+
+
+def read_part(path, table):
+    """A partition's decks, with their cards by oracle id again ({oracle id: copies}, as slim_deck has them)"""
+    for line in read_lines(path):
+        d = json.loads(line)
+        cards = {}
+        for c in d["cards"]:
+            cards[table[c]] = cards.get(table[c], 0) + 1
+        d["cards"] = cards
+        yield d
+
+
+class Copy:
+    """Where a deck's newest copy is, and what's known of the deck"""
+    __slots__ = ("updated", "source", "line", "commanders", "created", "dated", "removed")
+
+
+def winners(sources, seen=None):
+    """{deck id: Copy}: each deck's newest copy in these corpus files (see corpus_files), the later
+    file's on a tie, with a creation date any copy or note has (dated: the copy has its own), and
+    removed if it was found gone since. seen: counts the cards of the decks with cards by oracle id."""
+    best, notes, leads = {}, {}, {}
+    for s, (path, table) in enumerate(sources):
+        for n, line in enumerate(read_lines(path)):
+            d = json.loads(line)
+            i, created = d["id"], d.get("created") or ""
+            if "cards" not in d:  # a note
+                note = notes.setdefault(i, ["", ""])
+                note[0], note[1] = note[0] or created, max(note[1], d.get("removed") or "")
+                continue
+            if table is None and seen is not None:
+                seen.update(d["cards"])
+            old = best.get(i)
+            if not old or d["updated"] >= old.updated:
+                c = best[i] = Copy()
+                c.updated, c.source, c.line, c.removed = d["updated"], s, n, d.get("removed") or ""
+                c.commanders = leads.setdefault(tuple(d["commanders"]), tuple(d["commanders"]))
+                c.created, c.dated = created or (old.created if old else ""), bool(created)
+            elif not old.created:
+                old.created = created
+    for i, (created, removed) in notes.items():
+        c = best.get(i)
+        if c:
+            c.created = c.created or created
+            if removed >= c.updated:  # gone since this version (a newer one means it's back)
+                c.removed = max(c.removed, removed)
+    return best
+
+
+def compact(sources, out="."):
+    """Fold corpus files (see corpus_files) into the partitions in `out`: each deck's newest copy, as
+    winners() finds. Card numbers are the first card table's, the others' numbered to match (two
+    crawls can number new cards apart). Then `out`'s decks-new.jsonl.gz, if folded in, is deleted
+    and its decks.jsonl.gz kept as BACKUP. Returns winners()."""
+    seen = Counter()
+    best = winners(sources, seen)
+    number = {}
+    for _, table in sources:
+        for o in table or []:
+            number.setdefault(o, len(number))
+    for o, _ in sorted(seen.items(), key=lambda x: (-x[1], x[0])):
+        number.setdefault(o, len(number))
+    wanted = [{} for _ in sources]
+    for c in best.values():
+        wanted[c.source][c.line] = c
+    outs = [gzip.open(os.path.join(out, PART.format(p) + ".tmp"), "wt", encoding="utf-8") for p in range(PARTS)]
+    for (path, table), keep in zip(sources, wanted):
+        renumber = [number[o] for o in table] if table else None
+        if renumber == list(range(len(renumber or []))):
+            renumber = None
+        for n, line in enumerate(read_lines(path)):
+            c = keep.get(n)
+            if not c:
+                continue
+            if table is None or renumber or c.removed or c.created and not c.dated:  # else copied as it is
+                d = json.loads(line)
+                if table is None:
+                    d["cards"] = sorted(number[o] for o, k in d["cards"].items() for _ in range(k))
+                elif renumber:
+                    d["cards"] = sorted(renumber[k] for k in d["cards"])
+                if c.created:
+                    d["created"] = c.created
+                if c.removed:
+                    d["removed"] = c.removed
+                line = json.dumps(d, separators=(",", ":")) + "\n"
+            outs[part(c.commanders)].write(line)
+    for f in outs:
+        f.close()
+    with open(os.path.join(out, CARD_TABLE + ".tmp"), "w", encoding="utf-8") as f:
+        json.dump(list(number), f)
+    for p in range(PARTS):
+        os.replace(os.path.join(out, PART.format(p) + ".tmp"), os.path.join(out, PART.format(p)))
+    os.replace(os.path.join(out, CARD_TABLE + ".tmp"), os.path.join(out, CARD_TABLE))
+    paths = [path for path, _ in sources]
+    if os.path.join(out, NEW) in paths and os.path.exists(os.path.join(out, NEW)):
+        os.remove(os.path.join(out, NEW))
+    if os.path.join(out, CORPUS) in paths and os.path.exists(os.path.join(out, CORPUS)):
+        if os.path.exists(os.path.join(out, BACKUP)):  # never written over
+            print(f"Folded in {CORPUS}; {BACKUP} is already there, so it's left as it is", flush=True)
+        else:
+            os.replace(os.path.join(out, CORPUS), os.path.join(out, BACKUP))
+    return best
+
+
+def all_decks(where="."):
+    """Every deck of the corpus in a directory, once compacted: {id: deck}"""
+    table = corpus_files(where)[1][1]
+    return {d["id"]: d for p in range(PARTS) for d in read_part(os.path.join(where, PART.format(p)), table)}
 
 
 # === Tournament results, from TopDeck.gg's API (where cEDH tournaments are run) ===
@@ -359,22 +512,18 @@ def duration(seconds):
     return f"{h}h {m}m" if h else f"{m}m {s}s" if m else f"{s}s"
 
 
-def merge(corpus, state, other_dir, path=CORPUS, state_path=STATE):
-    """Add what another copy of the corpus (in other_dir) has that this one doesn't: decks, and
-    newer versions of decks. Crawl dates keep the later of the two. Returns how many decks it took."""
-    taken = 0
-    for i, d in load_corpus(os.path.join(other_dir, path)).items():
-        mine = corpus.get(i)
-        if not mine or d["updated"] > mine["updated"]:
-            corpus[i], mine, d = d, d, mine or {}
-            taken += 1
-        if not mine.get("created") and d.get("created"):  # a creation date either copy has
-            mine["created"] = d["created"]
+def merge(other_dir, state, state_path=STATE):
+    """Fold another copy of the corpus (in other_dir) into this one (see compact: decks only it has,
+    and newer versions of decks), and its crawl state into state (the later of each commander's
+    dates). Returns how many decks it gave, and how many there are now."""
+    theirs = corpus_files(other_dir)
+    best = compact(theirs + corpus_files())
+    taken = sum(c.source < len(theirs) for c in best.values())
     if os.path.exists(os.path.join(other_dir, state_path)):
         with open(os.path.join(other_dir, state_path), encoding="utf-8") as f:
             for commander, day in json.load(f).items():
                 state[commander] = max(state.get(commander, ""), day)
-    return taken
+    return taken, len(best)
 
 
 def merge_results(mine, theirs):
@@ -386,7 +535,7 @@ def merge_results(mine, theirs):
     return len(taken)
 
 
-def share(corpus, state, path=CORPUS, state_path=STATE, results_path=RESULTS):
+def share(state, state_path=STATE, results_path=RESULTS):
     """Upload the corpus, crawl state and tournament results to the release, after merging in what
     the release has that they don't (another crawl's, e.g. the daily one on GitHub Actions), so
     nothing there is lost: uploading over it unmerged loses whatever arrived since it was downloaded.
@@ -394,22 +543,25 @@ def share(corpus, state, path=CORPUS, state_path=STATE, results_path=RESULTS):
     print(f"\nSharing with the {RELEASE} release...", flush=True)
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            got = subprocess.run(["gh", "release", "download", RELEASE, "--dir", tmp,
-                                  "--pattern", path, "--pattern", state_path, "--pattern", results_path])
+            # CORPUS: the release's, if it's from before the corpus was split
+            got = subprocess.run(["gh", "release", "download", RELEASE, "--dir", tmp, "--pattern", "decks-[0-9]*.jsonl.gz",
+                                  "--pattern", CARD_TABLE, "--pattern", CORPUS, "--pattern", state_path,
+                                  "--pattern", results_path])
             if got.returncode:  # uploading anyway could replace decks we couldn't see
                 raise RuntimeError("couldn't download the release to merge with")
-            taken = merge(corpus, state, tmp, path, state_path)
+            print("Merging...", flush=True)
+            taken, decks = merge(tmp, state, state_path)
             results = load_corpus(results_path)
             took = merge_results(results, load_corpus(os.path.join(tmp, results_path)))
-        save_corpus(corpus, path)
         if results:
             save_corpus(results, results_path)
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=0, sort_keys=True)
-        print(f"Merged in {taken:,} decks and {took:,} tournaments from the release; {len(corpus):,} decks "
+        print(f"Merged in {taken:,} decks and {took:,} tournaments from the release; {decks:,} decks "
               f"and {len(results):,} tournaments in all", flush=True)
-        files = [path, state_path] + ([results_path] if results else [])
-        if subprocess.run(["gh", "release", "upload", RELEASE, *files, "--clobber"]).returncode:
+        # The card table first: the release's partitions can still be read with a longer one
+        files = [[CARD_TABLE], [PART.format(p) for p in range(PARTS)] + [state_path] + ([results_path] if results else [])]
+        if any(subprocess.run(["gh", "release", "upload", RELEASE, *f, "--clobber"]).returncode for f in files):
             raise RuntimeError("the upload failed")
         print("Uploaded.", flush=True)
         # The site only reads the corpus when it's built, so build it now rather than on Monday
@@ -423,14 +575,14 @@ def share(corpus, state, path=CORPUS, state_path=STATE, results_path=RESULTS):
         return False
 
 
-def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=CORPUS, state_path=STATE,
-          site="archidekt", bracket=None):
+def crawl(per_commander, only=None, hours=None, top=None, upload=False, state_path=STATE, site="archidekt",
+          bracket=None):
     """First the decks updated most recently on `site` (new decks, and new versions of ones we have),
     then up to per_commander more decks for each commander: commanders never crawled there first
     (most common in the corpus first), then the ones crawled longest ago, until `hours` run out.
     With `top`: instead, the `top` most played commanders, each topped up to per_commander of the
     site's decks, several at once (as fast as DELAY allows). With `bracket`: only decks their
-    builders gave that bracket."""
+    builders gave that bracket. Decks go to decks-new.jsonl.gz (see compact)."""
     moxfield = site == "moxfield"
     if moxfield:
         oracles = printing_oracles()  # Moxfield decks list printings
@@ -445,10 +597,8 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
     deadline = time.time() + hours * 3600 if hours else float("inf")
     stop = threading.Event()  # Ctrl+C: threads finish their request but save nothing more
     lock = threading.Lock()  # around the corpus, the file and the counts
-    corpus = load_corpus(path)
-    # Rewritten first too: decks appended after one cut off by a stopped crawl couldn't be read
-    save_corpus(corpus, path)
-    have = {i: d["updated"] for i, d in corpus.items()}
+    corpus = winners(corpus_files())  # what's known of each deck, not the decks: those stay on disk
+    have = {i: "" if d.removed else d.updated for i, d in corpus.items()}  # a deck found gone is fetched again
     state = {}
     if os.path.exists(state_path):
         with open(state_path, encoding="utf-8") as f:
@@ -458,7 +608,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
         only = full_names(only, names)
     start, before = time.time(), len(corpus)
     counts = {"new": 0, "updated": 0}
-    print(f"{len(corpus):,} decks in {path}" + (f"; crawling for {hours:g} hours" if hours else "")
+    print(f"{len(corpus):,} decks in the corpus" + (f"; crawling for {hours:g} hours" if hours else "")
           + (f"; only bracket {bracket} decks" if bracket else "")
           + "\n  + new deck   ~ newer version of a deck we had\n", flush=True)
 
@@ -468,7 +618,11 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
         return f"{len(corpus):,} decks, {rate:,.0f}/hour{left}"
 
     # Each deck is its own gzip member, so stopping the crawl can only cut off the last one
-    with open(path, "ab") as out:
+    with open(NEW, "ab") as out:
+        def save(record):
+            out.write(gzip.compress((json.dumps(record, separators=(",", ":")) + "\n").encode()))
+            out.flush()
+
         def fetch(found, limit):
             added = 0
             for deck_id, updated, created in found:
@@ -477,19 +631,21 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                 with lock:
                     if have.get(deck_id, "") >= updated:  # already have this version
                         mine = corpus.get(deck_id)  # (None for one that isn't a usable deck)
-                        if created and mine and not mine.get("created"):  # crawled before dates were kept
-                            mine["created"] = created
+                        if created and mine and not mine.created:  # crawled before dates were kept
+                            mine.created = created
+                            save({"id": deck_id, "created": created})
                         continue
                     have[deck_id] = updated
                 deck = get_deck(deck_id)
                 with lock:
                     if not deck or stop.is_set():
                         continue
-                    out.write(gzip.compress((json.dumps(deck, separators=(",", ":")) + "\n").encode()))
-                    out.flush()
+                    save(deck)
                     kind = "updated" if deck_id in corpus else "new"
                     counts[kind] += 1
-                    corpus[deck_id] = deck
+                    known = corpus[deck_id] = Copy()
+                    known.updated, known.commanders, known.created, known.removed = \
+                        deck["updated"], deck["commanders"], deck["created"], ""
                     added += 1
                     lead = " & ".join(names.get(o, "?") for o in deck["commanders"])
                     print(f"  {'~' if kind == 'updated' else '+'} {len(corpus):>7,}  {deck['name'][:40]:<40}  "
@@ -530,8 +686,8 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
 
         try:
             if top:
-                count = Counter(o for d in corpus.values() if isinstance(d["id"], str) == moxfield
-                                for o in d["commanders"])
+                count = Counter(o for i, d in corpus.items() if isinstance(i, str) == moxfield and not d.removed
+                                for o in d.commanders)
                 queue = [(name, per_commander - count[o]) for o, name in top_commanders(top) if count[o] < per_commander]
                 print(f"{len(queue):,} of the top {top:,} commanders have fewer than {per_commander} decks\n", flush=True)
                 take_turns(queue)
@@ -544,7 +700,7 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                 if only:
                     queue = [c for c in only if c not in done]
                 else:  # recounted each time: crawling one commander turns up decks for others
-                    by_lead = Counter(names[o] for d in corpus.values() for o in d["commanders"] if o in names)
+                    by_lead = Counter(names[o] for d in corpus.values() if not d.removed for o in d.commanders if o in names)
                     by_lead.update({name: 0 for _, name in leaders})  # and commanders with no decks yet
                     queue = sorted((c for c in by_lead if c not in done), key=lambda c: (state.get(turn(c), ""), -by_lead[c]))
                 if not queue:
@@ -565,12 +721,10 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, path=COR
                 stop.set()
             print("\nStopped. Everything fetched so far is saved.", flush=True)
 
-    print(f"Compacting {path} ({len(corpus):,} decks, a few minutes; the decks are already saved)...", flush=True)
-    save_corpus(corpus, path)
-    print(f"Done in {duration(time.time() - start)}: {counts['new']:,} new decks, {counts['updated']:,} updated; "
-          f"{len(corpus):,} in {path} (was {before:,}).", flush=True)
+    print(f"Done in {duration(time.time() - start)}: {counts['new']:,} new decks, {counts['updated']:,} updated, "
+          f"in {NEW}; {len(corpus):,} in the corpus (was {before:,}).", flush=True)
     if upload:
-        share(corpus, state, path, state_path)
+        share(state, state_path)
     else:
         print("Share it with the site (merged with the release first): python scripts/build_decks.py share", flush=True)
 
@@ -721,14 +875,14 @@ def themes(here, n, usual, card_tags, count=THEMES):
     return [t for t, _ in picked]
 
 
-def made_dates(corpus):
+def made_dates(decks, dated):
     """{deck id: when it was made}: its creation date, or for an Archidekt deck crawled before those
     were kept, that of the last dated deck before it (Archidekt numbers decks as they're made), so
-    it's in a window just when it would be by id. "" when nothing tells."""
-    dated = sorted((d["id"], d["created"]) for d in corpus.values() if isinstance(d["id"], int) and d.get("created"))
+    it's in a window just when it would be by id. "" when nothing tells. dated: (id, creation date)
+    of every Archidekt deck that has one, sorted."""
     ids = [i for i, _ in dated]
     made = {}
-    for d in corpus.values():
+    for d in decks:
         if d.get("created"):
             made[d["id"]] = d["created"]
         else:
@@ -1044,7 +1198,9 @@ def precon_sets(in_sets, sets):
 
 
 def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, results=None, precons=None, combos=None):
-    """corpus: {id: deck} (see slim_deck); cards: Scryfall cards in card-index order;
+    """corpus: called for the decks (see slim_deck), in lists that each have every deck of their
+    commanders (see read_part); twice, first for what's true of every deck, then commander by
+    commander, so just one list is held at a time. cards: Scryfall cards in card-index order;
     tags: Scryfall Tagger tags, {slug: (oracle ids, names)} (see load_oracle_tags);
     prices: {oracle id: cheapest USD price} (see load_printings); precons: see precon_sets;
     combos: see load_combos."""
@@ -1065,29 +1221,39 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             for o in ids:
                 if o in number:
                     card_tags[number[o]].append(slug)
-    groups = defaultdict(list)
-    for d in corpus.values():
-        if not all(o in number for o in d["commanders"]):
-            continue
-        key = "-".join(str(n) for n in sorted(number[o] for o in d["commanders"]))
-        played = sorted({number[o] for o in d["cards"]
-                         if o in number and o not in basic and o not in banned and o not in d["commanders"]})
-        groups[key].append((d, played))
-    for decks in groups.values():  # newest first, so nothing depends on the order decks are stored in
-        decks.sort(key=lambda x: (x[0]["updated"], str(x[0]["id"])), reverse=True)
 
+    def grouped(decks):
+        """{commander file name: [(deck, the cards it plays)], newest first}, leaving out decks found gone"""
+        groups = defaultdict(list)
+        for d in decks:
+            if d.get("removed") or not all(o in number for o in d["commanders"]):
+                continue
+            key = "-".join(str(n) for n in sorted(number[o] for o in d["commanders"]))
+            played = sorted({number[o] for o in d["cards"]
+                             if o in number and o not in basic and o not in banned and o not in d["commanders"]})
+            groups[key].append((d, played))
+        for decks in groups.values():  # so nothing depends on the order decks are stored in
+            decks.sort(key=lambda x: (x[0]["updated"], str(x[0]["id"])), reverse=True)
+        return groups
+
+    everywhere, total, dated, known = Counter(), 0, [], []  # known: the first and last creation dates
+    for chunk in corpus():
+        for d in chunk:
+            if d.get("created") and not d.get("removed"):
+                known = [min(known[0], d["created"]), max(known[1], d["created"])] if known else [d["created"]] * 2
+                if isinstance(d["id"], int):
+                    dated.append((d["id"], d["created"]))
+        for decks in grouped(chunk).values():
+            everywhere.update(c for _, played in decks for c in played)
+            total += len(decks)
+    dated.sort()
     # A window is every deck made from its first day on. None: no deck known to be made in it, or no
     # known deck is older, so the window isn't filled in yet.
     today = today or date.today()
-    made = made_dates(corpus)
-    known = [d["created"] for d in corpus.values() if d.get("created")]
     since = []
     for days in WINDOWS:
         cutoff = (today - timedelta(days)).isoformat()
-        since.append(cutoff if any(c >= cutoff for c in known) and any(c < cutoff for c in known) else None)
-
-    everywhere = Counter(c for decks in groups.values() for _, played in decks for c in played)
-    total = sum(len(decks) for decks in groups.values())
+        since.append(cutoff if known and known[0] < cutoff <= known[1] else None)
     usual = Counter()
     for c, k in sorted(everywhere.items()):
         for t in card_tags[c]:
@@ -1123,51 +1289,58 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             write_json(os.path.join(out_dir, "results", "pilots", f"{b}.json"), block)
         write_json(os.path.join(out_dir, "results", "ranking.json"), {"windows": RESULT_WINDOWS, "pilots": ranking(histories, today)})
     commanders, trends = [], []
-    for key, decks in sorted(groups.items()):
-        if len(decks) < MIN_DECKS:
-            continue
-        here = Counter(c for _, played in decks for c in played)
-        known_themes = themes(here, len(decks), usual, card_tags)
-        price = median([round(100 * math.fsum(prices[o] * k for o, k in d["cards"].items() if o in prices and o not in basic))
-                        for d, _ in decks], -1)
-        bracket = median([d["bracket"] for d, _ in decks if d.get("bracket")], 0)
-        # Trends: decks made ever and in each window, and how many of them play each card. Only cards
-        # at least TREND_SHARE of the decks play in some window, which keeps the file to about a MB.
-        # ponytail: a card under that in every commander's decks is missing from filtered Trends;
-        # per-identity totals (exact) if that matters
-        counts, plays = window_plays(decks, since, made)
-        trends.append([key, counts, price, bracket, known_themes, trend_cards(counts, plays, TREND_SHARE, TREND_DECKS)])
+    # Every deck of the commanders in trends.json, exactly: what Trends shows until a filter is picked
+    every_count, every_play = [0] * (len(WINDOWS) + 1), defaultdict(lambda: [0] * (len(WINDOWS) + 1))
+    for chunk in corpus():
+        made, groups = made_dates(chunk, dated), grouped(chunk)
+        for key, decks in sorted(groups.items()):
+            if len(decks) < MIN_DECKS:
+                continue
+            here = Counter(c for _, played in decks for c in played)
+            known_themes = themes(here, len(decks), usual, card_tags)
+            price = median([round(100 * math.fsum(prices[o] * k for o, k in d["cards"].items() if o in prices and o not in basic))
+                            for d, _ in decks], -1)
+            bracket = median([d["bracket"] for d, _ in decks if d.get("bracket")], 0)
+            # Trends: decks made ever and in each window, and how many of them play each card. Only cards
+            # at least TREND_SHARE of the decks play in some window, which keeps the file to about a MB.
+            # ponytail: a card under that in every commander's decks is missing from filtered Trends;
+            # per-identity totals (exact) if that matters
+            counts, plays = window_plays(decks, since, made)
+            trends.append([key, counts, price, bracket, known_themes, trend_cards(counts, plays, TREND_SHARE, TREND_DECKS)])
+            every_count = [a + b for a, b in zip(every_count, counts)]
+            for c, ks in plays.items():
+                every_play[c] = [a + b for a, b in zip(every_play[c], ks)]
 
-        decks = decks[:MAX_DECKS]
-        here = Counter(c for _, played in decks for c in played)
-        played_most = sorted(here, key=lambda c: (-here[c], c))
-        position = {c: i for i, c in enumerate(played_most)}
-        lift = {c: here[c] / len(decks) - everywhere[c] / total for c in here}
-        signature = sorted(here, key=lambda c: -lift[c])
-        by_tag = defaultdict(list)
-        precon = {precons[o][0] for o in decks[0][0]["commanders"] if precons.get(o)}
-        for i, c in enumerate(played_most if len(decks) >= BUILD_DECKS else []):
-            if here[c] >= max(2, COMMON * len(decks)) and "Land" not in cards[c].get("type_line", ""):
-                for t in card_tags[c]:
-                    by_tag[t].append(i)
-        write_json(os.path.join(out_dir, f"{key}.json"), {
-            "cards": played_most,
-            "decks": [[d["id"], d["name"][:80], d["updated"], gaps(sorted(position[c] for c in played)), made[d["id"]],
-                       d.get("bracket") or 0]
-                      for d, played in decks],
-            "signature": signature[:SHOWN_SIGNATURE],
-            "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
-            # ponytail: a commander first printed as one of the 99 in a Commander set (Kenrith in ltc) gets
-            # that set's cards; a precon decklist source if that hides real packages
-            "combos": played_combos(decks, here, {number[o] for o in decks[0][0]["commanders"]}, by_rarest),
-            "precon": gaps([i for i, c in enumerate(played_most) if precon & set(precons.get(cards[c]["oracle_id"], ()))]),
-            "price": price, "bracket": bracket, "themes": known_themes,
-            **({"results": standings[key]["totals"][-1][0]} if key in standings else {}),
-        })
-        if key in standings:
-            write_json(os.path.join(out_dir, "results", f"{key}.json"), {k: v for k, v in standings[key].items() if k not in ("lists", "refs")})
-            write_json(os.path.join(out_dir, "results", "lists", f"{key}.json"), standings[key]["lists"])
-        commanders.append([key, counts[0], signature[:SIGNATURE]])
+            decks = decks[:MAX_DECKS]
+            here = Counter(c for _, played in decks for c in played)
+            played_most = sorted(here, key=lambda c: (-here[c], c))
+            position = {c: i for i, c in enumerate(played_most)}
+            lift = {c: here[c] / len(decks) - everywhere[c] / total for c in here}
+            signature = sorted(here, key=lambda c: -lift[c])
+            by_tag = defaultdict(list)
+            precon = {precons[o][0] for o in decks[0][0]["commanders"] if precons.get(o)}
+            for i, c in enumerate(played_most if len(decks) >= BUILD_DECKS else []):
+                if here[c] >= max(2, COMMON * len(decks)) and "Land" not in cards[c].get("type_line", ""):
+                    for t in card_tags[c]:
+                        by_tag[t].append(i)
+            write_json(os.path.join(out_dir, f"{key}.json"), {
+                "cards": played_most,
+                "decks": [[d["id"], d["name"][:80], d["updated"], gaps(sorted(position[c] for c in played)), made[d["id"]],
+                           d.get("bracket") or 0]
+                          for d, played in decks],
+                "signature": signature[:SHOWN_SIGNATURE],
+                "tags": [[t, gaps(ps)] for t, ps in sorted(by_tag.items()) if len(ps) >= 2],
+                # ponytail: a commander first printed as one of the 99 in a Commander set (Kenrith in ltc) gets
+                # that set's cards; a precon decklist source if that hides real packages
+                "combos": played_combos(decks, here, {number[o] for o in decks[0][0]["commanders"]}, by_rarest),
+                "precon": gaps([i for i, c in enumerate(played_most) if precon & set(precons.get(cards[c]["oracle_id"], ()))]),
+                "price": price, "bracket": bracket, "themes": known_themes,
+                **({"results": standings[key]["totals"][-1][0]} if key in standings else {}),
+            })
+            if key in standings:
+                write_json(os.path.join(out_dir, "results", f"{key}.json"), {k: v for k, v in standings[key].items() if k not in ("lists", "refs")})
+                write_json(os.path.join(out_dir, "results", "lists", f"{key}.json"), standings[key]["lists"])
+            commanders.append([key, counts[0], signature[:SIGNATURE]])
     commanders.sort(key=lambda c: (-c[1], c[0]))
     write_json(os.path.join(out_dir, "index.json"),
                {"decks": total, "commanders": commanders, "windows": WINDOWS, "since": since,
@@ -1176,10 +1349,8 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
     names = sorted({t for c in trends for t in c[4]})
     for c in trends:
         c[4] = [names.index(t) for t in c[4]]
-    # Every deck of these commanders, exactly: what Trends shows until a filter is picked
-    counts, plays = window_plays([x for key, *_ in trends for x in groups[key]], since, made)
     write_json(os.path.join(out_dir, "trends.json"), {
-        "themes": names, "everything": [counts, *trend_cards(counts, plays, 0, TREND_DECKS)],
+        "themes": names, "everything": [every_count, *trend_cards(every_count, every_play, 0, TREND_DECKS)],
         "commanders": [c[:5] for c in trends]})
     # Most of each commander's cards, split two ways so a page fetches only what it needs: by color
     # identity for a filtered Trends (a color filter keeps one), and by card for a card's page
@@ -1206,8 +1377,16 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
           f"in {len(by_identity)} files)")
 
 
+def fold(extra=()):
+    """compact() the corpus in this directory, with any other files of decks and notes (see compact)"""
+    print("Folding new decks into the corpus...", flush=True)
+    files = corpus_files()
+    best = compact(files + [(path, None) for path in extra])
+    gone = sum(bool(c.removed) for c in best.values())
+    print(f"{len(best):,} decks in {PARTS} files ({gone:,} of them found gone)", flush=True)
+
+
 if __name__ == "__main__":
-    in_data()
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("crawl", help="download decks from Archidekt or Moxfield into the corpus")
@@ -1229,7 +1408,13 @@ if __name__ == "__main__":
                                              "older ones), not just those since the newest it has")
     sub.add_parser("share", help="merge with the release, upload the corpus, crawl state and results, and deploy")
     sub.add_parser("build", help="write site/decks/ from the corpus")
+    d = sub.add_parser("delta", help="fold decks and notes from other files into the corpus: lines of decks as "
+                                     "slim_deck makes them, {id, removed: date} for decks found gone, {id, created}")
+    d.add_argument("files", nargs="+", help="gzipped JSONL files")
     args = p.parse_args()
+    if args.cmd == "delta":
+        args.files = [os.path.abspath(f) for f in args.files]  # before moving to data/
+    in_data()
     sys.stdout.reconfigure(errors="replace")  # deck names with emoji can't crash a non-UTF-8 console
     if args.cmd == "crawl":
         DELAY = 1 / args.rate
@@ -1239,9 +1424,15 @@ if __name__ == "__main__":
         fetch_results(args.hours, days=args.days)
     elif args.cmd == "share":
         state = json.load(open(STATE, encoding="utf-8")) if os.path.exists(STATE) else {}
-        sys.exit(0 if share(load_corpus(), state) else 1)
+        sys.exit(0 if share(state) else 1)
+    elif args.cmd == "delta":
+        fold(args.files)
     else:
-        combos = load_combos()  # first: reading it takes 2 GB for a moment, before the corpus is in memory
+        if os.path.exists(NEW) or os.path.exists(CORPUS):
+            fold()
+        combos = load_combos()
         prices, _, in_sets, sets, _ = load_printings()
-        build(load_corpus(), by_popularity(load_cards()), load_oracle_tags(), prices=prices,
+        table = corpus_files()[1][1]
+        build(lambda: (list(read_part(PART.format(p), table)) for p in range(PARTS)), by_popularity(load_cards()),
+              load_oracle_tags(), prices=prices,
               results=load_corpus(RESULTS), precons=precon_sets(in_sets, sets), combos=combos)

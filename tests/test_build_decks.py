@@ -13,7 +13,18 @@ from datetime import date, datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))  # the scripts tested
 import build_decks
-from build_decks import build, load_corpus, precon_sets, save_corpus, slim_deck, slim_moxfield
+from build_decks import all_decks, compact, corpus_files, load_corpus, precon_sets, save_corpus, slim_deck, slim_moxfield
+
+
+def build(corpus, *args, **kwargs):
+    """build_decks.build, from {id: deck}: all in one list, as if in one partition"""
+    build_decks.build(lambda: [list(corpus.values())], *args, **kwargs)
+
+
+def corpus_now():
+    """Every deck in this directory's corpus, after folding in what's new"""
+    compact(corpus_files())
+    return all_decks()
 
 
 def entry(uid, categories, quantity=1):
@@ -33,6 +44,7 @@ assert deck["commanders"] == ["cmdr"] and "maybe" not in deck["cards"], deck
 assert sum(deck["cards"].values()) == 100 and deck["cards"]["island"] == 2 and deck["updated"] == "2026-09-30"
 assert slim_deck({**archidekt, "cards": archidekt["cards"][:50]}) is None  # incomplete
 assert slim_deck({**archidekt, "cards": archidekt["cards"][1:]}) is None  # no commander
+assert "zero" not in slim_deck({**archidekt, "cards": archidekt["cards"] + [entry("zero", ["Ramp"], 0)]})["cards"]
 
 
 # The same deck on Moxfield, whose cards are printings ("p-<oracle id>" here)
@@ -55,21 +67,63 @@ assert slim_moxfield(mox_deck("x", lead="nope"), printings) is None  # no comman
 assert slim_moxfield({}, printings) is None  # a deck that's gone (404)
 
 with tempfile.TemporaryDirectory() as tmp:
-    # One gzip member per deck; a newer copy of a deck replaces the older, and a crawl cut off
-    # mid-write loses only its last deck
-    path = os.path.join(tmp, "decks.jsonl.gz")
-    with open(path, "wb") as f:
-        for d in (deck, {**deck, "id": 8}, {**deck, "name": "Newer"}):
-            f.write(gzip.compress((json.dumps(d) + "\n").encode()))
+    def append(path, *records):  # as a crawl does: one gzip member each
+        with open(path, "ab") as f:
+            for r in records:
+                f.write(gzip.compress((json.dumps(r) + "\n").encode()))
+    here = os.path.join(tmp, "corpus")  # the crawl below starts from its own
+    os.makedirs(here)
+    # A crawl appends to decks-new.jsonl.gz, one gzip member per deck; a stopped one loses only its last deck
+    new = os.path.join(here, "decks-new.jsonl.gz")
+    append(new, deck, {**deck, "id": 8}, {**deck, "name": "Newer"})
+    with open(new, "ab") as f:
         cut = gzip.compress(b'{"id": 9, "name": "cut off mid-write"}\n')
         f.write(cut[:len(cut) // 2])
-    corpus = load_corpus(path)
-    assert sorted(corpus) == [7, 8] and corpus[7]["name"] == "Newer", corpus.keys()
-    # A crawl rewrites the corpus before appending, or decks after the cut-off one would be lost
-    save_corpus(corpus, path)
-    with open(path, "ab") as f:
-        f.write(gzip.compress((json.dumps({**deck, "id": 10}) + "\n").encode()))
-    assert sorted(load_corpus(path)) == [7, 8, 10]
+    best = compact(corpus_files(here), here)
+    corpus = all_decks(here)
+    assert sorted(corpus) == [7, 8] and corpus[7]["name"] == "Newer" and corpus[7] == {**deck, "name": "Newer"}, corpus
+    assert not os.path.exists(new) and best[7].source == len(corpus_files(here)) - 1  # folded in, from decks-new
+    # Every deck of a commander is in the same partition, its cards by number in decks-cards.json, a
+    # card's number once a copy (the island's twice); the most played cards get the smallest numbers
+    lines = {p: list(build_decks.read_lines(os.path.join(here, build_decks.PART.format(p)))) for p in range(build_decks.PARTS)}
+    assert [len(ls) for ls in lines.values() if ls] == [2] and build_decks.part(["cmdr"]) in [p for p, ls in lines.items() if ls]
+    with open(os.path.join(here, "decks-cards.json"), encoding="utf-8") as f:
+        table = json.load(f)
+    stored = json.loads(lines[build_decks.part(["cmdr"])][0])
+    assert table[0] == "island" and stored["cards"][:3] == [0, 0, 1] and len(stored["cards"]) == 100, stored["cards"][:5]
+    # The corpus from before it was split is folded in, then kept as decks-backup.jsonl.gz; a deck's
+    # newer copy wins, and an older one can still tell when it was made
+    save_corpus({8: {**deck, "id": 8, "updated": "2026-01-01", "created": "2025-12-01"},
+                 11: {**deck, "id": 11, "commanders": ["c0"]}}, os.path.join(here, "decks.jsonl.gz"))
+    compact(corpus_files(here), here)
+    corpus = all_decks(here)
+    assert sorted(corpus) == [7, 8, 11] and corpus[8]["updated"] == "2026-09-30" and corpus[8]["created"] == "2025-12-01"
+    assert os.path.exists(os.path.join(here, "decks-backup.jsonl.gz")) and not os.path.exists(os.path.join(here, "decks.jsonl.gz"))
+    assert table == json.load(open(os.path.join(here, "decks-cards.json"), encoding="utf-8"))[:len(table)]  # numbers stay put
+    # A deck found gone keeps its record, marked removed; a newer version brings it back. A note
+    # older than the deck's version is about an earlier one, so it's left alone.
+    append(new, {"id": 7, "removed": "2026-10-01"}, {"id": 8, "removed": "2026-09-01"}, {"id": 404, "removed": "2026-10-01"})
+    compact(corpus_files(here), here)
+    corpus = all_decks(here)
+    assert corpus[7]["removed"] == "2026-10-01" and "removed" not in corpus[8] and 404 not in corpus
+    append(new, {**deck, "updated": "2026-10-02"})
+    best = compact(corpus_files(here), here)
+    assert "removed" not in all_decks(here)[7] and not best[7].removed
+    # Another copy of the corpus that numbered new cards differently: its decks are renumbered to this one's
+    other = os.path.join(here, "other")
+    os.makedirs(other)
+    append(os.path.join(other, "decks-new.jsonl.gz"), {**deck, "id": 12, "cards": {"brand new": 1, **deck["cards"]}})
+    compact(corpus_files(other), other)
+    append(new, {**deck, "id": 13, "cards": {"newer still": 1, **deck["cards"]}})
+    compact(corpus_files(here) + corpus_files(other), here)
+    corpus = all_decks(here)
+    assert corpus[12]["cards"]["brand new"] == 1 and corpus[13]["cards"]["newer still"] == 1 and len(corpus[12]["cards"]) == 100
+    assert sorted(corpus) == [7, 8, 11, 12, 13]
+    # A deck whose commander changed moves partitions, and isn't left behind
+    append(os.path.join(here, "decks-new.jsonl.gz"), {**deck, "id": 11, "updated": "2026-10-03"})
+    compact(corpus_files(here), here)
+    assert [d["commanders"] for d in all_decks(here).values() if d["id"] == 11] == [["cmdr"]]
+    assert sum(len(list(build_decks.read_lines(os.path.join(here, build_decks.PART.format(p))))) for p in range(64)) == 5
 
     # Cards in index order: 0 = the commander, 1 = a basic land, then c0..c96
     cards = [{"oracle_id": "cmdr", "name": "Cmdr", "type_line": "Legendary Creature"},
@@ -265,9 +319,9 @@ with tempfile.TemporaryDirectory() as tmp:
         assert json.load(f)[2] == [0, 5]  # c0: commander 0's 5 decks play it
 
     # An undated Archidekt deck was made when the last dated one before it was (or who knows: "")
-    assert build_decks.made_dates({d["id"]: d for d in [{"id": 1, "created": "2026-01-01"}, {"id": 2}, {"id": 0},
-                                                        {"id": 3, "created": "2026-02-01"}, {"id": "m", "created": "2026-03-01"},
-                                                        {"id": "n"}]}) == \
+    assert build_decks.made_dates([{"id": 1, "created": "2026-01-01"}, {"id": 2}, {"id": 0}, {"id": 3, "created": "2026-02-01"},
+                                   {"id": "m", "created": "2026-03-01"}, {"id": "n"}],
+                                  [(1, "2026-01-01"), (3, "2026-02-01")]) == \
         {1: "2026-01-01", 2: "2026-01-01", 0: "", 3: "2026-02-01", "m": "2026-03-01", "n": ""}
     # Archidekt and Moxfield decks together, updated the same day (so sorted by id too)
     mixed = {i: {**deck, "id": i, "updated": "2026-09-30", "created": "2026-01-01"} for i in range(1, 4)}
@@ -361,7 +415,7 @@ with tempfile.TemporaryDirectory() as tmp:
     build_decks.get_json, build_decks.DELAY = fake_get_json, 0
     save_corpus({i: {**deck, "id": i, "commanders": ["A"]} for i in range(3)}, "decks.jsonl.gz")
     build_decks.crawl(3, top=10)
-    count = Counter(o for d in load_corpus("decks.jsonl.gz").values() for o in d["commanders"])
+    count = Counter(o for d in corpus_now().values() for o in d["commanders"])
     assert count == {"A": 3, "B": 3, "D": 3}, count  # A already had 3
     with open("crawl_state.json", encoding="utf-8") as f:
         assert sorted(json.load(f)) == ["B // B2", "D"]
@@ -372,7 +426,7 @@ with tempfile.TemporaryDirectory() as tmp:
         f.write(json.dumps({"id": "p-reversible", "card_faces": [{"oracle_id": "c0"}, {"oracle_id": "c0"}]}) + "\n")
     assert build_decks.printing_oracles() == {**printings, "p-reversible": "c0"}
     build_decks.crawl(3, top=10, site="moxfield")
-    corpus = load_corpus("decks.jsonl.gz")
+    corpus = corpus_now()
     count = Counter(o for d in corpus.values() if isinstance(d["id"], str) for o in d["commanders"])
     assert count == {"A": 3, "B": 3, "D": 3}, count
     assert corpus["A-Descending1-0"]["created"] == "2026-09-29"
@@ -380,10 +434,10 @@ with tempfile.TemporaryDirectory() as tmp:
         assert sorted(json.load(f)) == ["B // B2", "D", "moxfield:A", "moxfield:B // B2", "moxfield:D"]
     # Recently updated decks, then each commander, newest decks and then oldest
     build_decks.crawl(0, site="moxfield")
-    assert sorted(i for i in load_corpus("decks.jsonl.gz") if str(i).startswith("new")) == \
+    assert sorted(i for i in corpus_now() if str(i).startswith("new")) == \
         ["new-Descending1-0", "new-Descending1-1", "new-Descending2-0", "new-Descending2-1"]
     build_decks.crawl(10, only=["d"], site="moxfield")
-    assert sum(isinstance(d["id"], str) and d["commanders"] == ["D"] for d in load_corpus("decks.jsonl.gz").values()) == 8
+    assert sum(isinstance(d["id"], str) and d["commanders"] == ["D"] for d in corpus_now().values()) == 8
     # --bracket: each site's search asks for just that bracket, and the crawl takes its own turns
     searched = []
     build_decks.get_json = lambda path, base=build_decks.ARCHIDEKT: searched.append(path) or fake_get_json(path, base)
@@ -407,16 +461,25 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Before uploading, the release's copy is merged in: decks only it has, and newer versions
     os.makedirs("release")
-    save_corpus({1: {**deck, "id": 1, "updated": "2026-01-01", "created": "2025-12-01"}, 2: {**deck, "id": 2, "updated": "2026-12-01"},
-                 99: {**deck, "id": 99}}, os.path.join("release", "decks.jsonl.gz"))
+    with open(os.path.join("release", "decks-new.jsonl.gz"), "wb") as f:
+        for d in [{**deck, "id": 1, "updated": "2026-01-01", "created": "2025-12-01"}, {**deck, "id": 2, "updated": "2026-12-01"},
+                  {**deck, "id": 99}]:
+            f.write(gzip.compress((json.dumps(d) + "\n").encode()))
+    compact(corpus_files("release"), "release")
     with open(os.path.join("release", "crawl_state.json"), "w", encoding="utf-8") as f:
         json.dump({"A": "2027-01-01", "Z": "2026-01-01"}, f)
-    mine = {1: {**deck, "id": 1, "updated": "2026-06-01"}, 2: {**deck, "id": 2, "updated": "2026-06-01"}}
+    os.makedirs("mine")
+    os.chdir("mine")
+    with open("decks-new.jsonl.gz", "wb") as f:
+        for d in [{**deck, "id": 1, "updated": "2026-06-01"}, {**deck, "id": 2, "updated": "2026-06-01"}]:
+            f.write(gzip.compress((json.dumps(d) + "\n").encode()))
     state = {"A": "2026-10-01", "B // B2": "2026-10-01"}
-    assert build_decks.merge(mine, state, "release") == 2
+    assert build_decks.merge(os.path.join("..", "release"), state) == (2, 3)
+    mine = all_decks()
     assert {i: d["updated"] for i, d in mine.items()} == {1: "2026-06-01", 2: "2026-12-01", 99: "2026-09-30"}
     assert state == {"A": "2027-01-01", "B // B2": "2026-10-01", "Z": "2026-01-01"}
     assert mine[1]["created"] == "2025-12-01"  # an older copy can still tell when the deck was made
+    os.chdir("..")
     # Tournaments: the ones only the other copy has, and ones it has more decklists of
     old, new = [0] * 9, [0] * 10  # an entry fetched before pilots' profiles were, and one after
     mine = {"a": {"entries": [new, new]}, "b": {"entries": [new]}, "d": {"entries": [old]}}
