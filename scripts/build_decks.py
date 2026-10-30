@@ -14,6 +14,7 @@ import argparse
 import bisect
 import gzip
 import json
+import math
 import os
 import re
 import shutil
@@ -1072,6 +1073,8 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
         played = sorted({number[o] for o in d["cards"]
                          if o in number and o not in basic and o not in banned and o not in d["commanders"]})
         groups[key].append((d, played))
+    for decks in groups.values():  # newest first, so nothing depends on the order decks are stored in
+        decks.sort(key=lambda x: (x[0]["updated"], str(x[0]["id"])), reverse=True)
 
     # A window is every deck made from its first day on. None: no deck known to be made in it, or no
     # known deck is older, so the window isn't filled in yet.
@@ -1086,7 +1089,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
     everywhere = Counter(c for decks in groups.values() for _, played in decks for c in played)
     total = sum(len(decks) for decks in groups.values())
     usual = Counter()
-    for c, k in everywhere.items():
+    for c, k in sorted(everywhere.items()):
         for t in card_tags[c]:
             usual[t] += k / total
     if os.path.isdir(out_dir):
@@ -1120,12 +1123,12 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             write_json(os.path.join(out_dir, "results", "pilots", f"{b}.json"), block)
         write_json(os.path.join(out_dir, "results", "ranking.json"), {"windows": RESULT_WINDOWS, "pilots": ranking(histories, today)})
     commanders, trends = [], []
-    for key, decks in groups.items():
+    for key, decks in sorted(groups.items()):
         if len(decks) < MIN_DECKS:
             continue
         here = Counter(c for _, played in decks for c in played)
         known_themes = themes(here, len(decks), usual, card_tags)
-        price = median([round(100 * sum(prices[o] * k for o, k in d["cards"].items() if o in prices and o not in basic))
+        price = median([round(100 * math.fsum(prices[o] * k for o, k in d["cards"].items() if o in prices and o not in basic))
                         for d, _ in decks], -1)
         bracket = median([d["bracket"] for d, _ in decks if d.get("bracket")], 0)
         # Trends: decks made ever and in each window, and how many of them play each card. Only cards
@@ -1135,7 +1138,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
         counts, plays = window_plays(decks, since, made)
         trends.append([key, counts, price, bracket, known_themes, trend_cards(counts, plays, TREND_SHARE, TREND_DECKS)])
 
-        decks = sorted(decks, key=lambda x: (x[0]["updated"], str(x[0]["id"])), reverse=True)[:MAX_DECKS]
+        decks = decks[:MAX_DECKS]
         here = Counter(c for _, played in decks for c in played)
         played_most = sorted(here, key=lambda c: (-here[c], c))
         position = {c: i for i, c in enumerate(played_most)}
@@ -1165,11 +1168,11 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             write_json(os.path.join(out_dir, "results", f"{key}.json"), {k: v for k, v in standings[key].items() if k not in ("lists", "refs")})
             write_json(os.path.join(out_dir, "results", "lists", f"{key}.json"), standings[key]["lists"])
         commanders.append([key, counts[0], signature[:SIGNATURE]])
-    commanders.sort(key=lambda c: -c[1])
+    commanders.sort(key=lambda c: (-c[1], c[0]))
     write_json(os.path.join(out_dir, "index.json"),
                {"decks": total, "commanders": commanders, "windows": WINDOWS, "since": since,
                 "staples": sorted(c for c, k in everywhere.items() if k >= STAPLE * total)})
-    trends.sort(key=lambda c: -c[1][0])
+    trends.sort(key=lambda c: (-c[1][0], c[0]))
     names = sorted({t for c in trends for t in c[4]})
     for c in trends:
         c[4] = [names.index(t) for t in c[4]]
