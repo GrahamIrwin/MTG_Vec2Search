@@ -471,9 +471,15 @@ function withRows(list, more, rows) {
   list.replaceChildren();
   more.onclick();
 }
-let withTab = "synergy"; // the tab last picked, kept from card to card
+let withTab = "details"; // the tab last picked, kept from card to card
+// Just the card's details, no tabs (opened anywhere but a commander page, or nothing more to show)
+function plainCard() {
+  modal.classList.remove("wide");
+  $("with-tabs").hidden = true;
+  for (const e of modal.querySelectorAll("[data-with]")) e.hidden = e.dataset.with !== "details";
+}
 async function showCardWith(card) {
-  $("card-with").hidden = true;
+  plainCard();
   const ctx = cardContext;
   if (!ctx || card === undefined || !ctx.shard.position.has(card)) return;
   const { shard, names, lead } = ctx;
@@ -482,7 +488,6 @@ async function showCardWith(card) {
   // From the first month with enough decks to go on: the few before it are mostly noise
   const byMonth = playRateByMonth(shard, card);
   byMonth.splice(0, Math.max(0, byMonth.findIndex(r => r.decks >= FEW_MONTH_DECKS)));
-  $("with-label").textContent = `${name} in ${lead} decks`;
   const nameButton = c => el("button", { type: "button", className: "term", textContent: frontName(names[c]), title: names[c],
     onclick: () => openByNumber(c) });
 
@@ -532,15 +537,17 @@ async function showCardWith(card) {
   // showing, at the size they're shown at
   const tabs = () => {
     const views = [
+      ["details", "Card"],
       graph.nodes.length >= 3 && ["synergy", "Synergy"],
       played.length && ["played", withCount("Played more with", played.length)],
       wins.length && ["wins", withCount("Wins more with", wins.length)],
       (byMonth.filter(r => r.decks).length >= 2 || months.some(r => r.decks)) && ["time", "Over time"],
     ].filter(Boolean);
-    $("card-with").hidden = !views.length;
-    if (!views.length) return;
-    const current = views.some(([v]) => v === withTab) ? withTab : views[0][0];
-    showSections($("card-with"), $("with-tabs"), views, current, v => { withTab = v; tabs(); }, "with");
+    if (views.length < 2) return plainCard();
+    modal.classList.add("wide"); // before drawing: the charts are drawn at the size they're shown at
+    $("with-tabs").hidden = false;
+    const current = views.some(([v]) => v === withTab) ? withTab : "details";
+    showSections(modal, $("with-tabs"), views, current, v => { withTab = v; tabs(); }, "with");
     if (current === "synergy") synergyChart($("synergy"), graph, ctx, name);
     if (current === "time") drawTime();
   };
