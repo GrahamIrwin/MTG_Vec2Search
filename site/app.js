@@ -460,7 +460,7 @@ const PAGE_WITH = 5;
 const FEW_MONTH_DECKS = 20; // a month with fewer decks is drawn faded (tournament decks: MIN_RESULT_DECKS)
 const frontName = name => name.split(" // ")[0];
 const openByNumber = card => cardInfo(card).then(info => openCard(info.id, card));
-function withRows(box, list, more, rows) {
+function withRows(list, more, rows) {
   let shown = 0;
   more.onclick = () => {
     const page = shown ? 2 * PAGE_WITH : PAGE_WITH;
@@ -470,38 +470,36 @@ function withRows(box, list, more, rows) {
   };
   list.replaceChildren();
   more.onclick();
-  box.hidden = !rows.length;
 }
+let withTab = "synergy"; // the tab last picked, kept from card to card
 async function showCardWith(card) {
   $("card-with").hidden = true;
   const ctx = cardContext;
   if (!ctx || card === undefined || !ctx.shard.position.has(card)) return;
   const { shard, names, lead } = ctx;
   const name = frontName(names[card]);
-  const played = playedMoreWith(shard, card);
+  const decksWith = shard.plays[shard.position.get(card)];
   // From the first month with enough decks to go on: the few before it are mostly noise
   const byMonth = playRateByMonth(shard, card);
   byMonth.splice(0, Math.max(0, byMonth.findIndex(r => r.decks >= FEW_MONTH_DECKS)));
-  const decksWith = shard.plays[shard.position.get(card)];
-  $("with-label").textContent = `With ${lead}`;
+  $("with-label").textContent = `${name} in ${lead} decks`;
   const nameButton = c => el("button", { type: "button", className: "term", textContent: frontName(names[c]), title: names[c],
     onclick: () => openByNumber(c) });
-  $("played-with-lede").textContent = `Cards the ${decksText(decksWith)} with ${name} play more often than all `
-    + `${shard.decks.length.toLocaleString()} ${lead} decks do: the share of all decks, then of decks with ${name}.`;
-  withRows($("played-with-box"), $("played-with"), $("more-played-with"), played.map(x => el("li", {}, nameButton(x.card),
-    el("small", { textContent: `${percent(x.base)} → ${percent(x.with)} of decks (${decksText(x.decksWith)})` }))));
-  $("wins-with-box").hidden = $("synergy-box").hidden = true;
-  $("card-with").hidden = false;
+
+  const played = playedMoreWith(shard, card);
+  $("played-with-lede").textContent = `The share of all ${shard.decks.length.toLocaleString()} ${lead} decks that play each card, `
+    + `then of the ${decksText(decksWith)} with ${name}.`;
+  withRows($("played-with"), $("more-played-with"), played.map(x => el("li", {}, nameButton(x.card),
+    el("small", { textContent: `${percent(x.base)} → ${percent(x.with)} of decks · ${decksText(x.decksWith)}` }))));
 
   // Over time: its play rate, and with tournament results, its decks' win rate
-  let lists = null, months = [];
-  let kind = "play";
+  let lists = null, months = [], wins = [], kind = "play";
   const drawTime = () => {
     const kinds = [["play", "Play rate"], ...(months.some(r => r.decks) ? [["wins", "Tournament win rate"]] : [])];
+    if (!kinds.some(([k]) => k === kind)) kind = "play";
     chipRow($("with-kinds"), kinds, kind, k => { kind = k; drawTime(); });
     $("with-kinds").hidden = kinds.length < 2;
     $("with-legend").hidden = kind !== "wins";
-    $("with-time").hidden = false; // drawn at the size it's shown at
     if (kind === "play") {
       const every = (shard.months?.[1] ?? []).reduce((k, c) => k + c, 0) > shard.decks.length;
       $("with-chart-note").textContent = `The share of ${lead} decks made each month that play ${name}, from ${every ? "the newest" : "all"} `
@@ -511,7 +509,6 @@ async function showCardWith(card) {
         value: r => (r.decks ? r.playing / r.decks : null), few: r => r.decks < FEW_MONTH_DECKS,
         tip: r => `${monthName(r.month)}: ${r.decks ? `${percent(r.playing / r.decks)} of ${decksText(r.decks)}` : "no decks"}`,
       });
-      $("with-time").hidden = kinds.length < 2 && byMonth.filter(r => r.decks).length < 2; // the chips stay when there's a win rate
     } else {
       $("with-legend").replaceChildren(el("span", { textContent: `Decks with ${name}` }),
         el("span", { className: "other", textContent: `All ${lead} decks` }));
@@ -526,24 +523,41 @@ async function showCardWith(card) {
       });
     }
   };
-  drawTime();
 
   const w = tournament?.w;
-  const draw = () => synergyChart($("synergy"), synergyGraph(shard, lists, card, w ?? 0), ctx, name);
-  draw();
+  // On a phone, fewer cards around it, so their names have room
+  const graphOf = () => synergyGraph(shard, lists, card, w ?? 0, $("modal").clientWidth < 560 ? { n: 6 } : {});
+  let graph = graphOf();
+  // The tabs with something in them; the one picked last, or the first. Charts are drawn once they're
+  // showing, at the size they're shown at
+  const tabs = () => {
+    const views = [
+      graph.nodes.length >= 3 && ["synergy", "Synergy"],
+      played.length && ["played", withCount("Played more with", played.length)],
+      wins.length && ["wins", withCount("Wins more with", wins.length)],
+      (byMonth.filter(r => r.decks).length >= 2 || months.some(r => r.decks)) && ["time", "Over time"],
+    ].filter(Boolean);
+    $("card-with").hidden = !views.length;
+    if (!views.length) return;
+    const current = views.some(([v]) => v === withTab) ? withTab : views[0][0];
+    showSections($("card-with"), $("with-tabs"), views, current, v => { withTab = v; tabs(); }, "with");
+    if (current === "synergy") synergyChart($("synergy"), graph, ctx, name);
+    if (current === "time") drawTime();
+  };
+  tabs();
   if (!ctx.results || w === undefined) return;
   lists = await listsFile(ctx.key).catch(() => null);
   if (openedCard !== card || !lists) return;
   months = resultsByMonth(lists, card);
-  drawTime();
-  const wins = winsMoreWith(lists, card, w).filter(x => x.lift > 0 && x.evidence >= SIGNAL);
+  wins = winsMoreWith(lists, card, w).filter(x => x.lift > 0 && x.evidence >= SIGNAL);
+  graph = graphOf();
   const rate = s => percent(s.wins / s.games);
-  $("wins-with-lede").textContent = `${lead} tournament decks with ${name} in the last ${tournament.period}: the win rate `
-    + "of those without each card listed, then of those with it (share of games won). Only clear differences are shown.";
-  withRows($("wins-with-box"), $("wins-with"), $("more-wins-with"), wins.map(x => el("li", {}, nameButton(x.card),
-    el("small", { textContent: `${rate(x.without)} → ${rate(x.with)} win rate (${x.with.decks.toLocaleString()} decks play both, `
-      + `${x.without.decks.toLocaleString()} only ${name})` }))));
-  draw();
+  $("wins-with-lede").textContent = `The win rate of ${lead} tournament decks with ${name} in the last ${tournament.period}: `
+    + "without each card, then with it. Only clear differences are shown.";
+  withRows($("wins-with"), $("more-wins-with"), wins.map(x => el("li", {}, nameButton(x.card),
+    el("small", { textContent: `${rate(x.without)} → ${rate(x.with)} win rate · ${x.with.decks.toLocaleString()} decks with both, `
+      + `${x.without.decks.toLocaleString()} without` }))));
+  tabs();
 }
 
 // A synergy graph (synergyGraph's) in box: each card's art in a circle, named under it; lines from the card
@@ -551,19 +565,23 @@ async function showCardWith(card) {
 // node to the cards its decks win more with. Pointing at a card says why it's there; picking it opens it.
 function synergyChart(box, graph, { names, lead }, name) {
   box.replaceChildren();
-  $("synergy-box").hidden = graph.nodes.length < 3;
   if (graph.nodes.length < 3) return;
-  // Filling the width, as tall as its nodes need: on a phone, stretched taller and with smaller nodes to fit
-  const W = Math.max(260, box.clientWidth || 480), narrow = W < 420;
-  const [mx, my] = narrow ? [30, 30] : [40, 34];
+  // Filling the width up to a height, centred: on a phone, stretched taller and with smaller nodes to fit
+  const W = Math.max(260, box.clientWidth || 480), narrow = W < 520;
+  box.classList.toggle("narrow", narrow);
+  const size = narrow ? 19 : 30;
+  const [mx, my] = [size + 18, size + 10];
   const xs = graph.nodes.map(n => n.x), ys = graph.nodes.map(n => n.y);
   const [x0, y0] = [Math.min(...xs), Math.min(...ys)];
-  const sx = (W - 2 * mx) / Math.max(0.1, Math.max(...xs) - x0), sy = narrow ? 1.5 * sx : sx;
-  const H = Math.round(2 * my + 12 + (Math.max(...ys) - y0) * sy); // and room for the names under the bottom row
-  const at = n => [mx + (n.x - x0) * sx, my + (n.y - y0) * sy];
-  const size = narrow ? 16 : 22;
-  const radius = n => Math.round(size * (n.kind === "center" ? 1.35 : n.kind === "extra" ? 0.8 : 1));
-  const chars = narrow ? 10 : 16;
+  const [rx, ry] = [Math.max(0.1, Math.max(...xs) - x0), Math.max(0.1, Math.max(...ys) - y0)];
+  let sx = (W - 2 * mx) / rx, sy = narrow ? 1.7 * sx : sx;
+  const fit = Math.min(1, ((narrow ? 520 : 500) - 2 * my - 22) / (ry * sy));
+  [sx, sy] = [sx * fit, sy * fit];
+  const H = Math.round(2 * my + 22 + ry * sy); // and room for the names under the bottom row
+  const ox = (W - rx * sx) / 2;
+  const at = n => [ox + (n.x - x0) * sx, my + (n.y - y0) * sy];
+  const radius = n => Math.round(size * (n.kind === "center" ? 1.3 : n.kind === "extra" ? 0.8 : 1));
+  const chars = narrow ? 12 : 20;
   const short = t => (t.length > chars ? t.slice(0, chars - 1).trimEnd() + "…" : t);
   const byCard = new Map(graph.nodes.filter(n => n.card !== null).map(n => [n.card, n]));
   const wonNode = graph.nodes.find(n => n.kind === "won");
@@ -597,12 +615,16 @@ function synergyChart(box, graph, { names, lead }, name) {
       n.lift !== undefined && `tournament decks with both win more than those with only ${name}`].filter(Boolean);
     return `${names[n.card]}: ${bits.join("; ")}`;
   };
-  const note = [`Lines from ${name} go to the cards ${lead} decks play more with it (thicker: more)`,
-    together && "grey lines join cards played together far more often than the rest",
-    apart && "red dotted lines join cards rarely played together (one or the other)",
-    wonNode && "dashed green lines join Won to the cards its tournament decks win more with"].filter(Boolean).join("; ")
-    + ". Pick a card to open it.";
-  const noteBox = $("synergy-note");
+  $("synergy-legend").replaceChildren(...[["spoke", `Played more with ${name} (thicker: more)`],
+    together && ["link", "Often played together"], apart && ["apart", "One or the other, rarely both"],
+    wonNode && ["won-link", "Its tournament decks win more with"]].filter(Boolean).map(([cls, text]) => {
+    const sample = svgEl("svg", { viewBox: "0 0 34 10", "aria-hidden": "true" });
+    sample.append(svgEl("line", { class: cls, x1: 2, y1: 5, x2: 32, y2: 5, ...(cls === "spoke" && { "stroke-width": 4 }),
+      ...(cls === "link" && { "stroke-width": 3 }) }));
+    return el("li", {}, sample, text);
+  }));
+  const note = "Point at a card for its numbers, or pick one to open it.";
+  const noteBox = $("synergy-hint");
   const focus = n => {
     for (const [node, a, b] of lines) node.classList.toggle("dim", !!n && a !== n && b !== n);
     noteBox.textContent = n ? say(n) : note;
@@ -622,15 +644,15 @@ function synergyChart(box, graph, { names, lead }, name) {
     const g = svgEl("g", { class: `node ${n.kind}${n.kind === "partner" && n.lift !== undefined ? " wins" : ""}`,
       transform: `translate(${x.toFixed(1)},${y.toFixed(1)})` });
     g.append(svgEl("title", {}, say(n)), svgEl("circle", { class: "back", r }));
-    if (n.kind === "won") g.append(svgEl("text", { class: "inside", "text-anchor": "middle", y: 4.5 }, "Won"));
+    if (n.kind === "won") g.append(svgEl("text", { class: "inside", "text-anchor": "middle", y: 5.5 }, "Won"));
     else {
       const img = svgEl("image", { x: -r * 1.4, y: -r, width: r * 2.8, height: r * 2, preserveAspectRatio: "xMidYMid slice",
         "clip-path": `url(#syn-clip-${r})` });
       cardInfo(n.card).then(info => img.setAttribute("href", artCrop(info.id)));
       // Moved in from the edge, so a name there isn't cut off
-      const half = Math.min(chars, frontName(names[n.card]).length) * 3.3;
+      const half = Math.min(chars, frontName(names[n.card]).length) * (narrow ? 3.6 : 4.2);
       const tx = Math.min(W - 2 - half - x, Math.max(2 + half - x, 0));
-      g.append(img, svgEl("text", { "text-anchor": "middle", x: tx.toFixed(1), y: r + 14 }, short(frontName(names[n.card]))));
+      g.append(img, svgEl("text", { "text-anchor": "middle", x: tx.toFixed(1), y: r + (narrow ? 15 : 18) }, short(frontName(names[n.card]))));
     }
     g.append(svgEl("circle", { class: "ring", r }));
     if (n.kind !== "center") {
@@ -3016,7 +3038,7 @@ function monthChart(box, rows, { value, other = null, few = () => false, tip, la
   box.replaceChildren();
   if (!rows.length) return;
   const W = Math.max(260, box.clientWidth || 640);
-  const [H, L, R, T, B] = [Math.min(220, Math.max(170, Math.round(W * 0.45))), isShare ? 42 : 48, 10, 30, 26];
+  const [H, L, R, T, B] = [Math.min(W < 520 ? 220 : 300, Math.max(170, Math.round(W * 0.45))), isShare ? 42 : 48, 10, 30, 26];
   const values = rows.map(value), others = rows.map(r => (other ? other(r) : null));
   const top = Math.max(...values, ...others, isShare ? 0.05 : 1); // nulls count as 0
   const ticks = niceTicks(0, top * 1.05, W < 420 ? 3 : 4);

@@ -654,21 +654,28 @@
     .months-heading { margin-top: 10px; }
     #commander-months-box { margin-bottom: 18px; }
     /* A card with a commander, in its details: over time, what it's played and wins more with, and a graph of those */
-    .card-with { margin: 14px 0 4px; }
-    .card-with > .label { display: block; line-height: 1.3; }
-    .with-heading { font-size: 18px; margin: 18px 0 0; }
-    .with-note { margin: 4px 0 0; font-size: 14px; line-height: 1.4; }
-    .with-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
-    .with-list small { font-size: 14px; font-variant-numeric: tabular-nums; }
-    .card-with .link-button { margin-top: 6px; font-size: 15px; }
-    .card-with .chips button { font-size: 14px; padding: 2px 10px; }
-    #with-kinds { margin-top: 8px; }
-    .synergy { margin-top: 8px; }
+    /* Under the card and its details, the dialog's whole width */
+    .card-with { grid-column: 1 / -1; border-top: 1px solid var(--rule); padding-top: 18px; min-width: 0; }
+    .with-title { font-size: 22px; margin: 0 0 10px; }
+    .with-tabs { margin-bottom: 12px; }
+    .with-note { margin: 0 0 10px; font-size: 16px; line-height: 1.45; color: var(--ink-soft); }
+    /* A table: names in a column as wide as the longest, numbers beside them */
+    .with-list { display: grid; grid-template-columns: max-content 1fr; align-items: baseline; gap: 8px 18px; }
+    .with-list li { display: contents; }
+    .with-list li > button { justify-self: start; font-size: 16px; max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .with-list small { font-size: 16px; font-variant-numeric: tabular-nums; }
+    @media (max-width: 600px) { .with-list { grid-template-columns: 1fr; gap: 2px; } .with-list small { margin-bottom: 8px; } }
+    .card-with .link-button { margin-top: 8px; font-size: 16px; }
+    #with-kinds { margin-bottom: 4px; }
+    .card-with .price-chart text { font-size: 14px; }
+    .synergy-legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 15px; color: var(--ink-soft); }
+    .synergy-legend li { display: flex; align-items: center; gap: 8px; }
+    .synergy-legend svg { width: 34px; height: 10px; flex: none; overflow: visible; }
     .synergy svg { display: block; width: 100%; height: auto; touch-action: manipulation; }
-    .synergy .spoke { stroke: var(--link); stroke-linecap: round; opacity: .55; }
-    .synergy .link { stroke: var(--ink-faint); stroke-linecap: round; opacity: .55; }
-    .synergy .apart { stroke: var(--down); stroke-width: 2; stroke-dasharray: 1 5; stroke-linecap: round; }
-    .synergy .won-link { stroke: var(--up); stroke-width: 2; stroke-dasharray: 5 4; stroke-linecap: round; }
+    :is(.synergy, .synergy-legend) .spoke { stroke: var(--link); stroke-linecap: round; opacity: .55; }
+    :is(.synergy, .synergy-legend) .link { stroke: var(--ink-faint); stroke-linecap: round; opacity: .55; }
+    :is(.synergy, .synergy-legend) .apart { stroke: var(--down); stroke-width: 2; stroke-dasharray: 1 5; stroke-linecap: round; }
+    :is(.synergy, .synergy-legend) .won-link { stroke: var(--up); stroke-width: 2; stroke-dasharray: 5 4; stroke-linecap: round; }
     .synergy .node { cursor: pointer; outline: none; }
     .synergy .node .back { fill: var(--paper-3); }
     .synergy .node .ring { fill: none; stroke: var(--paper); stroke-width: 2; }
@@ -676,10 +683,11 @@
     .synergy .node.wins .ring { stroke: var(--up); stroke-width: 2.5; }
     .synergy .node.won .back { fill: var(--accent-soft); }
     .synergy .node.won .ring { stroke: var(--up); stroke-width: 2; }
-    .synergy .node.won text.inside { fill: var(--up); font-weight: bold; font-size: 13px; }
+    .synergy .node.won text.inside { fill: var(--up); font-weight: bold; font-size: 16px; }
     .synergy .node:hover .ring, .synergy .node:focus-visible .ring { stroke: var(--focus); stroke-width: 3; }
     .synergy .center { cursor: default; }
-    .synergy text { font-family: inherit; font-size: 12px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
+    .synergy text { font-family: inherit; font-size: 15px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
+    .synergy.narrow text { font-size: 13px; }
     .synergy .dim { opacity: .15; }
     .field input.short { width: 90px; }
     #trend-theme { width: 220px; max-width: 100%; }
@@ -1627,38 +1635,37 @@
       <span class="label">Printings</span>
       <ul class="printings" id="printings"></ul>
       <div class="card-results" id="card-results" hidden></div>
-      <div class="card-with" id="card-with" hidden>
-        <span class="label" id="with-label"></span>
-        <div id="with-time" hidden>
-          <div class="chips type-filter" id="with-kinds" role="group" aria-label="Over time"></div>
-          <p class="chart-legend" id="with-legend" hidden></p>
-          <div class="price-chart" id="with-chart"></div>
-          <p class="muted with-note" id="with-chart-note"></p>
-        </div>
-        <div id="played-with-box" hidden>
-          <h3 class="with-heading">Played more with</h3>
-          <p class="muted with-note" id="played-with-lede"></p>
-          <ul class="found-list with-list" id="played-with"></ul>
-          <button type="button" class="link-button" id="more-played-with" hidden>Show more</button>
-        </div>
-        <div id="wins-with-box" hidden>
-          <h3 class="with-heading">Wins more with</h3>
-          <p class="muted with-note" id="wins-with-lede"></p>
-          <ul class="found-list with-list" id="wins-with"></ul>
-          <button type="button" class="link-button" id="more-wins-with" hidden>Show more</button>
-        </div>
-        <div id="synergy-box" hidden>
-          <h3 class="with-heading">Synergy</h3>
-          <div class="synergy" id="synergy"></div>
-          <p class="muted with-note" id="synergy-note"></p>
-        </div>
-      </div>
       <div class="card-actions" id="card-actions" hidden>
         <a id="as-commander" class="btn-quiet" hidden>View as commander</a>
         <a id="in-decks" class="btn-quiet">View in commander decks</a>
       </div>
       <a id="scryfall-link" target="_blank" rel="noopener">View on Scryfall ↗</a>
     </div>
+    <section class="card-with" id="card-with" hidden>
+      <h3 class="with-title" id="with-label"></h3>
+      <div class="chips type-filter with-tabs" id="with-tabs" role="group" aria-label="Show"></div>
+      <div data-with="synergy">
+        <p class="with-note" id="synergy-hint"></p>
+        <div class="synergy" id="synergy"></div>
+        <ul class="synergy-legend" id="synergy-legend"></ul>
+      </div>
+      <div data-with="played">
+        <p class="with-note" id="played-with-lede"></p>
+        <ul class="found-list with-list" id="played-with"></ul>
+        <button type="button" class="link-button" id="more-played-with" hidden>Show more</button>
+      </div>
+      <div data-with="wins">
+        <p class="with-note" id="wins-with-lede"></p>
+        <ul class="found-list with-list" id="wins-with"></ul>
+        <button type="button" class="link-button" id="more-wins-with" hidden>Show more</button>
+      </div>
+      <div data-with="time">
+        <div class="chips type-filter" id="with-kinds" role="group" aria-label="Over time"></div>
+        <p class="chart-legend" id="with-legend" hidden></p>
+        <div class="price-chart" id="with-chart"></div>
+        <p class="with-note" id="with-chart-note"></p>
+      </div>
+    </section>
   </dialog>
 
   <dialog id="terms" aria-labelledby="terms-title">
