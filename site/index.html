@@ -321,7 +321,7 @@
     .close:hover { background: var(--paper-2); border-color: var(--rule); color: var(--ink); }
 
     #modal[open] { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 30px; }
-    @media (max-width: 700px) { #modal[open] { grid-template-columns: 1fr; } .card-sheet-art { max-width: 300px; margin: 0 auto; } }
+    @media (max-width: 700px) { #modal[open] { grid-template-columns: 1fr; } .card-sheet-art { max-width: 300px; margin: 0 auto; } .card-sheet-info { padding-right: 0; } }
     .card-sheet-art { position: relative; }
     .foil-wrapper { position: relative; overflow: hidden; border-radius: 4.75% / 3.4%; box-shadow: var(--shadow-md); background: var(--paper-2); }
     .foil-wrapper img { display: block; width: 100%; aspect-ratio: 488 / 680; }
@@ -641,6 +641,45 @@
       background: var(--paper-2); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 8px;
       font-size: 14px; font-variant-numeric: tabular-nums; box-shadow: var(--shadow-sm);
     }
+    /* Month charts (monthChart in app.js): the price chart's look, bars or lines; faded months have few decks */
+    .price-chart .faint { opacity: .4; }
+    .price-chart .bar { fill: var(--link); }
+    .price-chart .other { fill: none; stroke: var(--ink-faint); stroke-width: 1.5; stroke-linejoin: round; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 8px 0 0; font-size: 14px; color: var(--ink-soft); }
+    .chart-legend span::before {
+      content: ""; display: inline-block; width: 14px; height: 2px; margin-right: 6px; vertical-align: middle; background: var(--link);
+    }
+    .chart-legend .other::before { background: var(--ink-faint); }
+    #commander-months { max-width: 900px; }
+    .months-heading { margin-top: 10px; }
+    #commander-months-box { margin-bottom: 18px; }
+    /* A card with a commander, in its details: over time, what it's played and wins more with, and a graph of those */
+    .card-with { margin: 14px 0 4px; }
+    .card-with > .label { display: block; line-height: 1.3; }
+    .with-heading { font-size: 18px; margin: 18px 0 0; }
+    .with-note { margin: 4px 0 0; font-size: 14px; line-height: 1.4; }
+    .with-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+    .with-list small { font-size: 14px; font-variant-numeric: tabular-nums; }
+    .card-with .link-button { margin-top: 6px; font-size: 15px; }
+    .card-with .chips button { font-size: 14px; padding: 2px 10px; }
+    #with-kinds { margin-top: 8px; }
+    .synergy { margin-top: 8px; }
+    .synergy svg { display: block; width: 100%; height: auto; touch-action: manipulation; }
+    .synergy .spoke { stroke: var(--link); stroke-linecap: round; opacity: .55; }
+    .synergy .link { stroke: var(--ink-faint); stroke-linecap: round; opacity: .55; }
+    .synergy .won-link { stroke: var(--up); stroke-width: 2; stroke-dasharray: 5 4; stroke-linecap: round; }
+    .synergy .node { cursor: pointer; outline: none; }
+    .synergy .node .back { fill: var(--paper-3); }
+    .synergy .node .ring { fill: none; stroke: var(--paper); stroke-width: 2; }
+    .synergy .node.center .ring { stroke: var(--brass); stroke-width: 3; }
+    .synergy .node.wins .ring { stroke: var(--up); stroke-width: 2.5; }
+    .synergy .node.won .back { fill: var(--accent-soft); }
+    .synergy .node.won .ring { stroke: var(--up); stroke-width: 2; }
+    .synergy .node.won text.inside { fill: var(--up); font-weight: bold; font-size: 13px; }
+    .synergy .node:hover .ring, .synergy .node:focus-visible .ring { stroke: var(--focus); stroke-width: 3; }
+    .synergy .center { cursor: default; }
+    .synergy text { font-family: inherit; font-size: 12px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
+    .synergy .dim { opacity: .15; }
     .field input.short { width: 90px; }
     #trend-theme { width: 220px; max-width: 100%; }
     .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 10px; }
@@ -1015,6 +1054,11 @@
           <div data-view="trends">
             <details class="panel" open id="commander-trends">
               <summary><h2 class="deck-heading">Trends</h2></summary>
+              <div id="commander-months-box" hidden>
+                <h3 class="sub-heading months-heading">Decks made per month</h3>
+                <div class="price-chart" id="commander-months"></div>
+                <p class="muted deck-lede" id="commander-months-note"></p>
+              </div>
               <p class="muted deck-lede" id="commander-trends-lede"></p>
               <div class="chips type-filter" id="commander-windows" role="group" aria-label="Period"></div>
               <h3 class="sub-heading">Rising</h3>
@@ -1582,6 +1626,32 @@
       <span class="label">Printings</span>
       <ul class="printings" id="printings"></ul>
       <div class="card-results" id="card-results" hidden></div>
+      <div class="card-with" id="card-with" hidden>
+        <span class="label" id="with-label"></span>
+        <div id="with-time" hidden>
+          <div class="chips type-filter" id="with-kinds" role="group" aria-label="Over time"></div>
+          <p class="chart-legend" id="with-legend" hidden></p>
+          <div class="price-chart" id="with-chart"></div>
+          <p class="muted with-note" id="with-chart-note"></p>
+        </div>
+        <div id="played-with-box" hidden>
+          <h3 class="with-heading">Played more with</h3>
+          <p class="muted with-note" id="played-with-lede"></p>
+          <ul class="found-list with-list" id="played-with"></ul>
+          <button type="button" class="link-button" id="more-played-with" hidden>Show more</button>
+        </div>
+        <div id="wins-with-box" hidden>
+          <h3 class="with-heading">Wins more with</h3>
+          <p class="muted with-note" id="wins-with-lede"></p>
+          <ul class="found-list with-list" id="wins-with"></ul>
+          <button type="button" class="link-button" id="more-wins-with" hidden>Show more</button>
+        </div>
+        <div id="synergy-box" hidden>
+          <h3 class="with-heading">Synergy</h3>
+          <div class="synergy" id="synergy"></div>
+          <p class="muted with-note" id="synergy-note"></p>
+        </div>
+      </div>
       <div class="card-actions" id="card-actions" hidden>
         <a id="as-commander" class="btn-quiet" hidden>View as commander</a>
         <a id="in-decks" class="btn-quiet">View in commander decks</a>

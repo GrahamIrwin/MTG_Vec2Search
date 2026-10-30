@@ -103,6 +103,8 @@ time, a few KB after that).
      partner pair) with its newest 10,000 decks. Each deck is stored as positions
      in that commander's list of cards, most played first, gap-encoded like the
      card index, which comes to about 100 bytes per deck over the wire.
+     It also counts the decks made each month over all of the commander's decks, not just the
+     10,000 kept (`months`).
      `index.json` lists every commander with its "signature" cards, the ones
      its decks play far more often than other decks do.
    - In the browser (`site/deck.js`), decks are compared by cosine similarity
@@ -211,6 +213,21 @@ time, a few KB after that).
    page in commander decks (`?card=<number>`): the commanders whose decks
    play it most often, grouped by what those decks are known for.
 
+   Opened from a commander's page, a card's details also show it **with that
+   commander**: its play rate by month among the commander's decks (and, with
+   tournament results, its decks' win rate by month against all the
+   commander's decks; months with few decks are faded), **Played more with**
+   (cards the decks playing it play more often than the commander's decks as a
+   whole, e.g. "42% → 48% of decks (595 decks)"), **Wins more with** (cards
+   whose tournament decks with both win more than those with only this card,
+   over the page's results period, clear differences only, e.g. "26% → 38% win
+   rate (412 decks play both, 300 only Jeska's Will)"), and a **synergy graph**:
+   the card in the middle, the cards it's played more with around it (thicker
+   lines: more), grey lines between those played together more than chance, and
+   a "Won" node linked to the cards it wins more with. Picking a card in the
+   lists or the graph opens it. The page's **Trends** section charts the decks
+   made per month, over all of the commander's decks.
+
    **Tournament results**, for commanders with cEDH decklists on
    [TopDeck.gg](https://topdeck.gg) (where most cEDH tournaments are run), over the last 3, 6, 12 or
    24 months:
@@ -265,7 +282,7 @@ time, a few KB after that).
      play none, over the chosen period, pulled toward the commander's win rate
      the same way (`packageResults`). It needs each tournament deck's cards, so
      `results/lists/<file name>.json` holds them one by one, fetched only when
-     a card is picked.
+     a card is picked, with each one's tournament month (`months`).
    - **Made the cut**: among the decks in events with a top cut, the cards whose share of decks
      differs most between those that made it and those that missed it (`cutGroups()` and
      `playedDifferently()`): what they play more, and less, the biggest gap first, 6 at a time

@@ -159,9 +159,13 @@ with tempfile.TemporaryDirectory() as tmp:
     # A card banned in Commander (Jeweled Lotus) is left out of what the decks play: nothing suggests it
     banned = [dict(c) for c in cards]
     banned[3]["legalities"] = {"commander": "banned"}  # c1, in 4 of the 5 decks
+    build_decks.MAX_DECKS = 2  # and decks made per month count every deck, not just the newest kept
     build(corpus, banned, tags, os.path.join(tmp, "banned"), today=date(2026, 10, 4))
+    build_decks.MAX_DECKS = 10000
     with open(os.path.join(tmp, "banned", "0.json"), encoding="utf-8") as f:
-        assert 3 in shard["cards"] and 3 not in json.load(f)["cards"]
+        few = json.load(f)
+        assert 3 in shard["cards"] and 3 not in few["cards"]
+    assert len(few["decks"]) == 2 and few["months"] == shard["months"]
     assert shard["tags"] == [["pump", [0, 1]]] and len(shard["signature"]) == 60, shard["tags"]
     precon = [sum(shard["precon"][:i + 1]) for i in range(len(shard["precon"]))]
     assert sorted(shard["cards"][p] for p in precon) == [2, 7], shard["precon"]
@@ -171,6 +175,10 @@ with tempfile.TemporaryDirectory() as tmp:
     assert first[0] == 5 and first[2] == "2026-09-05" and first[4] == "2026-10-01"  # newest first; when it was made
     assert [d[5] for d in shard["decks"]] == [4, 0, 3, 3, 3]  # its bracket (0: none)
     assert [d[4] for d in shard["decks"]] == ["2026-10-01", "2026-09-13", "2025-01-01", "2025-01-01", "2025-01-01"]
+    # Decks made each month, from the first through the last, empty months too
+    assert shard["months"] == ["2025-01", [3] + [0] * 19 + [1, 1]], shard["months"]
+    assert build_decks.month_counts(["", "2025-12-31", "2026-02-01T00:00"]) == ["2025-12", [1, 0, 1]]
+    assert build_decks.month_counts(["", ""]) is None
     positions = [sum(first[3][:i + 1]) for i in range(len(first[3]))]
     assert [shard["cards"][p] for p in positions] == [2, 98]  # no commander, no basic land
     with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
@@ -217,7 +225,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert stats["0-1"]["cards"] == []  # in 1 deck: too few to say anything
     # Each deck, for testing packages: narrowest window (event 2 is in the year's, 2), games, wins,
     # top cut (2: made it, 1: missed it, 0: none) and its cards as gaps between positions in cards
-    assert lead["lists"] == {"cards": [3, 4], "decks": [[0, 6, 4, 2, 0, 1], [0, 6, 1, 1, 0], [2, 5, 5, 0, 1]]}, lead["lists"]
+    assert lead["lists"] == {"cards": [3, 4], "decks": [[0, 6, 4, 2, 0, 1], [0, 6, 1, 1, 0], [2, 5, 5, 0, 1]],
+                             "months": ["2026-09", "2026-09", "2026-01"]}, lead["lists"]  # each deck's tournament month
     assert lead["field"][-1] == [5, 29, 16, 4, 3, 2]  # every deck, the unknown commander's too
     # The cards a pilot likes: all 5 Lead decks play Bolt, but only Ann's two play Front (2 of 5 Lead
     # decks: 0.8 of her 2 expected); Bo plays nothing more than expected, nobody else has 2 decks

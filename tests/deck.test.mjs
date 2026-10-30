@@ -4,6 +4,7 @@ import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
+  playedMoreWith, winsMoreWith, synergyGraph, playRateByMonth, resultsByMonth,
 } from "../site/deck.js";
 
 const NAMES = ["Sol Ring", "Atraxa, Praetors' Voice", "Delver of Secrets // Insectile Aberration", "Island",
@@ -326,4 +327,124 @@ test("playedDifferently: the cards decks that made the cut play most more, and l
   assert.equal(playedDifferently(missed, made).more.length, 3); // and 3, once there's room
   // Only some cards: a deck's own, say
   assert.deepEqual(playedDifferently(missed, made, { only: c => c !== 1 }).more.map(r => r.card), [6, 3]);
+});
+
+// 100 decks; card 100 in the first 40. 101: in all 40 and 10 more (50% of decks, 100% with it);
+// 102: in 5 of them only; 103: in 4 (too few); 104: every deck; 105: 20 of the 40 and 30 others (50% both ways)
+const range = (from, to) => Array.from({ length: to - from }, (_, i) => from + i);
+const made = i => (i < 30 ? "2026-01-15" : i < 60 ? "2026-03-02" : i < 90 ? "" : "2025-12-31");
+const withShard = {
+  cards: [100, 101, 102, 103, 104, 105, 106],
+  decks: range(0, 100).map(i => [i, "", "", gaps([
+    ...(i < 40 ? [0] : []), ...(i < 50 ? [1] : []), ...(i < 5 ? [2] : []), ...(i < 4 ? [3] : []), 4,
+    ...((i < 40 ? i < 20 : i < 70) ? [5] : []), ...(i >= 97 ? [6] : [])]), made(i)]),
+};
+
+test("played more with: what the decks playing a card play more than all the commander's decks", () => {
+  const shard = decodeShard(withShard);
+  const rows = playedMoreWith(shard, 100);
+  assert.deepEqual(rows.map(r => r.card), [101, 102]);
+  const { evidence, ...one } = rows[0];
+  assert.deepEqual(one, { card: 101, base: 0.5, with: 1, decks: 40, decksWith: 40 });
+  assert.ok(evidence > 2);
+  assert.deepEqual(playedMoreWith(withShard, 100), rows); // a raw file is decoded first
+  assert.deepEqual(playedMoreWith(shard, 102), []); // only 5 decks play it
+  assert.deepEqual(playedMoreWith(shard, 999), []); // no deck does
+  assert.deepEqual(playedMoreWith(shard, 100, { min: 4, evidence: 0 }).map(r => r.card), [101, 102, 103]); // 103: 4% -> 10%, 1.9 standard errors
+});
+
+test("a card's play rate by month: consecutive months, undated decks left out", () => {
+  assert.deepEqual(playRateByMonth(decodeShard(withShard), 100), [
+    { month: "2025-12", decks: 10, playing: 0 }, { month: "2026-01", decks: 30, playing: 30 },
+    { month: "2026-02", decks: 0, playing: 0 }, { month: "2026-03", decks: 30, playing: 10 }]);
+  assert.deepEqual(playRateByMonth(decodeShard(withShard), 999).map(r => r.playing), [0, 0, 0, 0]);
+  assert.deepEqual(playRateByMonth(decodeShard({ cards: [1], decks: [[1, "", "", [0], ""]] }), 1), []);
+  assert.equal(decodeShard({ ...withShard, months: ["2026-01", [3, 0, 2]] }).months[0], "2026-01");
+});
+
+// Tournament decks: [narrowest window, games, wins, cut, ...gaps]; cards 7, 8, 9, 10 at 0..3.
+// 30 decks play 7: the 15 with 8 win 4 of 6, the 15 without 1 of 6; 9 is in 5 of them, 10 in every
+// other one. 10 decks don't play 7; 10 more with 7 and 8 lost every game, but two years back.
+const listDeck = (narrowest, wins, ps) => [narrowest, 6, wins, 0, ...gaps(ps)];
+const wonLists = {
+  cards: [7, 8, 9, 10],
+  decks: [
+    ...range(0, 30).map(i => listDeck(0, i < 15 ? 4 : 1, [0, ...(i < 15 ? [1] : []), ...(i < 5 ? [2] : []), ...(i % 2 ? [] : [3])])),
+    ...range(0, 10).map(() => listDeck(0, 3, [1, 2])),
+    ...range(0, 10).map(() => listDeck(3, 0, [0, 1])),
+  ],
+};
+
+test("wins more with: among a card's tournament decks, those with another card against those without", () => {
+  assert.deepEqual(winsMoreWith(wonLists, 7, 1), []); // 15 a side: under the 20 a pair needs by default
+  const rows = winsMoreWith(wonLists, 7, 1, { min: 10 });
+  assert.deepEqual(rows.map(r => r.card), [8, 10]); // 9: in only 5
+  assert.deepEqual(rows[0].with, { decks: 15, games: 90, wins: 60 });
+  assert.deepEqual(rows[0].without, { decks: 15, games: 90, wins: 15 });
+  assert.ok(rows[0].lift > 0.2 && rows[0].evidence > 2);
+  assert.ok(Math.abs(rows[1].evidence) < 2); // 10: about the same
+  // Over every window the old losing decks count too
+  const all = winsMoreWith(wonLists, 7, 3, { min: 10 }).find(r => r.card === 8);
+  assert.equal(all.with.decks, 25);
+  assert.ok(all.lift < rows[0].lift);
+  assert.deepEqual(winsMoreWith(wonLists, 7, 1, { min: 5 }).map(r => r.card).sort((a, b) => a - b), [8, 9, 10]);
+  assert.deepEqual(winsMoreWith(wonLists, 42, 3, { min: 10 }), []);
+});
+
+test("a card's tournament results by month, against all the commander's decks; none in older files", () => {
+  const lists = { cards: [7, 8], months: ["2025-11", "2026-01", "", "2026-01"],
+    decks: [listDeck(0, 2, [0]), listDeck(0, 3, [0, 1]), listDeck(0, 6, [0]), listDeck(0, 1, [1])] };
+  assert.deepEqual(resultsByMonth(lists, 7), [
+    { month: "2025-11", decks: 1, games: 6, wins: 2, allDecks: 1, allGames: 6, allWins: 2 },
+    { month: "2025-12", decks: 0, games: 0, wins: 0, allDecks: 0, allGames: 0, allWins: 0 },
+    { month: "2026-01", decks: 1, games: 6, wins: 3, allDecks: 2, allGames: 12, allWins: 4 }]);
+  assert.deepEqual(resultsByMonth(lists, 42).map(r => r.decks), [0, 0, 0]);
+  assert.deepEqual(resultsByMonth({ cards: lists.cards, decks: lists.decks }, 7), []);
+});
+
+test("synergy graph: partners around the card, linked pairs side by side, the Won node to the right", () => {
+  // 120 decks, card 100 in the first 60. Among those: 101 and 102 in the even ones, 103 and 104 in
+  // every third, 105 in the first 20, 106 in the last 20; each also in 6 of the other 60. 107: every deck.
+  const plays = i => i < 60
+    ? [0, ...(i % 2 ? [] : [1, 2]), ...(i % 3 ? [] : [3, 4]), ...(i < 20 ? [5] : []), ...(i >= 40 ? [6] : []), 7]
+    : [...(i % 10 ? [] : [1, 2, 3, 4, 5, 6]), 7];
+  const shard = decodeShard({ cards: range(100, 108), decks: range(0, 120).map(i => [i, "", "", gaps(plays(i))]) });
+  // Tournament decks with 100: those with 105 win far more; 200 isn't a partner but wins more too
+  const lists = { cards: [100, 105, 200], decks: range(0, 40).map(i =>
+    listDeck(0, i < 20 ? 5 : 1, [0, ...(i < 20 ? [1] : []), ...(i < 12 || (i >= 20 && i < 23) ? [2] : [])])) };
+
+  const graph = synergyGraph(shard, lists, 100, 0, { min: 10 });
+  assert.deepEqual(graph, synergyGraph(shard, lists, 100, 0, { min: 10 })); // the same every time
+  const byCard = new Map(graph.nodes.map(n => [n.card, n]));
+  assert.equal(byCard.get(100).kind, "center");
+  const ring = graph.nodes.filter(n => n.kind === "partner").map(n => n.card);
+  assert.deepEqual([...ring].sort(), [101, 102, 103, 104, 105, 106]);
+  assert.deepEqual(graph.won.map(x => x.card).sort(), [105, 200]);
+  assert.equal(byCard.get(200).kind, "extra");
+  assert.ok(byCard.get(105).lift > 0);
+  const wonNode = byCard.get(null);
+  assert.equal(wonNode.kind, "won");
+  assert.ok(graph.nodes.every(n => n === wonNode || n.kind === "extra" || n.x < wonNode.x));
+  assert.ok(byCard.get(105).x > byCard.get(100).x); // nearest the Won node
+  // Linked pairs: 101 and 102, 103 and 104 (not 105 and 106, never together)
+  const linked = (a, b) => graph.edges.some(e => (e.a === a && e.b === b) || (e.a === b && e.b === a));
+  assert.ok(linked(101, 102) && linked(103, 104) && !linked(105, 106));
+  assert.ok(ring.every(c => linked(100, c)));
+  const apart = (a, b) => {
+    const d = Math.abs(ring.indexOf(a) - ring.indexOf(b));
+    return Math.min(d, ring.length - d);
+  };
+  assert.equal(apart(101, 102), 1);
+  assert.equal(apart(103, 104), 1);
+  // In the box, and no two nodes on top of each other
+  for (const g of [graph, synergyGraph(shard, null, 100, 0), synergyGraph(shard, lists, 100, 0, { n: 12 })]) {
+    for (const n of g.nodes) assert.ok(n.x >= 0 && n.x <= 1 && n.y >= 0 && n.y <= 1, `${n.card} at ${n.x}, ${n.y}`);
+    for (const a of g.nodes) for (const b of g.nodes) if (a !== b) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= 0.1);
+  }
+  // No results: no Won node, the card in the middle
+  const plain = synergyGraph(shard, null, 100, 0);
+  assert.deepEqual(plain.won, []);
+  assert.ok(!plain.nodes.some(n => n.kind === "won"));
+  assert.equal(plain.nodes[0].x, 0.5);
+  assert.deepEqual(synergyGraph(shard, lists, 999, 0), { nodes: [{ card: 999, x: 0.5, y: 0.5, kind: "center" }], edges: [], won: [] });
 });

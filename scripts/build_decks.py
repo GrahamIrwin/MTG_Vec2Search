@@ -739,6 +739,8 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, state_pa
 #              as gaps (popular cards have small positions, so the gaps are small numbers; same
 #              idea as index/t/); made: when the deck was made (see made_dates; "" if unknown);
 #              bracket: what its builder gave it (0: none)
+#       months  ["YYYY-MM", [decks made that month, then each month after, through the last]] over every
+#              one of its decks (not just the newest MAX_DECKS), leaving out those made "" (absent: none dated)
 #       signature  the SHOWN_SIGNATURE cards these decks play far more often than other decks do
 #       tags   [Scryfall Tagger tag, gaps between positions in `cards`], over the nonland cards
 #              at least COMMON of the decks play: what the site names a commander's builds by
@@ -767,7 +769,8 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, state_pa
 #   results/lists/<card>.json  a commander's tournament decks one by one, fetched to test a package
 #              of cards: cards (every card they play, most played first) and decks: [narrowest
 #              window, games, wins, top cut (0: none in the event, 1: missed, 2: made), gaps
-#              between the positions in cards of the cards it plays]
+#              between the positions in cards of the cards it plays]; months: the month ("YYYY-MM")
+#              of each deck's tournament, in the same order as decks
 #   results/pilots.json  every pilot, for finding one by name or commander: see pilot_index()
 #   results/pilots/<block>.json  for the pilots numbered in a block of PILOT_BLOCK: {pilot: [name,
 #              [[date, event, players, top cut (players; 0: none), standing, wins, losses, draws, commander file name ("": not
@@ -891,6 +894,19 @@ def made_dates(decks, dated):
     return made
 
 
+def month_counts(dates):
+    """["YYYY-MM", [how many of these dates fall in that month, then each month after, through the
+    last]], leaving out "" (unknown); None if every date is."""
+    months = Counter(d[:7] for d in dates if d)
+    if not months:
+        return None
+    y, m, counts = int(min(months)[:4]), int(min(months)[5:7]), []
+    while not counts or f"{y:04d}-{m:02d}" <= max(months):
+        counts.append(months[f"{y:04d}-{m:02d}"])
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return [min(months), counts]
+
+
 def window_plays(decks, since, made):
     """For [(deck, cards it plays)]: how many were made ever and in each window (since: the date each
     starts; made: see made_dates), and how many of those play each card: {card: [ever, per window]}."""
@@ -1005,7 +1021,8 @@ def tournament_stats(results, cards, today):
                     "pilots": [[p, pilot_names[p], *sum(counts, [])]
                                for p, counts in sorted(pilots.items(), key=lambda x: (-x[1][-1][0], x[0]))],
                     "lists": {"cards": everything, "decks": [[w, row[1], row[2], row[3] + row[4], *gaps(sorted(position[c] for c in played))]
-                                                             for t, w, standing, record, link, played, row, who, _ in entries]},
+                                                             for t, w, standing, record, link, played, row, who, _ in entries],
+                              "months": [t["date"][:7] for t, *_ in entries]},
                     "refs": [(t["id"], n) for t, *_, n in entries]}
     return out
 
@@ -1311,6 +1328,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
             for c, ks in plays.items():
                 every_play[c] = [a + b for a, b in zip(every_play[c], ks)]
 
+            months = month_counts(made[d["id"]] for d, _ in decks)  # every deck, before keeping the newest
             decks = decks[:MAX_DECKS]
             here = Counter(c for _, played in decks for c in played)
             played_most = sorted(here, key=lambda c: (-here[c], c))
@@ -1335,6 +1353,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
                 "combos": played_combos(decks, here, {number[o] for o in decks[0][0]["commanders"]}, by_rarest),
                 "precon": gaps([i for i, c in enumerate(played_most) if precon & set(precons.get(cards[c]["oracle_id"], ()))]),
                 "price": price, "bracket": bracket, "themes": known_themes,
+                **({"months": months} if months else {}),
                 **({"results": standings[key]["totals"][-1][0]} if key in standings else {}),
             })
             if key in standings:

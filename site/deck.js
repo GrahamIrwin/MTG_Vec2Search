@@ -112,7 +112,8 @@ export function decodeShard(shard) {
   const combos = (shard.combos ?? []).map(([id, cards, needs, makes, how = ["", "", "", ""]]) =>
     ({ id, cards, needs, makes, how: { mana: how[0], easy: how[1], notable: how[2], steps: how[3] } }));
   return { cards: shard.cards, decks, plays, weight, position, tags, precon, combos, signature: shard.signature,
-    price: shard.price ?? -1, bracket: shard.bracket ?? 0, themes: shard.themes ?? [], results: shard.results ?? 0 };
+    price: shard.price ?? -1, bracket: shard.bracket ?? 0, themes: shard.themes ?? [], results: shard.results ?? 0,
+    months: shard.months ?? null }; // ["YYYY-MM" first month, [decks made each month]] over all its decks, or null
 }
 
 // Cosine similarity between the pasted deck and every deck in the file, over the cards they
@@ -685,4 +686,178 @@ export function packageResults(lists, cards, w) {
   const rate = (all.wins + none.wins + some.wins) / (all.games + none.games + some.games);
   const comparable = all.games && none.games && rate > 0 && rate < 1;
   return { all, none, some, ...(comparable ? compare(all.wins, all.games, none.wins, none.games, rate) : { lift: null, evidence: null }) };
+}
+
+// === A card with a commander: what its decks play more with it, and win more with it ===
+// shard: decodeShard's (a raw decks/<key>.json is decoded first); card: a card number.
+// Played more with: the cards the decks playing `card` (at least `least` of them) play more often than
+// all the commander's decks do, in at least `min` of them and `evidence` standard errors above (a share
+// of k decks against all decks' share). Sorted by how many decks more, pulled toward all decks' share by
+// `prior` decks' worth, so 6 of 10 decks doesn't beat 600 of 1,000. [{card, base (share of all decks),
+// with (share of the decks playing `card`), decks (playing `card`), decksWith (playing both), evidence}]
+export const MIN_WITH = 5, MIN_PLAYING = 10, PRIOR_DECKS = 20;
+const decoded = shard => (shard.position ? shard : decodeShard(shard));
+const playing = (shard, p) => (p === undefined ? [] : shard.decks.flatMap((d, i) => (d.cards.includes(p) ? [i] : [])));
+export function playedMoreWith(shard, card, { min = MIN_WITH, least = MIN_PLAYING, prior = PRIOR_DECKS, evidence = 2 } = {}) {
+  shard = decoded(shard);
+  const p = shard.position.get(card);
+  const members = playing(shard, p);
+  const k = members.length, n = shard.decks.length;
+  if (k < least) return [];
+  const rows = [];
+  playCounts(shard, members).forEach((c, q) => {
+    const base = shard.plays[q] / n, share = c / k;
+    if (q === p || c < min || share <= base) return;
+    const z = (share - base) / Math.sqrt(base * (1 - base) / k);
+    if (z >= evidence) rows.push({ card: shard.cards[q], base, with: share, decks: k, decksWith: c, evidence: z, score: (c - k * base) / (k + prior) });
+  });
+  return rows.sort((a, b) => b.score - a.score || a.card - b.card).map(({ score, ...row }) => row);
+}
+
+// Wins more with: among a commander's tournament decks (results/lists/<key>.json) playing `card`, over
+// window w (as packageResults), those also playing each other card against those that don't, compared as
+// cardResults does (pulled toward the win rate of the decks playing `card`). Both sides need `min` decks:
+// twice a single card's, since with fewer a shuffled corpus turns up as many "wins more" rows as the real one.
+// [{card, without: {decks, games, wins}, with: {decks, games, wins}, lift, evidence}], highest lift first;
+// an evidence of SIGNAL (2) or more is a clear difference
+export const MIN_PAIR_DECKS = 2 * MIN_RESULT_DECKS;
+export function winsMoreWith(lists, card, w, { min = MIN_PAIR_DECKS } = {}) {
+  const p = lists.cards.indexOf(card);
+  if (p < 0) return [];
+  const side = () => ({ decks: 0, games: 0, wins: 0 });
+  const add = (s, games, wins) => { s.decks++; s.games += games; s.wins += wins; };
+  const total = side(), both = new Map(); // position -> the decks playing it and `card`
+  for (const [narrowest, games, wins, , ...gaps] of lists.decks) {
+    if (narrowest > w) continue;
+    let q = 0;
+    const plays = gaps.map(g => (q += g));
+    if (!plays.includes(p)) continue;
+    add(total, games, wins);
+    for (const o of plays) if (o !== p) add(both.get(o) ?? both.set(o, side()).get(o), games, wins);
+  }
+  const rate = total.wins / total.games;
+  if (!(rate > 0 && rate < 1)) return [];
+  return [...both].flatMap(([o, wi]) => {
+    const wo = { decks: total.decks - wi.decks, games: total.games - wi.games, wins: total.wins - wi.wins };
+    if (wi.decks < min || wo.decks < min || !wi.games || !wo.games) return [];
+    return [{ card: lists.cards[o], without: wo, with: wi, ...compare(wi.wins, wi.games, wo.wins, wo.games, rate) }];
+  }).sort((a, b) => b.lift - a.lift || a.card - b.card);
+}
+
+// A card's synergy graph: the card in the middle, its n strongest played-more-with partners on a ring
+// around it, and a "Won" node (card null) to the right, linked to the cards it wins more with (won:
+// evidence 2 or more, up to MAX_WON; ones that aren't partners stand in a column by it). edges: the card
+// to each partner (strength: how far from all decks' share to every deck, (with - base) / (1 - base)),
+// and partners played together more than chance among the decks playing the card (strength: their phi,
+// LINK or more). The Won node's links are `won`'s cards. The layout is the same for the same data (no
+// randomness), in a 0..1 box: partners linked to each other sit side by side, won ones nearest the Won
+// node. nodes: [{card, x, y, kind: "center" | "partner" | "extra" | "won", ...partner row, lift}]
+export const GRAPH_PARTNERS = 8, MAX_WON = 4, LINK = 0.2;
+export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link = LINK, min = MIN_PAIR_DECKS } = {}) {
+  shard = decoded(shard);
+  const partners = playedMoreWith(shard, card).slice(0, n);
+  const won = (lists ? winsMoreWith(lists, card, w, { min }) : []).filter(x => x.evidence >= 2).slice(0, MAX_WON)
+    .map(({ card, lift }) => ({ card, lift }));
+  const m = partners.length, k = partners[0]?.decks ?? 0;
+  const pos = partners.map(x => shard.position.get(x.card));
+  const together = new Int32Array(m * m);
+  for (const d of playing(shard, shard.position.get(card))) {
+    const here = pos.flatMap((q, i) => (shard.decks[d].cards.includes(q) ? [i] : []));
+    for (const i of here) for (const j of here) together[i * m + j]++;
+  }
+  const phi = (i, j) => {
+    const a = partners[i].decksWith, b = partners[j].decksWith, ab = together[i * m + j];
+    const spread = Math.sqrt(a * (k - a) * b * (k - b));
+    return ab >= MIN_WITH && spread ? (ab * k - a * b) / spread : 0;
+  };
+  const edges = partners.map(x => ({ a: card, b: x.card, strength: (x.with - x.base) / (1 - x.base) }));
+  for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) {
+    const s = phi(i, j);
+    if (s >= link) edges.push({ a: partners[i].card, b: partners[j].card, strength: s });
+  }
+
+  // The ring's order: won partners first, then the rest, each next one the most linked to the one before
+  const lift = new Map(won.map(x => [x.card, x.lift]));
+  const isWon = i => lift.has(partners[i].card);
+  const order = [];
+  for (const group of [[...partners.keys()].filter(isWon), [...partners.keys()].filter(i => !isWon(i))]) {
+    const left = new Set(group);
+    while (left.size) {
+      const last = order.at(-1);
+      let next = -1, best = -Infinity;
+      for (const i of left) {
+        const s = last === undefined ? 0 : phi(last, i);
+        if (s > best) [next, best] = [i, s];
+      }
+      order.push(next);
+      left.delete(next);
+    }
+  }
+  const cx = won.length ? 0.38 : 0.5, cy = 0.5, r = 0.3, step = 2 * Math.PI / Math.max(m, 1);
+  const first = -(partners.filter((_, i) => isWon(i)).length - 1) / 2 * step; // won ones centred on the right
+  const nodes = [{ card, x: cx, y: cy, kind: "center" }];
+  order.forEach((i, j) => nodes.push({ ...partners[i], x: cx + r * Math.cos(first + j * step), y: cy + r * Math.sin(first + j * step),
+    kind: "partner", ...(isWon(i) && { lift: lift.get(partners[i].card) }) }));
+  if (won.length) {
+    nodes.push({ card: null, x: 0.92, y: cy, kind: "won" });
+    // Above and below it, the third and fourth further left, so no line from it runs through another of its cards
+    const spots = [[0.92, 0.22], [0.92, 0.78], [0.74, 0.12], [0.74, 0.88]];
+    won.filter(x => !partners.some(p => p.card === x.card))
+      .forEach((x, j) => nodes.push({ card: x.card, x: spots[j][0], y: spots[j][1], kind: "extra", lift: x.lift }));
+  }
+  return { nodes, edges, won };
+}
+
+// === Over time ===
+// Every month from the first to the last of the rows (a Map "YYYY-MM" -> row), blank() for months with none
+const nextMonth = month => {
+  const [y, m] = month.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+};
+function everyMonth(rows, blank) {
+  const months = [...rows.keys()].sort();
+  const out = [];
+  for (let m = months[0]; m && m <= months.at(-1); m = nextMonth(m)) out.push({ month: m, ...(rows.get(m) ?? blank()) });
+  return out;
+}
+const rowOf = (rows, month, blank) => rows.get(month) ?? rows.set(month, blank()).get(month);
+
+// A card's play rate by month among a commander's decks, by the month each was made (undated decks
+// left out): [{month, decks (made that month), playing (of them, play the card)}]
+export function playRateByMonth(shard, card) {
+  shard = decoded(shard);
+  const p = shard.position.get(card);
+  const blank = () => ({ decks: 0, playing: 0 });
+  const rows = new Map();
+  for (const d of shard.decks) {
+    if (!d.made) continue;
+    const row = rowOf(rows, d.made.slice(0, 7), blank);
+    row.decks++;
+    row.playing += p !== undefined && d.cards.includes(p);
+  }
+  return everyMonth(rows, blank);
+}
+
+// A card's tournament results by month (lists.months: the month each of lists.decks was played in;
+// [] for older files without it): [{month, decks, games, wins (the decks playing it), allDecks,
+// allGames, allWins (every deck)}]
+export function resultsByMonth(lists, card) {
+  if (!lists.months) return [];
+  const p = lists.cards.indexOf(card);
+  const blank = () => ({ decks: 0, games: 0, wins: 0, allDecks: 0, allGames: 0, allWins: 0 });
+  const rows = new Map();
+  lists.decks.forEach(([, games, wins, , ...gaps], i) => {
+    if (!lists.months[i]) return;
+    const row = rowOf(rows, lists.months[i], blank);
+    row.allDecks++;
+    row.allGames += games;
+    row.allWins += wins;
+    let q = 0;
+    if (p >= 0 && gaps.some(g => (q += g) === p)) {
+      row.decks++;
+      row.games += games;
+      row.wins += wins;
+    }
+  });
+  return everyMonth(rows, blank);
 }
