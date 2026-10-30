@@ -746,13 +746,18 @@ export function winsMoreWith(lists, card, w, { min = MIN_PAIR_DECKS } = {}) {
 
 // A card's synergy graph: the card in the middle, its n strongest played-more-with partners on a ring
 // around it, and a "Won" node (card null) to the right, linked to the cards it wins more with (won:
-// evidence 2 or more, up to MAX_WON; ones that aren't partners stand in a column by it). edges: the card
-// to each partner (strength: how far from all decks' share to every deck, (with - base) / (1 - base)),
-// and partners played together more than chance among the decks playing the card (strength: their phi,
-// LINK or more). The Won node's links are `won`'s cards. The layout is the same for the same data (no
+// evidence 2 or more, up to MAX_WON; ones that aren't partners stand in a column by it). edges: {a, b,
+// strength, kind}: "spoke", the card to each partner (strength: how far from all decks' share to every
+// deck, (with - base) / (1 - base)); "together", partners played together far more than the card's
+// other partners are (their phi among the decks playing the card, at least LINK and STAND_OUT above the
+// typical pair's: the decks playing a card mostly share one build, so most partners go together
+// somewhat), each partner's TOGETHER_LINKS strongest at most; "apart", partners rarely played together
+// (phi APART or less: an either/or, like two packages or two color builds; strength: -phi), the clearest
+// TOGETHER_LINKS a partner at most. The Won
+// node's links are `won`'s cards. The layout is the same for the same data (no
 // randomness), in a 0..1 box: partners linked to each other sit side by side, won ones nearest the Won
 // node. nodes: [{card, x, y, kind: "center" | "partner" | "extra" | "won", ...partner row, lift}]
-export const GRAPH_PARTNERS = 8, MAX_WON = 4, LINK = 0.2;
+export const GRAPH_PARTNERS = 8, MAX_WON = 4, LINK = 0.3, STAND_OUT = 0.12, TOGETHER_LINKS = 2, APART = -0.15;
 export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link = LINK, min = MIN_PAIR_DECKS } = {}) {
   shard = decoded(shard);
   const partners = playedMoreWith(shard, card).slice(0, n);
@@ -768,12 +773,27 @@ export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link =
   const phi = (i, j) => {
     const a = partners[i].decksWith, b = partners[j].decksWith, ab = together[i * m + j];
     const spread = Math.sqrt(a * (k - a) * b * (k - b));
-    return ab >= MIN_WITH && spread ? (ab * k - a * b) / spread : 0;
+    return spread ? (ab * k - a * b) / spread : 0;
   };
-  const edges = partners.map(x => ({ a: card, b: x.card, strength: (x.with - x.base) / (1 - x.base) }));
-  for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) {
-    const s = phi(i, j);
-    if (s >= link) edges.push({ a: partners[i].card, b: partners[j].card, strength: s });
+  const edges = partners.map(x => ({ a: card, b: x.card, strength: (x.with - x.base) / (1 - x.base), kind: "spoke" }));
+  const pairs = [];
+  for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) pairs.push([phi(i, j), i, j]);
+  const typical = [...pairs].sort((p, q) => p[0] - q[0])[pairs.length >> 1]?.[0] ?? 0;
+  const links = new Array(m).fill(0), aparts = new Array(m).fill(0);
+  pairs.sort((p, q) => q[0] - p[0] || p[1] - q[1] || p[2] - q[2]);
+  for (const [s, i, j] of pairs) {
+    if (s >= Math.max(link, typical + STAND_OUT) && together[i * m + j] >= MIN_WITH && (links[i] < TOGETHER_LINKS || links[j] < TOGETHER_LINKS)) {
+      links[i]++;
+      links[j]++;
+      edges.push({ a: partners[i].card, b: partners[j].card, strength: s, kind: "together" });
+    }
+  }
+  for (const [s, i, j] of pairs.reverse()) { // the clearest either/ors first, a few a card (two packages: one line will do)
+    if (s <= APART && aparts[i] < TOGETHER_LINKS && aparts[j] < TOGETHER_LINKS) {
+      aparts[i]++;
+      aparts[j]++;
+      edges.push({ a: partners[i].card, b: partners[j].card, strength: -s, kind: "apart" });
+    }
   }
 
   // The ring's order: won partners first, then the rest, each next one the most linked to the one before

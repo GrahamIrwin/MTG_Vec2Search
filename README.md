@@ -223,8 +223,11 @@ time, a few KB after that).
    over the page's results period, clear differences only, e.g. "26% → 38% win
    rate (412 decks play both, 300 only Jeska's Will)"), and a **synergy graph**:
    the card in the middle, the cards it's played more with around it (thicker
-   lines: more), grey lines between those played together more than chance, and
-   a "Won" node linked to the cards it wins more with. Picking a card in the
+   lines: more), grey lines between those played together far more often than
+   its other partners are (the decks playing a card mostly share one build, so
+   most of its partners go together a little), red dotted lines between those
+   rarely played together (one or the other: two packages, two color builds),
+   and a "Won" node linked to the cards it wins more with. Picking a card in the
    lists or the graph opens it. The page's **Trends** section charts the decks
    made per month, over all of the commander's decks.
 

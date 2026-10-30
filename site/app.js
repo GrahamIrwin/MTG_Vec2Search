@@ -584,9 +584,10 @@ function synergyChart(box, graph, { names, lead }, name) {
   };
   const center = graph.nodes[0];
   for (const e of graph.edges) {
-    const spoke = e.a === center.card;
-    root.append(line(byCard.get(e.a), byCard.get(e.b), spoke ? "spoke" : "link", spoke ? 1.5 + 6 * e.strength : 1 + 4 * e.strength));
+    root.append(line(byCard.get(e.a), byCard.get(e.b), e.kind === "together" ? "link" : e.kind,
+      e.kind === "spoke" ? 1.5 + 6 * e.strength : e.kind === "together" ? 1 + 4 * e.strength : 2.5));
   }
+  const apart = graph.edges.some(e => e.kind === "apart"), together = graph.edges.some(e => e.kind === "together");
   for (const x of graph.won) root.append(line(wonNode, byCard.get(x.card), "won-link"));
 
   const say = n => {
@@ -596,13 +597,25 @@ function synergyChart(box, graph, { names, lead }, name) {
       n.lift !== undefined && `tournament decks with both win more than those with only ${name}`].filter(Boolean);
     return `${names[n.card]}: ${bits.join("; ")}`;
   };
-  const note = `Lines from ${name} go to the cards ${lead} decks play more with it (thicker: more), grey lines join cards `
-    + "played together more than chance" + (wonNode ? ", and dashed green lines join Won to the cards its tournament decks win more with" : "")
+  const note = [`Lines from ${name} go to the cards ${lead} decks play more with it (thicker: more)`,
+    together && "grey lines join cards played together far more often than the rest",
+    apart && "red dotted lines join cards rarely played together (one or the other)",
+    wonNode && "dashed green lines join Won to the cards its tournament decks win more with"].filter(Boolean).join("; ")
     + ". Pick a card to open it.";
+  const noteBox = $("synergy-note");
   const focus = n => {
     for (const [node, a, b] of lines) node.classList.toggle("dim", !!n && a !== n && b !== n);
-    $("synergy-note").textContent = n ? say(n) : note;
+    noteBox.textContent = n ? say(n) : note;
   };
+  // As tall as its longest text, so pointing at a card doesn't change the dialog's height: when it's
+  // scrolled to the bottom, that would move the graph out from under the pointer and back
+  noteBox.style.minHeight = "";
+  let tallest = 0;
+  for (const n of [null, ...graph.nodes]) {
+    focus(n);
+    tallest = Math.max(tallest, noteBox.offsetHeight);
+  }
+  noteBox.style.minHeight = `${tallest}px`;
   focus(null);
   for (const n of graph.nodes) {
     const [x, y] = at(n), r = radius(n);

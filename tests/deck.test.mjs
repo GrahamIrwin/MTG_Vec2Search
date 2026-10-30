@@ -426,9 +426,14 @@ test("synergy graph: partners around the card, linked pairs side by side, the Wo
   assert.equal(wonNode.kind, "won");
   assert.ok(graph.nodes.every(n => n === wonNode || n.kind === "extra" || n.x < wonNode.x));
   assert.ok(byCard.get(105).x > byCard.get(100).x); // nearest the Won node
-  // Linked pairs: 101 and 102, 103 and 104 (not 105 and 106, never together)
-  const linked = (a, b) => graph.edges.some(e => (e.a === a && e.b === b) || (e.a === b && e.b === a));
-  assert.ok(linked(101, 102) && linked(103, 104) && !linked(105, 106));
+  // Played together: 101 and 102, 103 and 104; 105 and 106 never are, an either/or
+  const edge = (a, b) => graph.edges.find(e => (e.a === a && e.b === b) || (e.a === b && e.b === a));
+  const linked = (a, b) => !!edge(a, b);
+  assert.equal(edge(101, 102).kind, "together");
+  assert.equal(edge(103, 104).kind, "together");
+  assert.equal(edge(105, 106).kind, "apart");
+  assert.ok(graph.edges.filter(e => e.kind === "together").length <= 4); // not every pair: each card's strongest
+  assert.ok(graph.edges.every(e => (e.kind === "spoke") === (e.a === 100)));
   assert.ok(ring.every(c => linked(100, c)));
   const apart = (a, b) => {
     const d = Math.abs(ring.indexOf(a) - ring.indexOf(b));
