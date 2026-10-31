@@ -821,15 +821,16 @@ export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link =
 // not on is pushed off it, so no line runs under a node. hub: a key kept in the middle (a card's or a
 // package's own node); pulls: [{key, length}] held about that far from the hub with no line drawn (a
 // package's own cards); won: a key kept to the right of the rest, wonLinks the keys it has lines to.
-// aspect: the shape of the room it's drawn in (width / height), which it's spread to fit. Scaled into a 0..1
+// degrees: how many lines each node has (a Map), when they're to count lines not drawn. aspect: the shape of the room it's drawn in (width / height), which it's spread to fit. Scaled into a 0..1
 // box, the Won node at its right. Returns {key: [x, y]}.
 const GAP = 0.3, CLEAR = 0.1, STEPS = 600, STARTS = 10;
-function layoutGraph(nodes, links, { hub = null, pulls = [], won = null, wonLinks = [], aspect = 1 } = {}) {
+function layoutGraph(nodes, links, { hub = null, pulls = [], won = null, wonLinks = [], aspect = 1, degrees = null } = {}) {
   const index = new Map(nodes.map((n, i) => [n.key, i]));
   const m = nodes.length;
   const pinned = i => nodes[i].key === hub || nodes[i].key === won;
   const degree = new Array(m).fill(0);
-  for (const l of links) if (l.strength > 0 && l.a !== hub && l.b !== hub) { degree[index.get(l.a)]++; degree[index.get(l.b)]++; }
+  if (degrees) nodes.forEach((n, i) => { degree[i] = degrees.get(n.key) ?? 0; });
+  else for (const l of links) if (l.strength > 0 && l.a !== hub && l.b !== hub) { degree[index.get(l.a)]++; degree[index.get(l.b)]++; }
   const free = [...nodes.keys()].filter(i => !pinned(i)).sort((i, j) => degree[j] - degree[i] || String(nodes[i].key).localeCompare(String(nodes[j].key)));
   const isFree = new Set(free), toWon = new Set(wonLinks.map(k => index.get(k)));
   const drawn = links.map(l => [index.get(l.a), index.get(l.b), l.strength])
@@ -993,52 +994,68 @@ const clearResult = r => r.evidence !== null && Math.abs(r.evidence) >= 2
 // (members running it), name: its two strongest cards, lift?, tested?, have?}]; edges: [{a, b, strength}]; won: [{key,
 // lift, tested: [tournament decks with it, with none of it]}]
 export const MAP_PACKAGES = 12, PACKAGE_LINK = 0.15, PACKAGE_APART = -0.1;
-export function packageMap(shard, packages, members, { lists = null, w = 0, have = null, n = MAP_PACKAGES, aspect = 1 } = {}) {
+export function packageMap(shard, packages, members, { lists = null, w = 0, have = null, n = MAP_PACKAGES, aspect = 1, keep = null } = {}) {
   shard = decoded(shard);
   const all = members.length, least = Math.max(3, 0.03 * all);
-  const shown = packages.map(({ cards }, i) => ({ key: `p${i}`, cards, runs: running(shard, cards, members) }))
+  const enough = packages.map(({ cards }, i) => ({ key: `p${i}`, cards, runs: running(shard, cards, members) }))
     .filter(p => p.runs.length >= least).map((p, i) => ({ ...p, i }))
-    .sort((a, b) => b.runs.length - a.runs.length || a.i - b.i).slice(0, n);
-  const m = shown.length;
-  const sets = shown.map(p => new Set(p.runs));
-  const both = new Int32Array(m * m), phi = new Float64Array(m * m);
-  for (let i = 0; i < m; i++) for (let j = 0; j < m; j++) {
-    both[i * m + j] = shown[i].runs.reduce((k, d) => k + sets[j].has(d), 0);
-    phi[i * m + j] = phiOf(both[i * m + j], shown[i].runs.length, shown[j].runs.length, all);
+    .sort((a, b) => b.runs.length - a.runs.length || a.i - b.i);
+  // keep (a pasted deck's: the packages it runs): just those shown, but placed by all the commander's: a
+  // package linked to many of them sits in the middle here too; and lines need to stand out as much as on
+  // the commander's map (its n most run)
+  const top = linkPackages(enough.slice(0, n), all);
+  const shown = keep ? enough.filter(p => keep(p)).slice(0, n) : enough.slice(0, n);
+  const { edges } = keep ? linkPackages(shown, all, top.typical) : top;
+  const degrees = new Map();
+  if (keep) {
+    for (const e of linkPackages(enough, all, top.typical).edges) {
+      if (e.strength > 0) for (const k of [e.a, e.b]) degrees.set(k, (degrees.get(k) ?? 0) + 1);
+    }
   }
   const won = lists ? shown.flatMap(p => {
     const r = packageResults(lists, p.cards, w);
     return clearResult(r) ? [{ key: p.key, lift: r.lift, tested: [r.all.decks, r.none.decks] }] : [];
   }) : [];
 
+  const lift = new Map(won.map(x => [x.key, x.lift])), tested = new Map(won.map(x => [x.key, x.tested]));
+  const at = shown.length ? layoutGraph([...shown, ...(won.length ? [{ key: "won" }] : [])], edges,
+    { won: won.length ? "won" : null, wonLinks: won.map(x => x.key), aspect, ...(keep && { degrees }) }) : new Map();
+  const nodes = shown.map(({ key, cards, runs }) => ({ key, kind: "package", x: at.get(key)[0], y: at.get(key)[1],
+    cards, decks: runs.length, name: cards.slice(0, 2), ...(lift.has(key) && { lift: lift.get(key), tested: tested.get(key) }),
+    ...(have && { have: hasOf(have, cards) }) }));
+  if (won.length) nodes.push({ key: "won", kind: "won", x: at.get("won")[0], y: at.get("won")[1] });
+  return { nodes, edges, won };
+}
+
+// The lines between packages (items: [{key, runs: the decks running it}], of `all` decks): the phi between
+// decks running two, positive ones that stand out (PACKAGE_LINK and STAND_OUT above the typical pair's,
+// or `typical` when given; each package's TOGETHER_LINKS strongest at most), negative ones of PACKAGE_APART
+// or less, the clearest few a package. Returns {edges: [{a, b, strength}], typical}
+function linkPackages(items, all, typical = null) {
+  const m = items.length, sets = items.map(p => new Set(p.runs));
   const pairs = [];
-  for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) pairs.push([phi[i * m + j], i, j]);
-  const typical = [...pairs].sort((p, q) => p[0] - q[0])[pairs.length >> 1]?.[0] ?? 0;
+  for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) {
+    const both = items[i].runs.reduce((k, d) => k + sets[j].has(d), 0);
+    pairs.push([phiOf(both, items[i].runs.length, items[j].runs.length, all), i, j, both]);
+  }
+  typical ??= [...pairs].sort((p, q) => p[0] - q[0])[pairs.length >> 1]?.[0] ?? 0;
   pairs.sort((p, q) => q[0] - p[0] || p[1] - q[1] || p[2] - q[2]);
   const edges = [], links = new Array(m).fill(0), aparts = new Array(m).fill(0);
-  for (const [s, i, j] of pairs) {
-    if (s >= Math.max(PACKAGE_LINK, typical + STAND_OUT) && both[i * m + j] >= MIN_WITH && (links[i] < TOGETHER_LINKS || links[j] < TOGETHER_LINKS)) {
+  for (const [s, i, j, both] of pairs) {
+    if (s >= Math.max(PACKAGE_LINK, typical + STAND_OUT) && both >= MIN_WITH && (links[i] < TOGETHER_LINKS || links[j] < TOGETHER_LINKS)) {
       links[i]++;
       links[j]++;
-      edges.push({ a: shown[i].key, b: shown[j].key, strength: s });
+      edges.push({ a: items[i].key, b: items[j].key, strength: s });
     }
   }
   for (const [s, i, j] of pairs.reverse()) {
     if (s <= PACKAGE_APART && aparts[i] < TOGETHER_LINKS && aparts[j] < TOGETHER_LINKS) {
       aparts[i]++;
       aparts[j]++;
-      edges.push({ a: shown[i].key, b: shown[j].key, strength: s });
+      edges.push({ a: items[i].key, b: items[j].key, strength: s });
     }
   }
-
-  const lift = new Map(won.map(x => [x.key, x.lift])), tested = new Map(won.map(x => [x.key, x.tested]));
-  const at = m ? layoutGraph([...shown, ...(won.length ? [{ key: "won" }] : [])], edges,
-    { won: won.length ? "won" : null, wonLinks: won.map(x => x.key), aspect }) : new Map();
-  const nodes = shown.map(({ key, cards, runs }) => ({ key, kind: "package", x: at.get(key)[0], y: at.get(key)[1],
-    cards, decks: runs.length, name: cards.slice(0, 2), ...(lift.has(key) && { lift: lift.get(key), tested: tested.get(key) }),
-    ...(have && { have: hasOf(have, cards) }) }));
-  if (won.length) nodes.push({ key: "won", kind: "won", x: at.get("won")[0], y: at.get("won")[1] });
-  return { nodes, edges, won };
+  return { edges, typical };
 }
 
 // A package's graph, among members (numbers in shard.decks): the package (cards: card numbers) in the

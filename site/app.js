@@ -828,9 +828,9 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
   };
   const map = () => {
     delete box.dataset.open;
-    // A pasted deck's: just the packages it runs (all its cards, or at least half)
-    const runs = have ? packages.filter(p => 2 * p.cards.filter(c => have.has(c)).length >= p.cards.length) : packages;
-    const graph = packageMap(shard, runs, members, { lists, w, have, aspect: graphAspect(box), ...(box.clientWidth < 520 && { n: 8 }) });
+    // A pasted deck's: just the packages it runs (all its cards, or at least half), placed by the whole map
+    const keep = have && (p => 2 * p.cards.filter(c => have.has(c)).length >= p.cards.length);
+    const graph = packageMap(shard, packages, members, { lists, w, have, keep, aspect: graphAspect(box), ...(box.clientWidth < 520 && { n: 8 }) });
     if (graph.nodes.length < 3) {
       box.replaceChildren(el("p", { className: "muted deck-lede", textContent: have
         ? `Your deck runs too few of the packages ${lead} decks play to map (${graph.nodes.length}).`
