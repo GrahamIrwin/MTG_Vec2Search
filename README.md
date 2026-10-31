@@ -150,7 +150,7 @@ time, a few KB after that).
    - A commander with too few decks is compared with the commander whose
      signature cards the deck plays the most of. That same match powers "decks
      like yours with other commanders".
-   - **Packages** shows the packages of the commander's decks that the deck runs (all their cards, or
+   - **Packages & combos** shows (Packages | Combos) the packages, or the combos, of the commander's decks that the deck runs (all their cards, or
      at least half: a dotted ring), linked as on the commander page; a package's own graph shows just
      the cards of it, and of those decks with it add most, that the deck runs. The
      packages are found the first time the section is opened, which takes a moment for a commander

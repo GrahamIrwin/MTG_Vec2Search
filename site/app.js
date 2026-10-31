@@ -1375,19 +1375,42 @@ async function findSimilar(key) {
 
   // Packages this commander's decks play, how much of each your deck has: found the first time they show
   // (that takes a moment for a commander with many decks), drawn at the size they're shown at
-  let packages = null, packageLists = null;
+  let packages = null, combos = null, packageLists = null;
   const shown = deckShown = {};
   delete $("deck-packages").dataset.open;
   $("deck-packages-panel").hidden = false;
   const drawPackages = () => {
     const box = $("deck-packages");
     if (!box.offsetParent) return;
-    if (!packages) {
-      const lands = landsIn(shard);
-      packages = commanderPackages(shard, { lands, builds: findBuilds(shard, { ignore: lands }), staples: decks.staples ?? [] });
+    // Packages or combos, the one picked last
+    chipRow($("deck-packages-as"), [["packages", "Packages"], ["combos", "Combos"]], deckPackagesAs, v => {
+      deckPackagesAs = v;
+      delete box.dataset.open;
+      drawPackages();
+    });
+    const all = shard.decks.map((_, d) => d);
+    if (deckPackagesAs === "combos") {
+      // Each group of combos as its most played one, its pieces but the commander (as on the commander page)
+      if (!combos) {
+        const leaders = key.split("-").map(Number), seen = new Set();
+        combos = groupCombos(comboDecks(shard, all, c => leaders.includes(c)).filter(c => c.decks && c.decks >= 0.01 * all.length))
+          .flatMap(({ options }) => {
+            const cards = options[0].combo.cards.filter(c => !leaders.includes(c)), k = cards.join(".");
+            if (!cards.length || seen.has(k)) return [];
+            seen.add(k);
+            return [{ cards, makes: options[0].combo.makes.join(", ") }];
+          });
+      }
+      packageCharts(box, { shard, packages: combos, members: all, names, lead, these: "these decks", noun: "combo",
+        least: Math.max(3, 0.01 * all.length), lists: packageLists, w: tw ?? 0, period: tournament?.period ?? "", have: inDeck });
+    } else {
+      if (!packages) {
+        const lands = landsIn(shard);
+        packages = commanderPackages(shard, { lands, builds: findBuilds(shard, { ignore: lands }), staples: decks.staples ?? [] });
+      }
+      packageCharts(box, { shard, packages, members: all, names, lead, these: "these decks",
+        lists: packageLists, w: tw ?? 0, period: tournament?.period ?? "", have: inDeck });
     }
-    packageCharts(box, { shard, packages, members: shard.decks.map((_, d) => d), names, lead, these: "these decks",
-      lists: packageLists, w: tw ?? 0, period: tournament?.period ?? "", have: inDeck });
     if (tourney && !packageLists) listsFile(key).then(data => {
       if (packageLists || deckShown !== shown) return;
       packageLists = data;
@@ -1481,7 +1504,7 @@ async function findSimilar(key) {
   $("deck-results").hidden = false;
   deckSections = pageSections($("deck-results"), $("deck-views"), [["against", fromDeck?.average ? "Against the average deck"
     : "Against their list"], ["adds", "Cards to add"],
-    ["cuts", "Cards to cut"], ["combos", "Combos"], ["packages", "Packages"], ["tournament", "Tournament check"], ["similar", "Similar decks"],
+    ["cuts", "Cards to cut"], ["combos", "Combos"], ["packages", "Packages & combos"], ["tournament", "Tournament check"], ["similar", "Similar decks"],
     ["worth", "What it's worth"]], $("deck-how"), {
     against: "Their list against yours: what's in theirs and not yours, and in yours and not theirs, each ranked by how "
       + "the commander's tournament decks with it did against those without.",
@@ -1496,8 +1519,9 @@ async function findSimilar(key) {
     similar: "The decks behind these picks, and commanders whose decks play the most of your cards.",
     worth: "Each card at its cheapest printing, now and 30 days and a year ago (over the cards priced then).",
     packages: `Cards ${lead} decks play together far more often than chance (as on the commander page), each package a `
-      + "circle, linked when the same decks run them. Pick one for its cards and the cards decks with it add most. "
-      + "Faded: packages or cards your deck doesn't have; half faded: some of a package's cards.",
+      + "circle, linked when the same decks run them; or their combos (Commander Spellbook's, in 1% of the decks or more), "
+      + "the same way. Only the ones your deck runs, all of their cards or at least half (a dotted ring: some). Pick one "
+      + "for its cards and the cards decks with it add most.",
   }, fromDeck ? "against" : "adds", v => v === "packages" && drawPackages());
 }
 let deckShown = null; // the deck shown last, so what's loaded late for one shown before is dropped
@@ -1550,6 +1574,7 @@ const commanderMessage = text => {
 };
 let packagesAs = null; // a commander's packages as a "graph" or a "list" (null: a graph, if there are enough)
 let combosAs = null; // the same for its combos
+let deckPackagesAs = "packages"; // the deck page's packages graph: of "packages" or "combos"
 const commanderLink = key => "?" + new URLSearchParams({ commander: key });
 
 // Changes some of the URL's parameters (null: leaves it out), so a view is a link to share
