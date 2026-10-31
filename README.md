@@ -151,6 +151,8 @@ time, a few KB after that).
      packages are found the first time the section is opened, which takes a moment for a commander
      with thousands of decks.
 
+     ![The packages of Derevi decks that a pasted Derevi deck runs, linked as on the commander page; two it runs only part of have a dotted ring](docs/images/screenshot-deck-packages.webp)
+
    ![Deck recommendations for a Derevi deck compared with top-cut tournament decks: cards to add, each with how many of the most alike top-cut decks play it](docs/images/screenshot-deck.webp)
 
    Card-overlap similarity was checked against a "functional" similarity over
@@ -238,6 +240,10 @@ time, a few KB after that).
    lists or the graph opens it. The page's **Trends** section charts the decks
    made per month, over all of the commander's decks.
 
+   ![Swords to Plowshares in Derevi decks: its synergy graph, the card in the middle and the cards played with it around it; Esper Sentinel, Noble Hierarch and Bloom Tender linked as a package in green, dotted lines to Path to Exile, which those decks play instead](docs/images/screenshot-synergy.webp)
+
+   ![Swords to Plowshares' play rate in Derevi decks month by month since December 2023, between about 55% and 80%](docs/images/screenshot-overtime.webp)
+
    Its **Combos & packages** section lists the Commander Spellbook combos its decks play and its
    **packages**: cards its decks play together far more often than chance (`findPackages`), compared
    among decks of the same build, as tuned and with as many Game Changers (`packageGroups`), so cards
@@ -253,6 +259,10 @@ time, a few KB after that).
    linked by how strongly they pair, and around them the cards decks running it add most (played far
    more by them than by the other decks; 4 on a phone), each tied to the Won node if decks with the
    package and it win clearly more or less than those with the package alone. Picking a card opens it.
+
+   ![Derevi's package map: packages as nodes, each showing half of its two cards' art, linked when the same decks run them, the most linked in the middle; Bloom Tender + Faeburrow Elder pointed at, its name shown and 41% of these decks run all of them (1,323 decks)](docs/images/screenshot-packages.webp)
+
+   ![The Bloom Tender + Faeburrow Elder package's graph: the package in the middle, its two cards beside it, and around them the cards decks running it add most, such as Emiel the Blessed, Delney and Noble Hierarch](docs/images/screenshot-package.webp)
 
    All three graphs (a card's, the package map, a package's) are laid out the same way
    (`layoutGraph`): nodes push each other apart and lines pull the cards they join together (the
