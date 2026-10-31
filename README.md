@@ -244,7 +244,8 @@ time, a few KB after that).
    don't go together just for being in the same kind of deck. Packages show as a list ("31% of these
    decks play all of them (412)") or, with 3 or more, as a **graph** (Graph | List; the graph first):
    one node per package run by enough of the build's decks (`packageMap`, the 12 most run; 8 on a
-   phone), named for its two strongest cards, every line the correlation between decks running two
+   phone), named for its two strongest cards (half of each one's art on it; the name shows, whole, when
+   it's pointed at, rather than cut short under it), every line the correlation between decks running two
    packages, ranked and coloured like the synergy graph's, dotted for either/or packages (different
    builds), and with tournament results a Won node joined to the packages whose decks clearly win
    more (green) or less (red) than those with none of it. Picking a package swaps in its own graph

@@ -719,9 +719,25 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
     lifts.some(l => l > 0) && [sample([{ class: "won-link pos" }], 28), legend.more],
     lifts.some(l => l < 0) && [sample([{ class: "won-link neg" }], 28), legend.less],
   ].filter(Boolean).map(([svg, text]) => el("li", {}, svg, text)));
+  // A package's name ("A + B") isn't drawn under it, where it would have to be cut short: it shows in full
+  // over the graph while its node is pointed at
+  const named = n => !(n.kind === "package" && n !== hub);
+  const hoverName = svgEl("text", { class: "hover-name", "text-anchor": "middle" });
+  const showName = n => {
+    hoverName.replaceChildren();
+    if (!n || named(n) || n === wonNode) return;
+    const [x, y] = at(n), r = radius(n), rows = nameOf(n).text.split(" + ").map((p, i, all) => (i < all.length - 1 ? `${p} +` : p));
+    const half = Math.max(...rows.map(row => row.length)) * charW / 2;
+    const tx = Math.min(W - 2 - half, Math.max(2 + half, x));
+    // under it, or above it at the bottom of the graph
+    const below = y + r + 4 + rows.length * lineH <= H;
+    rows.forEach((row, i) => hoverName.append(svgEl("tspan", { x: tx.toFixed(1),
+      y: (below ? y + r + (narrow ? 15 : 18) + i * lineH : y - r - 8 - (rows.length - 1 - i) * lineH).toFixed(1) }, row)));
+  };
   const focus = n => {
     for (const [node, a, b] of lines) node.classList.toggle("dim", !!n && a !== n && b !== n);
     noteBox.textContent = n ? tip(n) : hint;
+    showName(n);
   };
   // As tall as its longest text, so pointing at a node doesn't change the page's height: when it's
   // scrolled to the bottom, that would move the graph out from under the pointer and back
@@ -752,7 +768,7 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
       });
       if (arts.length === 2) g.append(svgEl("line", { class: "split", x1: 0, y1: -r, x2: 0, y2: r }));
       // A package's own node is named by the breadcrumb above: a name under it would run into its cards
-      if (!(n === hub && n.kind === "package")) g.append(label(n, x, y, r));
+      if (named(n) && !(n === hub && n.kind === "package")) g.append(label(n, x, y, r));
     }
     g.append(svgEl("circle", { class: "ring", r }));
     if (n !== hub) {
@@ -774,6 +790,7 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
     g.addEventListener("blur", () => focus(null));
     root.append(g);
   }
+  root.append(hoverName); // last: over everything
   chart.append(root);
 }
 
