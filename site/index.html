@@ -28,6 +28,7 @@
       --link: #3a6447; --focus: #a8642a;
       --up: #3a6447; --down: #a3402a;
       --tie-strong: #2c6b43; --tie-weak: #d2c9bb; /* the synergy graph's ranked lines, strongest to weakest */
+      --vine: #5d7f3b; --leaf: #75a347; /* the vine by the scrollbar (vine.js) */
       --shadow-sm: 0 1px 2px rgb(60 40 20 / .12);
       --shadow-md: 0 2px 4px rgb(60 40 20 / .10), 0 10px 24px -8px rgb(60 40 20 / .28);
       --grain: .07;
@@ -44,6 +45,7 @@
       --link: #8cc39b; --focus: #d9a35b;
       --up: #8cc39b; --down: #e5937c;
       --tie-strong: #7ed39b; --tie-weak: #554e46;
+      --vine: #6e9a48; --leaf: #8fc466;
       --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
       --shadow-md: 0 2px 4px rgb(0 0 0 / .35), 0 14px 30px -10px rgb(0 0 0 / .7);
       --grain: .05;
@@ -704,6 +706,14 @@
     .synergy text { font-family: inherit; font-size: 15px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
     .synergy.narrow text { font-size: 13px; }
     .synergy .dim { opacity: .15; }
+    /* The vine by the scrollbar and its climbing elf (vine.js), on a computer */
+    #vine { position: fixed; top: 0; right: 0; width: 40px; height: 100vh; pointer-events: none; z-index: 5; }
+    #vine svg { display: block; overflow: visible; }
+    #vine .stem { fill: none; stroke: var(--vine); stroke-width: 4; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1;
+      transition: stroke-dashoffset .35s ease-out; }
+    #vine .leaf { fill: var(--leaf); opacity: 0; transition: opacity .5s; }
+    #vine .leaf.out { opacity: 1; }
+    @media (prefers-reduced-motion: reduce) { #vine .stem, #vine .leaf { transition: none; } }
     .synergy .hover-name { font-weight: bold; pointer-events: none; }
     .field input.short { width: 90px; }
     #trend-theme { width: 220px; max-width: 100%; }
@@ -1700,5 +1710,6 @@
   </dialog>
 
   <script type="module" src="app.js"></script>
+  <script type="module" src="vine.js"></script>
 </body>
 </html>
