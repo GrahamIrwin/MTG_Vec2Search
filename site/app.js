@@ -571,9 +571,9 @@ async function showCardWith(card) {
 // to the ones its decks play more with it (thicker: more), between those played together, and from a "Won"
 // node to the cards its decks win more with. Pointing at a card says why it's there; picking it opens it.
 const shade = strength => (0.2 + 0.8 * Math.min(1, Math.abs(strength) / 0.6)).toFixed(2);
-// The synergy graph's ranked line colours, green to red: hues for each fifth of the ranking
-const TIERS = [135, 90, 52, 28, 4];
-const tierColor = t => `hsl(${TIERS[t]} 62% var(--tier-l))`;
+// The synergy graph's ranked line colours: each fifth of the ranking, dark green to pale grey
+const TIERS = 5;
+const tierColor = t => `color-mix(in oklab, var(--tie-strong) ${100 - 25 * t}%, var(--tie-weak))`;
 function synergyChart(box, graph, { names, lead }, name) {
   box.replaceChildren();
   if (graph.nodes.length < 3) return;
@@ -627,9 +627,9 @@ function synergyChart(box, graph, { names, lead }, name) {
     defs.append(clip);
   }
   root.append(defs);
-  // Every line the same width. Played together or not: ranked, strongest first, and coloured by their
-  // fifth of the ranking, green to red (dotted: rarely together). Won's: green for winning more, red
-  // for less, the bigger the difference the more opaque
+  // Every line the same width. Played together: ranked, strongest first, and coloured by their fifth of
+  // the ranking, dark green to pale grey; rarely together: dotted. Won's: green for winning more, red
+  // (kept for this) for less, the bigger the difference the more opaque
   const lines = [];
   const line = (a, b, attrs) => {
     const [x1, y1] = at(a), [x2, y2] = at(b);
@@ -638,8 +638,9 @@ function synergyChart(box, graph, { names, lead }, name) {
     return node;
   };
   const ranked = [...graph.edges].sort((p, q) => q.strength - p.strength);
-  ranked.forEach((e, i) => root.append(line(byCard.get(e.a), byCard.get(e.b), { class: `tie${e.strength < 0 ? " apart" : ""}`,
-    style: `stroke: ${tierColor(Math.floor(i * TIERS.length / ranked.length))}` })));
+  const together = ranked.filter(e => e.strength >= 0);
+  ranked.forEach(e => root.append(line(byCard.get(e.a), byCard.get(e.b), e.strength < 0 ? { class: "tie apart" }
+    : { class: "tie", style: `stroke: ${tierColor(Math.floor(together.indexOf(e) * TIERS / together.length))}` })));
   // A win rate 5 points higher or lower shows about as strongly as a correlation of 0.3
   for (const x of graph.won) root.append(line(wonNode, byCard.get(x.card),
     { class: `won-link ${x.lift >= 0 ? "pos" : "neg"}`, "stroke-opacity": shade(6 * x.lift) }));
@@ -662,9 +663,9 @@ function synergyChart(box, graph, { names, lead }, name) {
     return svg;
   };
   $("synergy-legend").replaceChildren(...[
-    [sample(TIERS.map((_, t) => ({ class: "tie", style: `stroke: ${tierColor(t)}` }))), "Strongest to weakest tie, ranked within this graph"],
-    has(e => e.strength < 0) && [sample([{ class: "tie apart", style: `stroke: ${tierColor(TIERS.length - 1)}` }], 28),
-      "Rarely played together (one or the other)"],
+    [sample(Array.from({ length: TIERS }, (_, t) => ({ class: "tie", style: `stroke: ${tierColor(t)}` }))),
+      "Played together: strongest to weakest, ranked within this graph"],
+    has(e => e.strength < 0) && [sample([{ class: "tie apart" }], 28), "Rarely played together (one or the other)"],
     lifts.some(l => l > 0) && [sample([{ class: "won-link pos" }], 28), "Tournament decks win more with it"],
     lifts.some(l => l < 0) && [sample([{ class: "won-link neg" }], 28), "Tournament decks win less with it"],
   ].filter(Boolean).map(([svg, text]) => el("li", {}, svg, text)));

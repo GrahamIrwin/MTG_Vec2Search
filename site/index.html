@@ -27,7 +27,7 @@
       --accent: #3f6b4c; --accent-hover: #345a40; --on-accent: #f7f1e3; --accent-soft: #dfe7d6;
       --link: #3a6447; --focus: #a8642a;
       --up: #3a6447; --down: #a3402a;
-      --tier-l: 40%; /* lightness of the synergy graph's ranked line colours */
+      --tie-strong: #2c6b43; --tie-weak: #d2c9bb; /* the synergy graph's ranked lines, strongest to weakest */
       --shadow-sm: 0 1px 2px rgb(60 40 20 / .12);
       --shadow-md: 0 2px 4px rgb(60 40 20 / .10), 0 10px 24px -8px rgb(60 40 20 / .28);
       --grain: .07;
@@ -43,7 +43,7 @@
       --accent: #4c8459; --accent-hover: #589767; --on-accent: #f6f0e2; --accent-soft: #2c3a2b;
       --link: #8cc39b; --focus: #d9a35b;
       --up: #8cc39b; --down: #e5937c;
-      --tier-l: 63%;
+      --tie-strong: #7ed39b; --tie-weak: #554e46;
       --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
       --shadow-md: 0 2px 4px rgb(0 0 0 / .35), 0 14px 30px -10px rgb(0 0 0 / .7);
       --grain: .05;
@@ -680,7 +680,7 @@
     :is(.synergy, .synergy-legend) .pos { stroke: var(--up); }
     :is(.synergy, .synergy-legend) .neg { stroke: var(--down); }
     :is(.synergy, .synergy-legend) .won-link { stroke-dasharray: 6 5; stroke-linecap: butt; }
-    :is(.synergy, .synergy-legend) .tie.apart { stroke-dasharray: 0.1 7; stroke-width: 4; }
+    :is(.synergy, .synergy-legend) .tie.apart { stroke: var(--ink-soft); stroke-dasharray: 0.1 7; stroke-width: 4; }
     .synergy .node { cursor: pointer; outline: none; }
     .synergy .node .back { fill: var(--paper-3); }
     .synergy .node .ring { fill: none; stroke: var(--paper); stroke-width: 2; }

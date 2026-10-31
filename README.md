@@ -225,11 +225,11 @@ time, a few KB after that).
    the card in the middle and around it the cards played with it clearly more than chance (a
    correlation of 0.2 or more between being in a deck, the strongest 12; 8 on a phone). Every line is
    such a correlation, the same width, ranked strongest to weakest and coloured by its fifth of the
-   ranking, green to red, so a graph's ties are easy to tell apart; dotted lines are pairs rarely
-   played together (one or the other: two packages, two color builds). Between the cards around it, only
+   ranking, dark green to pale grey, so a graph's ties are easy to tell apart; dotted lines are pairs
+   rarely played together (one or the other: two packages, two color builds). Between the cards around it, only
    pairs that stand out from the rest show (the decks playing a card mostly share one build, so most
    of its partners go together a little). With tournament results, dashed lines join a "Won" node to
-   the cards whose decks win clearly more (green) or less (red) with them. Picking a card in the
+   the cards whose decks win clearly more (green) or less (red, used for nothing else) with them. Picking a card in the
    lists or the graph opens it. The page's **Trends** section charts the decks
    made per month, over all of the commander's decks.
 
