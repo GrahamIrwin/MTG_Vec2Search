@@ -650,10 +650,14 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
   };
   const root = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group", "aria-label": title });
   const defs = svgEl("defs", {});
+  // Each size's circle, and its left and right halves (a two-card package shows half of each card)
   for (const r of new Set(graph.nodes.map(radius))) {
-    const clip = svgEl("clipPath", { id: `syn-clip-${r}` });
-    clip.append(svgEl("circle", { r }));
-    defs.append(clip);
+    for (const [id, shape] of [["", svgEl("circle", { r })], ["-l", svgEl("path", { d: `M0 ${-r}A${r} ${r} 0 0 0 0 ${r}Z` })],
+      ["-r", svgEl("path", { d: `M0 ${-r}A${r} ${r} 0 0 1 0 ${r}Z` })]]) {
+      const clip = svgEl("clipPath", { id: `syn-clip-${r}${id}` });
+      clip.append(shape);
+      defs.append(clip);
+    }
   }
   root.append(defs);
   // Every line the same width. Played together: ranked, strongest first, and coloured by their fifth of
@@ -736,13 +740,17 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
     g.append(svgEl("title", {}, tip(n)), svgEl("circle", { class: "back", r }));
     if (n === wonNode) g.append(svgEl("text", { class: "inside", "text-anchor": "middle", y: 5.5 }, "Won"));
     else {
+      // Its card's art; two cards' (a package's): the left half of the circle the first's, the right the second's
       const { art } = nameOf(n);
-      if (art !== null && art !== undefined) {
-        const img = svgEl("image", { x: -r * 1.4, y: -r, width: r * 2.8, height: r * 2, preserveAspectRatio: "xMidYMid slice",
-          "clip-path": `url(#syn-clip-${r})` });
-        cardInfo(art).then(info => img.setAttribute("href", artCrop(info.id)));
+      const arts = (Array.isArray(art) ? art : [art]).filter(a => a !== null && a !== undefined).slice(0, 2);
+      arts.forEach((a, i) => {
+        const half = arts.length === 2 ? (i ? 1 : -1) : 0; // each art's middle in the middle of its half
+        const img = svgEl("image", { x: -r * 1.4 + half * r / 2, y: -r, width: r * 2.8, height: r * 2,
+          preserveAspectRatio: "xMidYMid slice", "clip-path": `url(#syn-clip-${r}${half ? (half < 0 ? "-l" : "-r") : ""})` });
+        cardInfo(a).then(info => img.setAttribute("href", artCrop(info.id)));
         g.append(img);
-      }
+      });
+      if (arts.length === 2) g.append(svgEl("line", { class: "split", x1: 0, y1: -r, x2: 0, y2: r }));
       // A package's own node is named by the breadcrumb above: a name under it would run into its cards
       if (!(n === hub && n.kind === "package")) g.append(label(n, x, y, r));
     }
@@ -840,7 +848,7 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
         more: "Tournament decks with it win more",
         less: "Tournament decks with it win less",
       },
-      label: n => ({ text: title(n.cards), art: n.cards[0] }),
+      label: n => ({ text: title(n.cards), art: n.cards.slice(0, 2) }),
       tip: n => (n.kind === "won"
         ? `Won, in tournaments of the last ${period}: green lines to the packages whose decks win more than those `
           + "with none of it, red to those that win less."
@@ -871,7 +879,7 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
         more: "Tournament decks win more with it",
         less: "Tournament decks win less with it",
       },
-      label: n => ({ text: n.card === undefined ? title(cards) : front(n.card), art: n.card ?? cards[0] }),
+      label: n => ({ text: n.card === undefined ? title(cards) : front(n.card), art: n.card ?? cards.slice(0, 2) }),
       tip: n => {
         if (n.kind === "won") return `Won, in tournaments of the last ${period}: green lines to what decks with the `
           + "package win more with, red to what they win less with.";
