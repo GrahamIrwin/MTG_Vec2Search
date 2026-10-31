@@ -823,7 +823,7 @@ export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link =
 // package's own cards); won: a key kept to the right of the rest, wonLinks the keys it has lines to.
 // degrees: how many lines each node has (a Map), when they're to count lines not drawn. aspect: the shape of the room it's drawn in (width / height), which it's spread to fit. Scaled into a 0..1
 // box, the Won node at its right. Returns {key: [x, y]}.
-const GAP = 0.3, CLEAR = 0.1, STEPS = 600, STARTS = 10;
+const GAP = 0.3, CLEAR = 0.1, STEPS = 600, STARTS = 10, MEET = 0.03, UNTANGLE = 25, UNTANGLE_STARTS = 4;
 function layoutGraph(nodes, links, { hub = null, pulls = [], won = null, wonLinks = [], aspect = 1, degrees = null } = {}) {
   const index = new Map(nodes.map((n, i) => [n.key, i]));
   const m = nodes.length;
@@ -851,6 +851,35 @@ function layoutGraph(nodes, links, { hub = null, pulls = [], won = null, wonLink
       }
     }
     return least;
+  };
+  // Points where three lines or more meet: two lines crossing (away from their ends), and a third line
+  // within MEET of the crossing (a share of the layout's size). [{line: the third's [a, b], px, py: the
+  // way off the crossing, need: how far}]
+  const crowded = (x, y) => {
+    const span = Math.max(Math.max(...x) - Math.min(...x), Math.max(...y) - Math.min(...y)) || 1, near = MEET * span;
+    const out = [];
+    for (let i = 0; i < drawn.length; i++) for (let j = i + 1; j < drawn.length; j++) {
+      const [a, b] = drawn[i], [c, e] = drawn[j];
+      if (a === c || a === e || b === c || b === e) continue;
+      const den = (x[b] - x[a]) * (y[e] - y[c]) - (y[b] - y[a]) * (x[e] - x[c]);
+      if (Math.abs(den) < 1e-12) continue;
+      const t = ((x[c] - x[a]) * (y[e] - y[c]) - (y[c] - y[a]) * (x[e] - x[c])) / den;
+      const u = ((x[c] - x[a]) * (y[b] - y[a]) - (y[c] - y[a]) * (x[b] - x[a])) / den;
+      if (t <= 0.02 || t >= 0.98 || u <= 0.02 || u >= 0.98) continue;
+      const cx = x[a] + t * (x[b] - x[a]), cy = y[a] + t * (y[b] - y[a]);
+      for (let k = 0; k < drawn.length; k++) {
+        if (k === i || k === j) continue;
+        const [f, g] = drawn[k];
+        const ux = x[g] - x[f], uy = y[g] - y[f], len2 = ux * ux + uy * uy || 1e-9;
+        const v = Math.max(0, Math.min(1, ((cx - x[f]) * ux + (cy - y[f]) * uy) / len2));
+        if (v <= 0.02 || v >= 0.98) continue; // at its end: a node, not a crossing
+        let px = x[f] + v * ux - cx, py = y[f] + v * uy - cy, d = Math.hypot(px, py);
+        if (d >= near) continue;
+        if (d < 1e-9) [px, py, d] = [-uy, ux, Math.sqrt(len2)];
+        out.push({ line: [f, g], px: px / d, py: py / d, need: (near - d) * 0.6 });
+      }
+    }
+    return out;
   };
   // One try, from a spiral turned by `turn`: the most linked first (nearest the middle), the Won node's
   // cards to the right; cards held to the hub start bunched on its left, so lines between them don't
@@ -917,7 +946,8 @@ function layoutGraph(nodes, links, { hub = null, pulls = [], won = null, wonLink
     if (w >= 0) [x[w], y[w]] = [Math.max(...free.map(i => x[i])) + 0.3, free.length ? free.reduce((s, i) => s + y[i], 0) / free.length : 0];
     // Then made to hold, not just leaned toward: a node a line runs under moved off it (or the line moved,
     // when the node is kept in place), nodes too close moved apart, until nothing's left to move
-    for (let round = 0; round < 800; round++) {
+    const hold = rounds => {
+    for (let round = 0; round < rounds; round++) {
       const span = Math.max(Math.max(...x) - Math.min(...x), Math.max(...y) - Math.min(...y)) || 1;
       const clear = 0.07 * span, apart = 0.19 * span;
       let moved = false;
@@ -945,13 +975,31 @@ function layoutGraph(nodes, links, { hub = null, pulls = [], won = null, wonLink
       if (w >= 0) x[w] = Math.max(x[w], Math.max(...free.map(i => x[i])) + 0.2);
       if (!moved) break;
     }
-    return { x, y, gap: worst(x, y) };
+    };
+    hold(800);
+    // Where a third line runs through two lines' crossing, it's hard to tell which line is which: the
+    // third moved aside (its free ends, as one), then held again
+    for (let round = 0; round < UNTANGLE; round++) {
+      const meets = crowded(x, y);
+      if (!meets.length) break;
+      for (const { line: [a, b], px, py, need } of meets) {
+        const movers = [a, b].filter(k => isFree.has(k));
+        // with one end kept in place, the free one moves further, so the line moves `need` where it crossed
+        const f = movers.length === 2 ? need : need * 2;
+        for (const k of movers) { x[k] += f * px; y[k] += f * py; }
+      }
+      hold(30);
+    }
+    hold(800);
+    return { x, y, gap: worst(x, y), crowded: crowded(x, y).length };
   };
-  // Tried from other turns of the spiral while a line still runs under a node; the clearest kept
+  // Tried from other turns of the spiral while a line still runs under a node or three lines meet: kept,
+  // the one with no line under a node, then the fewest meetings, then the clearest
+  const better = (p, q) => (p.gap >= 0.06) !== (q.gap >= 0.06) ? p.gap >= 0.06 : p.crowded !== q.crowded ? p.crowded < q.crowded : p.gap > q.gap;
   let best = attempt(0);
-  for (let t = 1; t < STARTS && best.gap < 0.06; t++) {
+  for (let t = 1; t < STARTS && (best.gap < 0.06 || (best.crowded && t < UNTANGLE_STARTS)); t++) {
     const next = attempt(t * 2 * Math.PI / STARTS + 0.4);
-    if (next.gap > best.gap) best = next;
+    if (better(next, best)) best = next;
   }
   const { x, y } = best;
   // Into a 0..1 box, its shape kept
@@ -1059,8 +1107,8 @@ function linkPackages(items, all, typical = null) {
 }
 
 // A package's graph, among members (numbers in shard.decks): the package (cards: card numbers) in the
-// middle; its cards on an inner ring, every pair linked by its phi (negative: rarely together, an
-// either/or); on an outer ring the `extra` cards decks running it add most: whose phi with running it is
+// middle; its cards close around it, the pairs of them that stand out linked by their phi (as synergyGraph's
+// partners: each card's strongest few, and either/ors, negative); further out the `extra` cards decks running it add most: whose phi with running it is
 // PARTNER_PHI or more, played more by the decks running it than by the others. With tournament decks
 // (lists, window w), a Won node to the right linked to the package, if its decks clearly win more or less
 // than those with none of it, and to the extra cards its tournament decks clearly win more or less with
@@ -1082,10 +1130,29 @@ export function packageGraph(shard, cards, members, { lists = null, w = 0, have 
   shard.sets ??= shard.decks.map(d => new Set(d.cards));
   const plays = p => (p === undefined ? 0 : counts[p]);
   const key = card => `c${card}`;
-  const edges = [];
+  // Its cards' pairs: the ones that stand out from its other pairs (each card's TOGETHER_LINKS strongest),
+  // and either/ors; every pair drawn crowds the middle with lines that say little (decks running it play all)
+  const pairs = [];
   for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
     const ab = ps[i] === undefined || ps[j] === undefined ? 0 : members.reduce((n, d) => n + (shard.sets[d].has(ps[i]) && shard.sets[d].has(ps[j])), 0);
-    edges.push({ a: key(cards[i]), b: key(cards[j]), strength: phiOf(ab, plays(ps[i]), plays(ps[j]), all) });
+    pairs.push([phiOf(ab, plays(ps[i]), plays(ps[j]), all), i, j, ab]);
+  }
+  const typical = pairs.length >= 3 ? [...pairs].sort((p, q) => p[0] - q[0])[pairs.length >> 1][0] : 0;
+  pairs.sort((p, q) => q[0] - p[0] || p[1] - q[1] || p[2] - q[2]);
+  const edges = [], links = new Array(ps.length).fill(0), aparts = new Array(ps.length).fill(0);
+  for (const [s, i, j, ab] of pairs) {
+    if (s >= Math.max(LINK, typical + STAND_OUT) && ab >= MIN_WITH && (links[i] < TOGETHER_LINKS || links[j] < TOGETHER_LINKS)) {
+      links[i]++;
+      links[j]++;
+      edges.push({ a: key(cards[i]), b: key(cards[j]), strength: s });
+    }
+  }
+  for (const [s, i, j] of pairs.reverse()) {
+    if (s <= APART && aparts[i] < TOGETHER_LINKS && aparts[j] < TOGETHER_LINKS) {
+      aparts[i]++;
+      aparts[j]++;
+      edges.push({ a: key(cards[i]), b: key(cards[j]), strength: s });
+    }
   }
   const core = new Set(all0.map(c => shard.position.get(c)));
   const extras = k < MIN_PLAYING ? [] : [...counts.keys()].flatMap(q => {
