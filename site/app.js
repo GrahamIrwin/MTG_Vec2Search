@@ -531,7 +531,8 @@ async function showCardWith(card) {
 
   const w = tournament?.w;
   // On a phone, fewer cards around it, so their names have room
-  const graphOf = () => synergyGraph(shard, lists, card, w ?? 0, $("modal").clientWidth < 560 ? { n: 8 } : {});
+  const graphOf = () => synergyGraph(shard, lists, card, w ?? 0,
+    { aspect: graphAspect($("modal")), ...($("modal").clientWidth < 560 && { n: 8 }) });
   let graph = graphOf();
   // The tabs with something in them; the one picked last, or the first. Charts are drawn once they're
   // showing, at the size they're shown at
@@ -578,9 +579,10 @@ const shade = strength => (0.2 + 0.8 * Math.min(1, Math.abs(strength) / 0.6)).to
 const TIERS = 5;
 const tierColor = t => `color-mix(in oklab, var(--tie-strong) ${100 - 25 * t}%, var(--tie-weak))`;
 const GRAPH_SIZES = { package: 1.15, extra: 0.8 }; // the hub's 1.3, others 1
+// The shape of the room a graph in box gets (width / height; see graphChart's height), for its layout
+const graphAspect = box => Math.min(2.2, Math.max(0.6, ((box.clientWidth || 480) - 120) / 480));
 function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = null, breadcrumb = null, title = "" }) {
   box.replaceChildren();
-  if (graph.nodes.length < 3) return;
   const crumbs = breadcrumb && el("nav", { className: "graph-crumbs", ariaLabel: "Graph" }, ...breadcrumb.flatMap(([text, go], i) => [
     i ? el("span", { className: "sep", ariaHidden: "true", textContent: "›" }) : "",
     go ? el("button", { type: "button", className: "link-button", textContent: text, onclick: go })
@@ -588,72 +590,63 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
   const noteBox = el("p", { className: "with-note" }), chart = el("div", { className: "synergy" });
   const legendBox = el("ul", { className: "synergy-legend" });
   box.append(...[crumbs, noteBox, chart, legendBox].filter(Boolean));
+  if (graph.nodes.length < 3) { // nothing to draw: just the way back, if any
+    for (const e of [noteBox, chart, legendBox]) e.remove();
+    return;
+  }
   // Filling the width up to a height, centred: on a phone, stretched taller and with smaller nodes to fit
   const W = Math.max(260, chart.clientWidth || 480), narrow = W < 520;
   chart.classList.toggle("narrow", narrow);
   const size = narrow ? 19 : 30;
-  // Names go outward from the ring: beside the nodes at its sides (room kept for them), above or below the
-  // rest. On a phone there's no room beside them: every name goes under its node
-  // The hub (a card's or a package's own node) sits in the middle; without one, the ring's middle
+  // Every name under its node, as wide as the room beside it allows. The hub (a card's or a package's own
+  // node) is drawn bigger
   const byKey = new Map(graph.nodes.map(n => [n.key, n]));
   const wonNode = byKey.get("won");
   const hub = graph.nodes.find(n => n.kind === "center" || n.key === "pkg");
-  const around = graph.nodes.filter(n => n !== hub && n !== wonNode);
-  // A ring of packages: their names take two lines, so more room above and below, and more height
-  const packages = around.some(n => n.kind === "package");
-  const charW = narrow ? 7.2 : 8.4, sideRoom = narrow ? 0 : 170, lineH = narrow ? 15 : 17;
-  const [mx, my] = [size + 12 + sideRoom, size + (narrow ? 22 : 30) + (packages ? lineH : 0)];
+  // Packages: their names take two lines, so more room under them
+  const packages = graph.nodes.some(n => n.kind === "package" && n !== hub);
+  const charW = narrow ? 7.2 : 8.4, lineH = narrow ? 15 : 17, most = narrow ? 13 : 22;
+  const [mx, top, bottom] = [size + 12 + (narrow ? 26 : 60), size * 1.3 + 8, size * 1.3 + 22 + (packages ? lineH : 0)];
   const xs = graph.nodes.map(n => n.x), ys = graph.nodes.map(n => n.y);
   const [x0, y0] = [Math.min(...xs), Math.min(...ys)];
   const [rx, ry] = [Math.max(0.1, Math.max(...xs) - x0), Math.max(0.1, Math.max(...ys) - y0)];
-  let sx = (W - 2 * mx) / rx, sy = narrow ? 1.7 * sx : sx;
-  const fit = Math.min(1, ((narrow ? 520 : 500) + (packages ? 100 : 0) - 2 * my - 22) / (ry * sy));
+  let sx = (W - 2 * mx) / rx, sy = sx;
+  const fit = Math.min(1, ((narrow ? 560 : 560) + (packages ? 80 : 0) - top - bottom) / (ry * sy));
   [sx, sy] = [sx * fit, sy * fit];
-  const H = Math.round(2 * my + ry * sy);
+  const H = Math.round(top + bottom + ry * sy);
   const ox = (W - rx * sx) / 2;
-  const at = n => [ox + (n.x - x0) * sx, my + (n.y - y0) * sy];
+  const at = n => [ox + (n.x - x0) * sx, top + (n.y - y0) * sy];
   const radius = n => Math.round(size * (n === hub ? 1.3 : GRAPH_SIZES[n.kind] ?? 1));
   const short = (t, chars) => (t.length > chars ? t.slice(0, Math.max(1, chars - 1)).trimEnd() + "…" : t);
   const lift = new Map(graph.won.map(x => [x.key, x.lift]));
-  const [cx, cy] = hub ? at(hub) : [0, 1].map(i => around.reduce((s, n) => s + at(n)[i], 0) / around.length);
-  // A name above or below a node has the room between it and the next one on its ring
-  const between = new Map();
-  for (const kind of new Set(around.map(n => n.kind))) {
-    const ring = around.filter(n => n.kind === kind);
-    const ringR = Math.hypot(...at(ring[0]).map((v, i) => v - [cx, cy][i]));
-    between.set(kind, ring.length > 1 ? 2 * ringR * Math.sin(Math.PI / ring.length) : W);
-  }
-  // A node's name; a package's ("A + B") on two lines, each part shortened to fit
+  // The room for a name under a node: the nearest node across whose circle or name is level with it (each
+  // name centred under its node, so two level names share the space between them; a circle, half of it)
+  const nameRows = n => (n.kind === "package" && n !== hub ? 2 : 1);
+  const band = n => { const [, y] = at(n), r = radius(n); return [y - r, y + r + 4 + nameRows(n) * lineH]; };
+  const room = n => {
+    const [x, y] = at(n), r = radius(n), mine = [y + r, y + r + 4 + nameRows(n) * lineH];
+    let least = 2 * W;
+    for (const o of graph.nodes) {
+      if (o === n) continue;
+      const [ox2] = at(o), [lo, hi] = band(o);
+      if (hi < mine[0] || lo > mine[1]) continue;
+      // Its name, level with this one: share the gap; only its circle: up to its edge
+      const nameLevel = at(o)[1] + radius(o) < mine[1] && at(o)[1] + radius(o) + nameRows(o) * lineH > mine[0];
+      least = Math.min(least, nameLevel ? Math.abs(ox2 - x) : 2 * (Math.abs(ox2 - x) - radius(o) - 4));
+    }
+    return least;
+  };
+  // A node's name under it; a package's ("A + B") on two lines, each part shortened to fit; kept inside the edges
   const label = (n, x, y, r) => {
-    const parts = n.kind === "package" ? nameOf(n).text.split(" + ") : [nameOf(n).text];
+    const parts = n.kind === "package" && n !== hub ? nameOf(n).text.split(" + ") : [nameOf(n).text];
     const rows = chars => parts.map((p, i) => (i < parts.length - 1 ? short(p, chars - 2) + " +" : short(p, chars)));
-    // Its lines from baseline y, `up` of them above it
-    const text = (attrs, chars, y, up = 0) => {
-      const shown = rows(chars);
-      if (shown.length === 1) return svgEl("text", { ...attrs, y }, shown[0]);
-      const t = svgEl("text", attrs);
-      shown.forEach((row, i) => t.append(svgEl("tspan", { x: attrs.x ?? 0, y: y + (i - up) * lineH }, row)));
-      return t;
-    };
-    if (n === hub) return text({ "text-anchor": "middle" }, narrow ? 14 : 22, r + 18);
-    // On a phone, under it (a package's own cards above the middle: above it, clear of the middle node), kept
-    // inside the edges; a package ring's two-line names no wider than the room between them
-    if (narrow) {
-      const chars = packages ? Math.min(15, Math.max(6, Math.floor((between.get(n.kind) - 6) / charW))) : 11;
-      const half = Math.max(...rows(chars).map(row => row.length)) * charW / 2;
-      const up = n.kind === "core" && y < cy - 1;
-      return text({ "text-anchor": "middle", x: Math.min(W - 2 - half - x, Math.max(2 + half - x, 0)).toFixed(1) }, chars,
-        up ? -(r + 6) : r + 15, up ? parts.length - 1 : 0);
-    }
-    const d = Math.hypot(x - cx, y - cy) || 1, cos = (x - cx) / d;
-    // Beside it at the ring's sides; on the right, not toward the Won node
-    if (Math.abs(cos) >= 0.55 && !(cos > 0 && wonNode)) {
-      return text({ "text-anchor": cos > 0 ? "start" : "end", x: (cos > 0 ? 1 : -1) * (r + 6) }, Math.floor(sideRoom / charW), 5,
-        (parts.length - 1) / 2);
-    }
-    const above = y < cy - 1;
-    return text({ "text-anchor": "middle" }, Math.max(6, Math.floor((between.get(n.kind) - 8) / charW)), above ? -(r + 8) : r + 18,
-      above ? parts.length - 1 : 0);
+    const chars = Math.max(6, Math.min(most, Math.floor((room(n) - 10) / charW)));
+    const shown = rows(chars), half = Math.max(...shown.map(row => row.length)) * charW / 2;
+    const attrs = { "text-anchor": "middle", x: Math.min(W - 2 - half - x, Math.max(2 + half - x, 0)).toFixed(1) };
+    if (shown.length === 1) return svgEl("text", { ...attrs, y: r + (narrow ? 15 : 18) }, shown[0]);
+    const t = svgEl("text", attrs);
+    shown.forEach((row, i) => t.append(svgEl("tspan", { x: attrs.x, y: r + (narrow ? 15 : 18) + i * lineH }, row)));
+    return t;
   };
   const root = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group", "aria-label": title });
   const defs = svgEl("defs", {});
@@ -667,9 +660,36 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
   // the ranking, dark green to pale grey; rarely together: dotted. Won's: green for winning more, red
   // (kept for this) for less, the bigger the difference the more opaque
   const lines = [];
+  // How close a path (points) comes to the edge of a node it doesn't join: negative, under it
+  const clearance = (pts, a, b) => Math.min(...graph.nodes.filter(n => n !== a && n !== b).map(n => {
+    const [nx, ny] = at(n);
+    let least = Infinity;
+    for (let i = 1; i < pts.length; i++) {
+      const [px, py] = pts[i - 1], ux = pts[i][0] - px, uy = pts[i][1] - py;
+      const t = Math.max(0, Math.min(1, ((nx - px) * ux + (ny - py) * uy) / (ux * ux + uy * uy || 1)));
+      least = Math.min(least, Math.hypot(nx - px - t * ux, ny - py - t * uy));
+    }
+    return least - radius(n) - 6;
+  }));
   const line = (a, b, attrs) => {
     const [x1, y1] = at(a), [x2, y2] = at(b);
-    const node = svgEl("line", { x1, y1, x2, y2, ...attrs });
+    let node = svgEl("line", { x1, y1, x2, y2, ...attrs });
+    // The layout keeps lines off the nodes they don't join; where it can't, the line bends around them
+    if (clearance([[x1, y1], [x2, y2]], a, b) < 0) {
+      const len = Math.hypot(x2 - x1, y2 - y1) || 1, [nx, ny] = [-(y2 - y1) / len, (x2 - x1) / len];
+      const curve = bend => {
+        const [cx, cy] = [(x1 + x2) / 2 + nx * bend, (y1 + y2) / 2 + ny * bend];
+        return Array.from({ length: 21 }, (_, i) => {
+          const t = i / 20, u = 1 - t;
+          return [u * u * x1 + 2 * u * t * cx + t * t * x2, u * u * y1 + 2 * u * t * cy + t * t * y2];
+        });
+      };
+      const bends = [0.15, 0.25, 0.35, 0.5, 0.7].flatMap(k => [k * len, -k * len]);
+      const bend = bends.find(k => clearance(curve(k), a, b) >= 0)
+        ?? bends.reduce((p, q) => (clearance(curve(q), a, b) > clearance(curve(p), a, b) ? q : p));
+      const [cx, cy] = [(x1 + x2) / 2 + nx * bend, (y1 + y2) / 2 + ny * bend];
+      node = svgEl("path", { d: `M${x1.toFixed(1)} ${y1.toFixed(1)}Q${cx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`, fill: "none", ...attrs });
+    }
     lines.push([node, a, b]);
     return node;
   };
@@ -800,14 +820,19 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
   };
   const map = () => {
     delete box.dataset.open;
-    const graph = packageMap(shard, packages, members, { lists, w, have, ...(box.clientWidth < 520 && { n: 8 }) });
+    // A pasted deck's: just the packages it runs (all its cards, or at least half)
+    const runs = have ? packages.filter(p => 2 * p.cards.filter(c => have.has(c)).length >= p.cards.length) : packages;
+    const graph = packageMap(shard, runs, members, { lists, w, have, aspect: graphAspect(box), ...(box.clientWidth < 520 && { n: 8 }) });
     if (graph.nodes.length < 3) {
-      box.replaceChildren(el("p", { className: "muted deck-lede", textContent: `Too few packages in ${these} to map.` }));
+      box.replaceChildren(el("p", { className: "muted deck-lede", textContent: have
+        ? `Your deck runs too few of the packages ${lead} decks play to map (${graph.nodes.length}).`
+        : `Too few packages in ${these} to map.` }));
       return;
     }
     graphChart(box, graph, {
       title: `Packages ${these} play`,
-      hint: have ? `Packages ${lead} decks play. Faded: your deck has none of its cards; dotted ring: some of them. Pick one to see its cards.`
+      hint: have ? `The packages ${lead} decks play that your deck runs, linked when the same decks run them; dotted ring: `
+        + "it has only some of the package's cards. Pick one to see its cards."
         : `Packages ${these} play, linked when the same decks run them. Pick one to see its cards.`,
       legend: {
         together: "Run by the same decks: strongest to weakest, ranked within this graph",
@@ -826,12 +851,19 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
   };
   const open = cards => {
     box.dataset.open = cards.join(".");
-    const graph = packageGraph(shard, cards, members, { lists, w, have, ...(box.clientWidth < 520 && { extra: 4 }) });
+    const graph = packageGraph(shard, cards, members, { lists, w, have, mine: !!have, aspect: graphAspect(box), ...(box.clientWidth < 520 && { extra: 4 }) });
     const k = graph.nodes[0].decks;
+    if (graph.nodes.length < 3) { // too little of it in a pasted deck to draw: say so, with the way back
+      graphChart(box, { nodes: [], edges: [], won: [] }, { breadcrumb: [["All packages", map], [title(cards), null]] });
+      box.append(el("p", { className: "muted deck-lede", textContent: `Your deck runs ${graph.nodes.length - 1} of its `
+        + `${cards.length} cards, and none of the cards decks with it add most.` }));
+      return;
+    }
     graphChart(box, graph, {
       title: `${title(cards)}: its cards, and the cards decks with it add most`,
       breadcrumb: [["All packages", map], [title(cards), null]],
-      hint: `Its cards in the middle; around them, the cards decks with it add most.${have ? " Faded: not in your deck." : ""} `
+      hint: `${have ? "The package's cards your deck runs" : "Its cards"} in the middle; around them, the cards decks with it add most`
+        + `${have ? " that your deck runs too" : ""}. `
         + "Pick a card to open it.",
       legend: {
         together: "Played together: strongest to weakest, ranked within this graph",

@@ -402,6 +402,16 @@ test("a card's tournament results by month, against all the commander's decks; n
   assert.deepEqual(resultsByMonth({ cards: lists.cards, decks: lists.decks }, 7), []);
 });
 
+// No line runs within `least` of a node it doesn't join (lines: [[node, node]], nodes with x and y)
+function clearOfLines(nodes, lines, least = 0.05) {
+  for (const [a, b] of lines) for (const n of nodes) {
+    if (n === a || n === b) continue;
+    const ux = b.x - a.x, uy = b.y - a.y, t = Math.max(0, Math.min(1, ((n.x - a.x) * ux + (n.y - a.y) * uy) / (ux * ux + uy * uy)));
+    const d = Math.hypot(n.x - a.x - t * ux, n.y - a.y - t * uy);
+    assert.ok(d >= least, `a line runs ${d.toFixed(3)} from a node`);
+  }
+}
+
 test("synergy graph: partners around the card, every line a correlation, the Won node to the right", () => {
   // 120 decks, card 100 in the first 60. Among those: 101 and 102 in the even ones, 103 and 104 in
   // every third, 105 in the first 20, 106 in the last 20; each also in 6 of the other 60. 107: every deck.
@@ -426,7 +436,6 @@ test("synergy graph: partners around the card, every line a correlation, the Won
   const wonNode = byCard.get(null);
   assert.equal(wonNode.kind, "won");
   assert.ok(graph.nodes.every(n => n === wonNode || n.x < wonNode.x));
-  assert.ok(byCard.get(105).x > byCard.get(100).x && byCard.get(106).x > byCard.get(100).x); // nearest the Won node
   // Spokes are each partner's correlation with the card: 101 is in half of 100's decks and few others
   assert.ok(graph.edges.filter(e => e.kind === "spoke").every(e => e.strength >= 0.2 && e.strength <= 1));
   // Every card correlated clearly enough with it (here 6), the strongest n at most
@@ -442,22 +451,20 @@ test("synergy graph: partners around the card, every line a correlation, the Won
   assert.ok(graph.edges.filter(e => e.kind === "together").length <= 4); // not every pair: each card's strongest
   assert.ok(graph.edges.every(e => (e.kind === "spoke") === (e.a === 100)));
   assert.ok(ring.every(c => linked(100, c)));
-  const apart = (a, b) => {
-    const d = Math.abs(ring.indexOf(a) - ring.indexOf(b));
-    return Math.min(d, ring.length - d);
-  };
-  assert.equal(apart(101, 102), 1);
-  assert.equal(apart(103, 104), 1);
-  // In the box, and no two nodes on top of each other
+  // Cards played together sit closer than an either/or pair
+  const far = (a, b) => Math.hypot(byCard.get(a).x - byCard.get(b).x, byCard.get(a).y - byCard.get(b).y);
+  assert.ok(far(101, 102) < far(105, 106) && far(103, 104) < far(105, 106));
+  // In the box, no two nodes on top of each other, and no line under a node it doesn't join
   for (const g of [graph, synergyGraph(shard, null, 100, 0), synergyGraph(shard, lists, 100, 0, { n: 12 })]) {
     for (const n of g.nodes) assert.ok(n.x >= 0 && n.x <= 1 && n.y >= 0 && n.y <= 1, `${n.card} at ${n.x}, ${n.y}`);
     for (const a of g.nodes) for (const b of g.nodes) if (a !== b) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= 0.1);
+    const at = new Map(g.nodes.map(n => [n.card, n]));
+    clearOfLines(g.nodes, [...g.edges.map(e => [at.get(e.a), at.get(e.b)]), ...g.won.map(x => [at.get(null), at.get(x.card)])]);
   }
   // No results: no Won node, the card in the middle
   const plain = synergyGraph(shard, null, 100, 0);
   assert.deepEqual(plain.won, []);
   assert.ok(!plain.nodes.some(n => n.kind === "won"));
-  assert.equal(plain.nodes[0].x, 0.5);
   assert.deepEqual(synergyGraph(shard, lists, 999, 0), { nodes: [{ card: 999, x: 0.5, y: 0.5, kind: "center" }], edges: [], won: [] });
 });
 
@@ -503,7 +510,8 @@ test("package map: packages run by enough decks, linked by how often decks run b
   assert.ok(byKey.get("p0").lift > 0 && byKey.get("p2").lift < 0 && !("lift" in byKey.get("p1")));
   assert.ok(map.won.every(x => x.tested.every(k => k >= 10)) && byKey.get("p0").tested === map.won.find(x => x.key === "p0").tested);
   assert.equal(byKey.get("won").x, 1);
-  assert.ok(byKey.get("p0").x > 0.5 && byKey.get("p2").x > 0.5); // nearest the Won node
+  assert.ok(map.nodes.every(n => n.key === "won" || n.x < 1)); // the Won node rightmost
+  clearOfLines(map.nodes, [...map.edges.map(e => [byKey.get(e.a), byKey.get(e.b)]), ...map.won.map(x => [byKey.get("won"), byKey.get(x.key)])]);
   // The n most run; within a build (members); a pasted deck's share of each
   assert.deepEqual(packageMap(shard, pkgs, all, { n: 2 }).nodes.map(n => n.key).sort(), ["p0", "p1"]);
   assert.deepEqual(packageMap(shard, pkgs, range(100, 200)).nodes.map(n => n.key).sort(), ["p2", "p3", "p4"]); // 4 of 100 is enough
@@ -562,4 +570,9 @@ test("package graph: its cards in the middle, what decks running it add around t
   assert.equal(three.edges.length, 3); // run by no deck: no extras
   for (const g of [graph, mine, three, packageGraph(shard, [10, 11, 21], all), packageGraph(shard, [10, 11], all, { lists: pkgLists, w: 0, extra: 12 })]) spread(g);
   assert.equal(packageGraph(shard, [10, 999], all).nodes[0].decks, 0);
+  // On a pasted deck's page, just the cards it plays: here one of the package's two, and an extra it has
+  const pick = packageGraph(pkgShard, [10, 11], range(0, 200), { have: new Set([10, 21]), mine: true });
+  assert.deepEqual(pick.nodes.filter(n => n.kind !== "package").map(n => n.card).sort((a, b) => a - b), [10, 21]);
+  assert.deepEqual(pick.nodes[0].cards, [10, 11]); // the package itself, whole
+  assert.ok(pick.edges.every(e => e.a !== "c11" && e.b !== "c11"));
 });

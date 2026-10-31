@@ -759,7 +759,7 @@ export function winsMoreWith(lists, card, w, { min = MIN_PAIR_DECKS } = {}) {
 // randomness), in a 0..1 box: partners linked to each other sit side by side, won ones nearest the Won
 // node. nodes: [{card, x, y, kind: "center" | "partner" | "won", ...partner row, phi, lift}]
 export const GRAPH_PARTNERS = 12, PARTNER_PHI = 0.2, LINK = 0.3, STAND_OUT = 0.12, TOGETHER_LINKS = 2, APART = -0.15;
-export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link = LINK, min = MIN_PAIR_DECKS } = {}) {
+export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link = LINK, min = MIN_PAIR_DECKS, aspect = 1 } = {}) {
   shard = decoded(shard);
   const all = shard.decks.length;
   const withCard = (x, b = x.base * all) => (x.decksWith * all - x.decks * b) / Math.sqrt(x.decks * (all - x.decks) * b * (all - b));
@@ -801,37 +801,162 @@ export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link =
     }
   }
 
-  // The ring's order: won partners first, then the rest, each next one the most linked to the one before
   const lift = new Map(won.map(x => [x.card, x.lift]));
-  const isWon = i => lift.has(partners[i].card);
-  const order = ringOrder([[...partners.keys()].filter(isWon), [...partners.keys()].filter(i => !isWon(i))], phi);
-  const cx = won.length ? 0.36 : 0.5, cy = 0.5, r = 0.3, step = 2 * Math.PI / Math.max(m, 1);
-  const first = -(partners.filter((_, i) => isWon(i)).length - 1) / 2 * step; // won ones centred on the right
-  const nodes = [{ card, x: cx, y: cy, kind: "center" }];
-  order.forEach((i, j) => nodes.push({ ...partners[i], x: cx + r * Math.cos(first + j * step), y: cy + r * Math.sin(first + j * step),
-    kind: "partner", ...(isWon(i) && { lift: lift.get(partners[i].card) }) }));
-  if (won.length) nodes.push({ card: null, x: 1, y: cy, kind: "won" });
+  if (!m) return { nodes: [{ card, x: 0.5, y: 0.5, kind: "center" }], edges, won };
+  const keyOf = c => (c === card ? "hub" : `c${c}`);
+  const at = layoutGraph([{ key: "hub" }, ...partners.map(x => ({ key: keyOf(x.card) })), ...(won.length ? [{ key: "won" }] : [])],
+    edges.map(e => ({ a: keyOf(e.a), b: keyOf(e.b), strength: e.strength })),
+    { hub: "hub", won: won.length ? "won" : null, wonLinks: won.map(x => keyOf(x.card)), aspect });
+  const place = k => ({ x: at.get(k)[0], y: at.get(k)[1] });
+  const nodes = [{ card, ...place("hub"), kind: "center" },
+    ...partners.map(x => ({ ...x, ...place(keyOf(x.card)), kind: "partner", ...(lift.has(x.card) && { lift: lift.get(x.card) }) }))];
+  if (won.length) nodes.push({ card: null, ...place("won"), kind: "won" });
   return { nodes, edges, won };
 }
 
-// A ring's order: each group in turn, each next one the most linked (link(i, j)) to the one before,
-// so linked ones sit side by side
-function ringOrder(groups, link) {
-  const order = [];
-  for (const group of groups) {
-    const left = new Set(group);
-    while (left.size) {
-      const last = order.at(-1);
-      let next = -1, best = -Infinity;
-      for (const i of left) {
-        const s = last === undefined ? 0 : link(last, i);
-        if (s > best) [next, best] = [i, s];
+// A graph's layout, the same every time (no randomness): nodes ([{key}], given x and y here) pushed apart,
+// lines pulling the cards they join together (links: [{a, b, strength}]; the stronger, the closer;
+// negative ones, an either/or, pushing apart), and every node pulled toward the middle the more lines it
+// has, so the most linked sit in the middle and the least at the edges. A node too close to a line it's
+// not on is pushed off it, so no line runs under a node. hub: a key kept in the middle (a card's or a
+// package's own node); pulls: [{key, length}] held about that far from the hub with no line drawn (a
+// package's own cards); won: a key kept to the right of the rest, wonLinks the keys it has lines to.
+// aspect: the shape of the room it's drawn in (width / height), which it's spread to fit. Scaled into a 0..1
+// box, the Won node at its right. Returns {key: [x, y]}.
+const GAP = 0.3, CLEAR = 0.1, STEPS = 600, STARTS = 10;
+function layoutGraph(nodes, links, { hub = null, pulls = [], won = null, wonLinks = [], aspect = 1 } = {}) {
+  const index = new Map(nodes.map((n, i) => [n.key, i]));
+  const m = nodes.length;
+  const pinned = i => nodes[i].key === hub || nodes[i].key === won;
+  const degree = new Array(m).fill(0);
+  for (const l of links) if (l.strength > 0 && l.a !== hub && l.b !== hub) { degree[index.get(l.a)]++; degree[index.get(l.b)]++; }
+  const free = [...nodes.keys()].filter(i => !pinned(i)).sort((i, j) => degree[j] - degree[i] || String(nodes[i].key).localeCompare(String(nodes[j].key)));
+  const isFree = new Set(free), toWon = new Set(wonLinks.map(k => index.get(k)));
+  const drawn = links.map(l => [index.get(l.a), index.get(l.b), l.strength])
+    .concat(wonLinks.map(k => [index.get(won), index.get(k), 0.3]));
+  const springs = pulls.map(p => [index.get(hub), index.get(p.key), p.length]);
+  const held = new Set(springs.map(([, j]) => j));
+  const w = won === null ? -1 : index.get(won), h = hub === null ? -1 : index.get(hub);
+  // How close a line comes to a node it doesn't join, as a share of the layout's size
+  const worst = (x, y) => {
+    const span = Math.max(Math.max(...x) - Math.min(...x), Math.max(...y) - Math.min(...y)) || 1;
+    let least = Infinity;
+    for (const [a, b] of drawn) {
+      const ux = x[b] - x[a], uy = y[b] - y[a], len2 = ux * ux + uy * uy || 1e-9;
+      for (let i = 0; i < m; i++) {
+        if (i === a || i === b) continue;
+        const t = Math.max(0, Math.min(1, ((x[i] - x[a]) * ux + (y[i] - y[a]) * uy) / len2));
+        least = Math.min(least, Math.hypot(x[i] - x[a] - t * ux, y[i] - y[a] - t * uy) / span);
       }
-      order.push(next);
-      left.delete(next);
     }
+    return least;
+  };
+  // One try, from a spiral turned by `turn`: the most linked first (nearest the middle), the Won node's
+  // cards to the right; cards held to the hub start bunched on its left, so lines between them don't
+  // enclose it
+  const attempt = turn => {
+    const x = new Float64Array(m), y = new Float64Array(m);
+    const loose = free.filter(i => !held.has(i)), bunch = free.filter(i => held.has(i));
+    loose.forEach((i, j) => {
+      const r = (hub === null ? 0.05 : 0.2) + 0.35 * Math.sqrt((j + 1) / loose.length), a = turn + j * 2.39996;
+      [x[i], y[i]] = [r * Math.cos(a) + (toWon.has(i) ? 0.15 : 0), r * Math.sin(a)];
+    });
+    bunch.forEach((i, j) => {
+      const a = Math.PI + turn / 4 + (j - (bunch.length - 1) / 2) * 0.7;
+      [x[i], y[i]] = [0.2 * Math.cos(a), 0.2 * Math.sin(a)];
+    });
+    for (let step = 0; step < STEPS; step++) {
+      const heat = 0.05 * (1 - step / STEPS) + 0.002;
+      if (w >= 0) [x[w], y[w]] = [Math.max(...free.map(i => x[i])) + 0.3, 0];
+      const dx = new Float64Array(m), dy = new Float64Array(m);
+      const push = (i, fx, fy) => { dx[i] += fx; dy[i] += fy; };
+      for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) { // apart
+        const ux = x[j] - x[i] || 1e-6 * (j - i), uy = y[j] - y[i], d = Math.hypot(ux, uy);
+        if (d > 2 * GAP) continue;
+        const f = 0.02 * (GAP / d) ** 2;
+        push(i, -f * ux / d, -f * uy / d);
+        push(j, f * ux / d, f * uy / d);
+      }
+      for (const [i, j, s] of drawn) { // lines: the stronger, the shorter (the hub's longer: it has one to each); either/ors apart
+        const ux = x[j] - x[i], uy = y[j] - y[i], d = Math.hypot(ux, uy) || 1e-6;
+        const rest = (i === h || j === h ? 0.55 : 0.34) - 0.12 * Math.min(1, s);
+        const f = s > 0 ? 0.06 * (0.25 + s) * (d - rest) : d < 0.9 ? -0.03 * -s : 0;
+        push(i, f * ux / d, f * uy / d);
+        push(j, -f * ux / d, -f * uy / d);
+      }
+      for (const [i, j, length] of springs) {
+        const ux = x[j] - x[i], uy = y[j] - y[i], d = Math.hypot(ux, uy) || 1e-6;
+        push(j, -0.1 * (d - length) * ux / d, -0.1 * (d - length) * uy / d);
+      }
+      // To the middle, the more linked the harder; less across than down when it's to be wide (aspect: width / height)
+      // (one with no lines at all a little harder, or nothing holds it near the rest)
+      for (const i of free) {
+        const g = 0.012 * (1 + degree[i]) + (degree[i] ? 0 : 0.02);
+        push(i, -g * x[i] / aspect, -g * y[i] * aspect);
+      }
+      for (const [a, b] of drawn) { // off the lines they're not on
+        const ux = x[b] - x[a], uy = y[b] - y[a], len2 = ux * ux + uy * uy || 1e-9;
+        for (let i = 0; i < m; i++) {
+          if (i === a || i === b) continue;
+          const t = Math.max(0, Math.min(1, ((x[i] - x[a]) * ux + (y[i] - y[a]) * uy) / len2));
+          const px = x[i] - (x[a] + t * ux), py = y[i] - (y[a] + t * uy), d = Math.hypot(px, py) || 1e-6;
+          if (d >= CLEAR) continue;
+          const f = 0.5 * (CLEAR - d);
+          push(i, f * px / d, f * py / d);
+          push(a, -0.25 * f * px / d, -0.25 * f * py / d);
+          push(b, -0.25 * f * px / d, -0.25 * f * py / d);
+        }
+      }
+      for (const i of free) {
+        const d = Math.hypot(dx[i], dy[i]), cap = d > heat ? heat / d : 1;
+        x[i] += dx[i] * cap;
+        y[i] += dy[i] * cap;
+      }
+    }
+    if (w >= 0) [x[w], y[w]] = [Math.max(...free.map(i => x[i])) + 0.3, free.length ? free.reduce((s, i) => s + y[i], 0) / free.length : 0];
+    // Then made to hold, not just leaned toward: a node a line runs under moved off it (or the line moved,
+    // when the node is kept in place), nodes too close moved apart, until nothing's left to move
+    for (let round = 0; round < 800; round++) {
+      const span = Math.max(Math.max(...x) - Math.min(...x), Math.max(...y) - Math.min(...y)) || 1;
+      const clear = 0.07 * span, apart = 0.19 * span;
+      let moved = false;
+      for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) {
+        const ux = x[j] - x[i] || 1e-6 * (j - i), uy = y[j] - y[i], d = Math.hypot(ux, uy);
+        if (d >= apart) continue;
+        const movers = [i, j].filter(k => isFree.has(k)), f = (apart - d) / Math.max(1, movers.length);
+        for (const k of movers) { const sgn = k === i ? -1 : 1; x[k] += sgn * f * ux / d; y[k] += sgn * f * uy / d; }
+        moved ||= movers.length > 0;
+      }
+      for (const [a, b] of drawn) {
+        const ux = x[b] - x[a], uy = y[b] - y[a], len2 = ux * ux + uy * uy || 1e-9;
+        for (let i = 0; i < m; i++) {
+          if (i === a || i === b) continue;
+          const t = Math.max(0, Math.min(1, ((x[i] - x[a]) * ux + (y[i] - y[a]) * uy) / len2));
+          let px = x[i] - (x[a] + t * ux), py = y[i] - (y[a] + t * uy), d = Math.hypot(px, py);
+          if (d >= clear) continue;
+          if (d < 1e-6) [px, py, d] = [-uy, ux, Math.sqrt(len2)]; // right on it: off to one side
+          const f = (clear - d) * 0.6;
+          if (isFree.has(i)) { x[i] += f * px / d; y[i] += f * py / d; moved = true; } else {
+            for (const k of [a, b]) if (isFree.has(k)) { x[k] -= f * px / d; y[k] -= f * py / d; moved = true; }
+          }
+        }
+      }
+      if (w >= 0) x[w] = Math.max(x[w], Math.max(...free.map(i => x[i])) + 0.2);
+      if (!moved) break;
+    }
+    return { x, y, gap: worst(x, y) };
+  };
+  // Tried from other turns of the spiral while a line still runs under a node; the clearest kept
+  let best = attempt(0);
+  for (let t = 1; t < STARTS && best.gap < 0.06; t++) {
+    const next = attempt(t * 2 * Math.PI / STARTS + 0.4);
+    if (next.gap > best.gap) best = next;
   }
-  return order;
+  const { x, y } = best;
+  // Into a 0..1 box, its shape kept
+  const x0 = Math.min(...x), y0 = Math.min(...y), span = Math.max(Math.max(...x) - x0, Math.max(...y) - y0) || 1;
+  const yPad = (1 - (Math.max(...y) - y0) / span) / 2, xPad = (1 - (Math.max(...x) - x0) / span) / 2;
+  return new Map(nodes.map((n, i) => [n.key, [+((x[i] - x0) / span + xPad).toFixed(4), +((y[i] - y0) / span + yPad).toFixed(4)]]));
 }
 
 // === Packages as graphs ===
@@ -868,7 +993,7 @@ const clearResult = r => r.evidence !== null && Math.abs(r.evidence) >= 2
 // (members running it), name: its two strongest cards, lift?, tested?, have?}]; edges: [{a, b, strength}]; won: [{key,
 // lift, tested: [tournament decks with it, with none of it]}]
 export const MAP_PACKAGES = 12, PACKAGE_LINK = 0.15, PACKAGE_APART = -0.1;
-export function packageMap(shard, packages, members, { lists = null, w = 0, have = null, n = MAP_PACKAGES } = {}) {
+export function packageMap(shard, packages, members, { lists = null, w = 0, have = null, n = MAP_PACKAGES, aspect = 1 } = {}) {
   shard = decoded(shard);
   const all = members.length, least = Math.max(3, 0.03 * all);
   const shown = packages.map(({ cards }, i) => ({ key: `p${i}`, cards, runs: running(shard, cards, members) }))
@@ -907,17 +1032,12 @@ export function packageMap(shard, packages, members, { lists = null, w = 0, have
   }
 
   const lift = new Map(won.map(x => [x.key, x.lift])), tested = new Map(won.map(x => [x.key, x.tested]));
-  const isWon = i => lift.has(shown[i].key);
-  const order = ringOrder([[...shown.keys()].filter(isWon), [...shown.keys()].filter(i => !isWon(i))], (i, j) => phi[i * m + j]);
-  const cx = won.length ? 0.4 : 0.5, cy = 0.5, r = m > 1 ? 0.36 : 0, step = 2 * Math.PI / Math.max(m, 1);
-  const first = -(won.length - 1) / 2 * step; // won ones centred on the right
-  const nodes = order.map((i, j) => {
-    const { key, cards, runs } = shown[i];
-    return { key, kind: "package", x: cx + r * Math.cos(first + j * step), y: cy + r * Math.sin(first + j * step),
-      cards, decks: runs.length, name: cards.slice(0, 2), ...(lift.has(key) && { lift: lift.get(key), tested: tested.get(key) }),
-      ...(have && { have: hasOf(have, cards) }) };
-  });
-  if (won.length) nodes.push({ key: "won", kind: "won", x: 1, y: cy });
+  const at = m ? layoutGraph([...shown, ...(won.length ? [{ key: "won" }] : [])], edges,
+    { won: won.length ? "won" : null, wonLinks: won.map(x => x.key), aspect }) : new Map();
+  const nodes = shown.map(({ key, cards, runs }) => ({ key, kind: "package", x: at.get(key)[0], y: at.get(key)[1],
+    cards, decks: runs.length, name: cards.slice(0, 2), ...(lift.has(key) && { lift: lift.get(key), tested: tested.get(key) }),
+    ...(have && { have: hasOf(have, cards) }) }));
+  if (won.length) nodes.push({ key: "won", kind: "won", x: at.get("won")[0], y: at.get("won")[1] });
   return { nodes, edges, won };
 }
 
@@ -934,9 +1054,12 @@ export function packageMap(shard, packages, members, { lists = null, w = 0, have
 // decksWith, phi}; lift?, tested? and have? (card nodes) on each. edges: [{a, b, strength}]; won: [{key, lift,
 // tested: [tournament decks with it, without it (the package's: with none of it)]}]
 export const PACKAGE_EXTRAS = 6;
-export function packageGraph(shard, cards, members, { lists = null, w = 0, have = null, extra = PACKAGE_EXTRAS, min = MIN_PAIR_DECKS } = {}) {
+export function packageGraph(shard, cards, members, { lists = null, w = 0, have = null, extra = PACKAGE_EXTRAS, min = MIN_PAIR_DECKS, mine = false, aspect = 1 } = {}) {
   shard = decoded(shard);
-  const all = members.length, runs = running(shard, cards, members), k = runs.length;
+  const all0 = cards;
+  // mine (with have): only the cards the pasted deck plays
+  if (mine && have) cards = cards.filter(c => have.has(c));
+  const all = members.length, runs = running(shard, all0, members), k = runs.length;
   const ps = cards.map(c => shard.position.get(c));
   const counts = playCounts(shard, members), withIt = playCounts(shard, runs);
   shard.sets ??= shard.decks.map(d => new Set(d.cards));
@@ -947,46 +1070,32 @@ export function packageGraph(shard, cards, members, { lists = null, w = 0, have 
     const ab = ps[i] === undefined || ps[j] === undefined ? 0 : members.reduce((n, d) => n + (shard.sets[d].has(ps[i]) && shard.sets[d].has(ps[j])), 0);
     edges.push({ a: key(cards[i]), b: key(cards[j]), strength: phiOf(ab, plays(ps[i]), plays(ps[j]), all) });
   }
-  const core = new Set(ps);
+  const core = new Set(all0.map(c => shard.position.get(c)));
   const extras = k < MIN_PLAYING ? [] : [...counts.keys()].flatMap(q => {
     if (core.has(q) || withIt[q] < MIN_WITH) return [];
     const phi = phiOf(withIt[q], k, counts[q], all), base = (counts[q] - withIt[q]) / (all - k), share = withIt[q] / k;
-    return phi >= PARTNER_PHI && share > base ? [{ card: shard.cards[q], base, with: share, decksWith: withIt[q], phi }] : [];
+    return phi >= PARTNER_PHI && share > base && (!mine || !have || have.has(shard.cards[q])) ? [{ card: shard.cards[q], base, with: share, decksWith: withIt[q], phi }] : [];
   }).sort((a, b) => b.phi - a.phi || a.card - b.card).slice(0, extra);
   for (const x of extras) edges.push({ a: "pkg", b: key(x.card), strength: x.phi });
 
-  const result = lists ? packageResults(lists, cards, w) : null;
+  const result = lists ? packageResults(lists, all0, w) : null;
   const inRing = new Set(extras.map(x => x.card));
   const won = [...(result && clearResult(result) ? [{ key: "pkg", lift: result.lift, tested: [result.all.decks, result.none.decks] }] : []),
-    ...(lists ? winsMoreWith(lists, cards, w, { min }) : []).filter(x => inRing.has(x.card) && Math.abs(x.evidence) >= 2)
+    ...(lists ? winsMoreWith(lists, all0, w, { min }) : []).filter(x => inRing.has(x.card) && Math.abs(x.evidence) >= 2)
       .map(x => ({ key: key(x.card), lift: x.lift, tested: [x.with.decks, x.without.decks] }))];
   const lift = new Map(won.map(x => [x.key, x.lift])), tested = new Map(won.map(x => [x.key, x.tested]));
   const marks = (card, k) => ({ ...(lift.has(k) && { lift: lift.get(k), tested: tested.get(k) }), ...(have && { have: have.has(card) }) });
 
-  // Rings around the middle, half a step off the line from it to the Won node where that line would hit one
-  const cx = won.length ? 0.4 : 0.5, cy = 0.5, at = (r, a) => ({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
-  const nodes = [{ key: "pkg", kind: "package", ...at(0, 0), cards, decks: k, name: cards.slice(0, 2), ...(lift.has("pkg") && { lift: lift.get("pkg"), tested: tested.get("pkg") }) }];
-  const phiAt = (i, j) => edges.find(e => e.a === key(cards[Math.min(i, j)]) && e.b === key(cards[Math.max(i, j)])).strength;
-  const wonExtras = extras.filter(x => lift.has(key(x.card)));
-  const outer = 2 * Math.PI / Math.max(extras.length, 1); // won ones centred on the right
-  const first = (-(wonExtras.length - 1) / 2 + (lift.has("pkg") && wonExtras.length % 2 ? 0.5 : 0)) * outer;
-  // The package's cards (and the outer ring, unless won ones are centred on it) turned so the cards sit
-  // clearest of the spokes and the line to the Won node: none runs over a card. Two cards go on the same
-  // side: facing each other, their line would run under the middle and look like two spokes to it
-  const inner = 2 * Math.PI / Math.max(cards.length, 1);
-  const arrangements = cards.length === 2 ? [0.8, 0.5, 0.6, 0.7, 0.9, 1].map(d => [Math.PI - d, Math.PI + d])
-    : Array.from({ length: 16 }, (_, t) => cards.map((_, j) => (j + 0.5 + t / 16) * inner));
-  const layouts = (wonExtras.length ? [0] : [0, 0.5, 0.25, 0.75]).flatMap(t => arrangements.map(core => ({ t, core })));
-  const clearOf = ({ t, core }) => {
-    const taken = extras.map((_, j) => first + (j + t) * outer).concat(won.length ? [0] : []);
-    return Math.min(...core.flatMap(a => taken.map(x => Math.abs(Math.atan2(Math.sin(a - x), Math.cos(a - x))))));
-  };
-  const best = layouts.reduce((b, l) => (clearOf(l) > clearOf(b) + 1e-9 ? l : b));
-  ringOrder([[...cards.keys()]], phiAt).forEach((i, j) =>
-    nodes.push({ key: key(cards[i]), kind: "core", ...at(0.19, best.core[j]), card: cards[i], decks: plays(ps[i]), ...marks(cards[i], key(cards[i])) }));
-  [...wonExtras, ...extras.filter(x => !lift.has(key(x.card)))].forEach((x, j) =>
-    nodes.push({ key: key(x.card), kind: "extra", ...at(0.38, first + (j + best.t) * outer), ...x, ...marks(x.card, key(x.card)) }));
-  if (won.length) nodes.push({ key: "won", kind: "won", x: 1, y: cy });
+  // Its cards held close around the middle (every deck running it plays them all: no line to them), the
+  // extra cards further out
+  const at = layoutGraph([{ key: "pkg" }, ...cards.map(c => ({ key: key(c) })), ...extras.map(x => ({ key: key(x.card) })),
+    ...(won.length ? [{ key: "won" }] : [])], edges,
+  { hub: "pkg", pulls: cards.map(c => ({ key: key(c), length: 0.17 })), won: won.length ? "won" : null, wonLinks: won.map(x => x.key), aspect });
+  const place = k => ({ x: at.get(k)[0], y: at.get(k)[1] });
+  const nodes = [{ key: "pkg", kind: "package", ...place("pkg"), cards: all0, decks: k, name: all0.slice(0, 2), ...(lift.has("pkg") && { lift: lift.get("pkg"), tested: tested.get("pkg") }) },
+    ...cards.map((c, i) => ({ key: key(c), kind: "core", ...place(key(c)), card: c, decks: plays(ps[i]), ...marks(c, key(c)) })),
+    ...extras.map(x => ({ key: key(x.card), kind: "extra", ...place(key(x.card)), ...x, ...marks(x.card, key(x.card)) }))];
+  if (won.length) nodes.push({ key: "won", kind: "won", ...place("won") });
   return { nodes, edges, won };
 }
 

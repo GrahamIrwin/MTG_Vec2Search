@@ -676,7 +676,7 @@
     .synergy-legend li { display: flex; align-items: center; gap: 8px; }
     .synergy-legend svg { height: 10px; flex: none; overflow: visible; }
     .synergy svg { display: block; width: 100%; height: auto; touch-action: manipulation; }
-    :is(.synergy, .synergy-legend) line { stroke-width: 3; stroke-linecap: round; }
+    :is(.synergy, .synergy-legend) :is(line, path) { stroke-width: 3; stroke-linecap: round; }
     :is(.synergy, .synergy-legend) .pos { stroke: var(--up); }
     :is(.synergy, .synergy-legend) .neg { stroke: var(--down); }
     :is(.synergy, .synergy-legend) .won-link { stroke-dasharray: 6 5; stroke-linecap: butt; }

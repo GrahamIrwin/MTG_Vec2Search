@@ -145,9 +145,9 @@ time, a few KB after that).
    - A commander with too few decks is compared with the commander whose
      signature cards the deck plays the most of. That same match powers "decks
      like yours with other commanders".
-   - **Packages** shows the commander's package graph (the same as its page's, over all its decks),
-     each package whole, half faded or faded as the deck has all, some or none of its cards; a
-     package's own graph fades the cards the deck lacks, so it reads as what it's missing. The
+   - **Packages** shows the packages of the commander's decks that the deck runs (all their cards, or
+     at least half: a dotted ring), linked as on the commander page; a package's own graph shows just
+     the cards of it, and of those decks with it add most, that the deck runs. The
      packages are found the first time the section is opened, which takes a moment for a commander
      with thousands of decks.
 
@@ -252,6 +252,14 @@ time, a few KB after that).
    linked by how strongly they pair, and around them the cards decks running it add most (played far
    more by them than by the other decks; 4 on a phone), each tied to the Won node if decks with the
    package and it win clearly more or less than those with the package alone. Picking a card opens it.
+
+   All three graphs (a card's, the package map, a package's) are laid out the same way
+   (`layoutGraph`): nodes push each other apart and lines pull the cards they join together (the
+   stronger, the closer; either/ors apart), and each node is pulled toward the middle the more lines it
+   has, so the most linked sit in the middle and the least at the edges. A node a line runs under is
+   moved off it, and the layout is tried from a few starting points until none is; the rare line it
+   still can't clear is drawn bending around the node. It's spread to the shape of the room it's drawn
+   in (wide on a computer, tall on a phone) and is the same every time for the same data.
 
    **Tournament results**, for commanders with cEDH decklists on
    [TopDeck.gg](https://topdeck.gg) (where most cEDH tournaments are run), over the last 3, 6, 12 or
