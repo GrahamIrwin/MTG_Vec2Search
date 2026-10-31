@@ -28,7 +28,6 @@
       --link: #3a6447; --focus: #a8642a;
       --up: #3a6447; --down: #a3402a;
       --tie-strong: #2c6b43; --tie-weak: #d2c9bb; /* the synergy graph's ranked lines, strongest to weakest */
-      --vine: #5d7f3b; --leaf: #75a347; /* the vine by the scrollbar (vine.js) */
       --shadow-sm: 0 1px 2px rgb(60 40 20 / .12);
       --shadow-md: 0 2px 4px rgb(60 40 20 / .10), 0 10px 24px -8px rgb(60 40 20 / .28);
       --grain: .07;
@@ -45,7 +44,6 @@
       --link: #8cc39b; --focus: #d9a35b;
       --up: #8cc39b; --down: #e5937c;
       --tie-strong: #7ed39b; --tie-weak: #554e46;
-      --vine: #6e9a48; --leaf: #8fc466;
       --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
       --shadow-md: 0 2px 4px rgb(0 0 0 / .35), 0 14px 30px -10px rgb(0 0 0 / .7);
       --grain: .05;
@@ -709,27 +707,34 @@
     .synergy text { font-family: inherit; font-size: 15px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
     .synergy.narrow text { font-size: 13px; }
     .synergy .dim { opacity: .15; }
-    /* On a computer every scrollbar is a vine (vine.js): the page's and each scrolling box's, in place of
-       their own, which are hidden */
-    html.vines, html.vines :is(dialog, .printings) { scrollbar-width: none; }
-    html.vines::-webkit-scrollbar, html.vines :is(dialog, .printings)::-webkit-scrollbar { display: none; }
-    html.vines .printings { padding-right: 28px; } /* room for its vine */
-    .vine { position: fixed; z-index: 5; touch-action: none; user-select: none; }
-    .vine svg { display: block; overflow: visible; }
-    .vine .track { fill: transparent; cursor: pointer; }
-    .vine .stem { fill: none; stroke: var(--vine); stroke-width: 4; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1;
-      transition: stroke-dashoffset .35s ease-out; pointer-events: none; }
-    .vine .ghost { fill: none; stroke: var(--vine); stroke-width: 2; stroke-linecap: round; opacity: .3; pointer-events: none; }
-    .vine .elf { cursor: grab; }
-    .vine.held .elf { cursor: grabbing; }
-    .vine .grip { fill: transparent; }
-    .vine .leaf { cursor: pointer; }
-    .vine .leaf .hit { fill: transparent; }
-    .vine .leaf path { fill: var(--leaf); opacity: .45; transform: scale(.6); transform-box: fill-box; transform-origin: 0 50%;
-      transition: opacity .4s, transform .4s; }
-    .vine .leaf.out path { opacity: 1; transform: none; }
-    .vine .leaf:hover path { fill: var(--focus); opacity: 1; }
-    @media (prefers-reduced-motion: reduce) { .vine .stem, .vine .leaf path { transition: none; } }
+    /* On a computer every scrollbar is a spindown (spindown.js): a d20 on a rail, the page's and each
+       scrolling box's, in place of their own, which are hidden */
+    html.spindowns, html.spindowns :is(dialog, .printings) { scrollbar-width: none; }
+    html.spindowns::-webkit-scrollbar, html.spindowns :is(dialog, .printings)::-webkit-scrollbar { display: none; }
+    html.spindowns .printings { padding-right: 34px; } /* room for its die */
+    .spindown { position: fixed; z-index: 5; touch-action: none; user-select: none; }
+    .spindown svg { display: block; overflow: visible; }
+    .spindown .track { fill: transparent; cursor: pointer; }
+    .spindown .rail { stroke: var(--rule); stroke-width: 2; stroke-linecap: round; pointer-events: none; }
+    .spindown .read { stroke: var(--brass); stroke-width: 3; stroke-linecap: round; pointer-events: none; transition: y2 .3s; }
+    .spindown .holder { cursor: grab; }
+    .spindown.held .holder { cursor: grabbing; }
+    .spindown .grip { fill: transparent; }
+    .spindown .die { transition: none; }
+    .spindown .die.settling { transition: transform .35s cubic-bezier(.3, 1.4, .5, 1); }
+    .spindown .die .body { fill: var(--paper-2); stroke: var(--brass); stroke-width: 2; stroke-linejoin: round; }
+    .spindown .die .face { fill: var(--paper-3); stroke: var(--brass); stroke-width: 1.2; stroke-linejoin: round; }
+    .spindown .die .edge { stroke: var(--brass); stroke-width: 1; opacity: .7; }
+    .spindown .die .number { fill: var(--ink); font-weight: bold; font-family: inherit; font-variant-numeric: tabular-nums; }
+    .spindown .counter { cursor: pointer; }
+    .spindown .counter .hit { fill: transparent; }
+    .spindown .counter .token { fill: var(--paper); stroke: var(--brass); stroke-width: 1.5; transition: fill .3s; }
+    .spindown .counter .plus { stroke: var(--brass); stroke-width: 1.6; stroke-linecap: round; }
+    .spindown .counter.reached .token { fill: var(--brass); }
+    .spindown .counter.reached .plus { stroke: var(--paper); }
+    .spindown .counter:hover .token { fill: var(--focus); stroke: var(--focus); }
+    .spindown .counter:hover .plus { stroke: var(--paper); }
+    @media (prefers-reduced-motion: reduce) { .spindown .read, .spindown .counter .token, .spindown .die.settling { transition: none; } }
     .synergy .hover-name { font-weight: bold; pointer-events: none; }
     .field input.short { width: 90px; }
     #trend-theme { width: 220px; max-width: 100%; }
@@ -1726,6 +1731,6 @@
   </dialog>
 
   <script type="module" src="app.js"></script>
-  <script type="module" src="vine.js"></script>
+  <script type="module" src="spindown.js"></script>
 </body>
 </html>
