@@ -1,6 +1,6 @@
 // On a computer, every scrollbar is a spindown: the page's, and each scrolling box's (dialogs, the
-// printings list). A d20 rides a rail down the scroller's right edge, counting down like a spindown life
-// counter: 20 at the top, 1 at the bottom. It tumbles while the scroller moves and lands face up when it
+// printings list). A d20 rides a rail down the scroller's right edge, counting up as it goes: 1 at the top,
+// 20 at the bottom. It tumbles while the scroller moves and lands face up when it
 // stops. The rail fills in as far as it's been read. +1/+1 counters on it are the scroller's sections (its
 // headings), each where the die lands with that section at the top: pick one to go there; ones not reached
 // yet are hollow. Drag the die, or pick anywhere on the rail, to scroll; the wheel and keys scroll as ever.
@@ -109,7 +109,7 @@ class Spindown {
     const y = this.y(this.top);
     this.read.setAttribute("y2", (this.r + this.grown * (height - 2 * this.r)).toFixed(1));
     this.holder.setAttribute("transform", `translate(${this.width / 2} ${y.toFixed(1)})`);
-    this.number.textContent = 20 - Math.round(share * 19); // a spindown: 20 at the top, 1 at the bottom
+    this.number.textContent = 1 + Math.round(share * 19); // 1 at the top, 20 at the bottom
     this.sections();
     for (const c of this.counters.children) c.classList.toggle("reached", +c.dataset.y <= this.y(this.grown * this.room) + 1);
     if (this.moved) this.roll();

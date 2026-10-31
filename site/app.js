@@ -8,6 +8,7 @@ import {
   findBuilds, playCounts, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
   cardResults, packageResults, MIN_RESULT_DECKS, playedMoreWith, winsMoreWith, synergyGraph, packageMap, packageGraph, playRateByMonth, resultsByMonth, winTies,
+  pairCounts,
 } from "./deck.js";
 
 const PAGE_SIZE = 30;
@@ -585,7 +586,7 @@ const graphAspect = box => Math.min(2.2, Math.max(0.6, ((box.clientWidth || 480)
 // (how the tournament decks playing both ends of each line do)
 let graphView = "play";
 function graphChart(box, graph, opts) {
-  const { hint, legend, label: nameOf, tip, onPick = null, breadcrumb = null, title = "", win = null } = opts;
+  const { hint, legend, label: nameOf, tip, onPick = null, breadcrumb = null, title = "", win = null, lineTip = null } = opts;
   box.replaceChildren();
   // win: {lists, w, sets(node) -> its cards}, the tournament decks to tell win rates from (none: no Win rate)
   const ties = win?.lists ? winTies(win.lists, win.w, new Map(graph.nodes.filter(n => n.kind !== "won").map(n => [n.key, win.sets(n)])),
@@ -720,6 +721,17 @@ function graphChart(box, graph, opts) {
     lines.push([node, a, b]);
     return node;
   };
+  // Pointing at a line (a wider, unseen one over it, as lines are thin): it stands out, its numbers above
+  const texts = new Map(); // each line's numbers
+  const hitFor = (node, e) => {
+    const hit = node.cloneNode(false);
+    hit.removeAttribute("style");
+    hit.removeAttribute("stroke-opacity");
+    hit.setAttribute("class", "edge-hit");
+    hit.addEventListener("pointerenter", () => focusLine(node, e));
+    hit.addEventListener("pointerleave", () => focus(null));
+    return hit;
+  };
   const ranked = [...graph.edges].sort((p, q) => q.strength - p.strength);
   const together = ranked.filter(e => e.strength >= 0);
   // Win rate: each line green or red as the decks playing both its ends win more or less than the rest, the
@@ -731,13 +743,17 @@ function graphChart(box, graph, opts) {
       const node = line(byKey.get(e.a), byKey.get(e.b), known
         ? { class: `tie win ${x.lift >= 0 ? "pos" : "neg"}`, "stroke-opacity": (0.2 + 0.8 * Math.min(1, Math.abs(x.evidence) / 3)).toFixed(2) }
         : { class: "tie few" });
-      node.append(svgEl("title", {}, `${nameOf(byKey.get(e.a)).text} with ${nameOf(byKey.get(e.b)).text}: ${known ? winText(x)
-        : `too few tournament decks with both (${x.decks})`} (all ${decksText(ties.decks)}: ${percent1(ties.rate)})`));
-      root.append(node);
+      texts.set(e, `${nameOf(byKey.get(e.a)).text} with ${nameOf(byKey.get(e.b)).text}: tournament decks with both, ${known ? winText(x)
+        : `too few to tell (${x.decks})`} (all ${decksText(ties.decks)}: ${percent1(ties.rate)})`);
+      root.append(node, hitFor(node, e));
     }
   } else {
-    ranked.forEach(e => root.append(line(byKey.get(e.a), byKey.get(e.b), e.strength < 0 ? { class: "tie apart" }
-      : { class: "tie", style: `stroke: ${tierColor(Math.floor(together.indexOf(e) * TIERS / together.length))}` })));
+    for (const e of ranked) {
+      const node = line(byKey.get(e.a), byKey.get(e.b), e.strength < 0 ? { class: "tie apart" }
+        : { class: "tie", style: `stroke: ${tierColor(Math.floor(together.indexOf(e) * TIERS / together.length))}` });
+      if (lineTip) texts.set(e, lineTip(e, byKey.get(e.a), byKey.get(e.b)));
+      root.append(node, ...(texts.has(e) ? [hitFor(node, e)] : []));
+    }
   }
   // A win rate 5 points higher or lower shows about as strongly as a correlation of 0.3
   for (const x of graph.won) root.append(line(wonNode, byKey.get(x.key),
@@ -779,8 +795,19 @@ function graphChart(box, graph, opts) {
     rows.forEach((row, i) => hoverName.append(svgEl("tspan", { x: tx.toFixed(1),
       y: (below ? y + r + (narrow ? 15 : 18) + i * lineH : y - r - 8 - (rows.length - 1 - i) * lineH).toFixed(1) }, row)));
   };
+  const focusLine = (shown, e) => {
+    for (const [node] of lines) {
+      node.classList.toggle("dim", node !== shown);
+      node.classList.toggle("lit", node === shown);
+    }
+    noteBox.textContent = texts.get(e);
+    showName(null);
+  };
   const focus = n => {
-    for (const [node, a, b] of lines) node.classList.toggle("dim", !!n && a !== n && b !== n);
+    for (const [node, a, b] of lines) {
+      node.classList.toggle("dim", !!n && a !== n && b !== n);
+      node.classList.remove("lit");
+    }
     noteBox.textContent = n ? tipOf(n) : winView ? "Each line: how the tournament decks with both its cards do. Point at one for its numbers." : hint;
     showName(n);
   };
@@ -789,6 +816,10 @@ function graphChart(box, graph, opts) {
   let tallest = 0;
   for (const n of [null, ...graph.nodes]) {
     focus(n);
+    tallest = Math.max(tallest, noteBox.offsetHeight);
+  }
+  for (const text of texts.values()) {
+    noteBox.textContent = text;
     tallest = Math.max(tallest, noteBox.offsetHeight);
   }
   noteBox.style.minHeight = `${tallest}px`;
@@ -841,7 +872,10 @@ function graphChart(box, graph, opts) {
 
 // The card dialog's synergy graph (synergyGraph's): the card in the middle, the cards its decks play more
 // with it around it, and a Won node linked to those its tournament decks win more or less with
-function synergyChart(box, graph, { names, lead }, name, lists = null, w = 0) {
+// A graph line's numbers in words: how many of the decks play (or run) both its ends, and what share of those with each
+const pairText = (c, a, b, verb = "play") => `${a} and ${b}: ${c.both.toLocaleString()} of ${decksText(c.decks)} ${verb} both, `
+  + `${c.a ? percent(c.both / c.a) : "–"} of the ${decksText(c.a)} with ${a} and ${c.b ? percent(c.both / c.b) : "–"} of the ${decksText(c.b)} with ${b}`;
+function synergyChart(box, graph, { names, lead, shard }, name, lists = null, w = 0) {
   const key = c => (c === null ? "won" : `c${c}`);
   graphChart(box, {
     nodes: graph.nodes.map(n => ({ ...n, key: key(n.card) })),
@@ -867,6 +901,7 @@ function synergyChart(box, graph, { names, lead }, name, lists = null, w = 0) {
     },
     onPick: n => openByNumber(n.card),
     win: lists && { lists, w, sets: n => [n.card] },
+    lineTip: (e, a, b) => pairText(pairCounts(shard, [a.card], [b.card]), frontName(names[a.card]), frontName(names[b.card])),
   });
 }
 
@@ -919,6 +954,7 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
           + [...(n.lift === undefined ? [] : [higher(n, "them", "none")]), ...yours(n)].map(t => `; ${t}`).join("")),
       onPick: n => open(n.cards),
       win: lists && { lists, w, sets: n => n.cards },
+      lineTip: (e, a, b) => pairText(pairCounts(shard, a.cards, b.cards, members), title(a.cards), title(b.cards), "run"),
     });
   };
   const open = cards => {
@@ -957,6 +993,8 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
       },
       onPick: n => openByNumber(n.card),
       win: lists && { lists, w, sets: n => n.cards ?? [n.card] },
+      lineTip: (e, a, b) => pairText(pairCounts(shard, a.cards ?? [a.card], b.cards ?? [b.card], members),
+        a.cards ? title(a.cards) : front(a.card), b.cards ? title(b.cards) : front(b.card)),
     });
   };
   const opened = packages.find(p => p.cards.join(".") === box.dataset.open);

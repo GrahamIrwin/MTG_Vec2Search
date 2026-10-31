@@ -98,6 +98,7 @@
     .tagline::after { transform: scaleX(-1); }
 
     .top-controls { position: absolute; top: 14px; right: 16px; z-index: 2; display: flex; gap: 8px; }
+    html.spindowns .top-controls { right: 58px; } /* clear of the page's die */
     .pill {
       display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer; min-height: 0;
       background-color: var(--paper); border: 1px solid var(--rule); border-radius: 999px;
@@ -707,6 +708,8 @@
     .synergy text { font-family: inherit; font-size: 15px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
     .synergy.narrow text { font-size: 13px; }
     .synergy .dim { opacity: .15; }
+    .synergy .edge-hit { stroke: transparent; stroke-width: 14; fill: none; cursor: help; }
+    .synergy .lit { stroke-width: 5; }
     /* On a computer every scrollbar is a spindown (spindown.js): a d20 on a rail, the page's and each
        scrolling box's, in place of their own, which are hidden */
     html.spindowns, html.spindowns :is(dialog, .printings) { scrollbar-width: none; }

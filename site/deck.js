@@ -745,6 +745,24 @@ export function winsMoreWith(lists, card, w, { min = MIN_PAIR_DECKS } = {}) {
   }).sort((a, b) => b.lift - a.lift || a.card - b.card);
 }
 
+// How many of members (numbers in shard.decks; all of them when null) play all of a's cards, all of b's,
+// and both: a graph line's numbers. {a, b, both, decks}
+export function pairCounts(shard, a, b, members = null) {
+  shard = decoded(shard);
+  const pa = a.map(c => shard.position.get(c)), pb = b.map(c => shard.position.get(c));
+  const list = members ?? [...shard.decks.keys()];
+  if ([...pa, ...pb].includes(undefined)) return { a: 0, b: 0, both: 0, decks: list.length };
+  shard.sets ??= shard.decks.map(d => new Set(d.cards));
+  let na = 0, nb = 0, both = 0;
+  for (const d of list) {
+    const s = shard.sets[d], ha = pa.every(p => s.has(p)), hb = pb.every(p => s.has(p));
+    na += ha;
+    nb += hb;
+    both += ha && hb;
+  }
+  return { a: na, b: nb, both, decks: list.length };
+}
+
 // A graph's win rates, for its Win rate view: how the tournament decks (lists, window w) playing each of
 // its nodes (sets: Map key -> its cards; a deck plays a package when it plays all of them) did, and those
 // playing both ends of each line (pairs: [[key, key]]), against the rest of the decks, as cardResults

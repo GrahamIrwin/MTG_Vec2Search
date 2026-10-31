@@ -8,8 +8,8 @@ yours doesn't, browse every commander's decks and what's trending, and see
 which cards' decks win more in cEDH tournaments, and which cards' prices are rising
 or falling, with every printing's price history since 2020. Dark mode by
 default. On a computer every scrollbar is a spindown (`site/spindown.js`): the page's, each dialog's
-and the printings list's. A d20 rides a rail down the side counting down like a spindown life counter,
-20 at the top to 1 at the bottom, tumbling as you scroll and landing face up when you stop; the rail
+and the printings list's. A d20 rides a rail down the side, counting up from 1 at the top to 20 at the
+bottom, tumbling as you scroll and landing face up when you stop; the rail
 fills in as far as you've read. +1/+1 counters on it are the sections showing, each where the die lands
 with that section at the top: pick one to jump there (ones not reached yet are hollow). Drag the die,
 or pick the rail anywhere, to scroll. The die doesn't tumble for anyone who'd rather have less motion. It's a static site: all the heavy lifting happens at build time, and a
@@ -268,6 +268,12 @@ time, a few KB after that).
    ![Derevi's package map: packages as nodes, each showing half of its two cards' art, linked when the same decks run them, the most linked in the middle; Bloom Tender + Faeburrow Elder pointed at, its name shown and 41% of these decks run all of them (1,323 decks)](docs/images/screenshot-packages.webp)
 
    ![The Bloom Tender + Faeburrow Elder package's graph: the package in the middle, its two cards beside it, and around them the cards decks running it add most, such as Emiel the Blessed, Delney and Noble Hierarch](docs/images/screenshot-package.webp)
+
+   Pointing at a line in any of the graphs lights it up and gives its numbers above the graph: in Play
+   rate, how many decks play (or run) both its ends and what share of those with each ("Rograkh, Son of
+   Rohgahh and Flare of Duplication: 127 of 1,320 decks play both, 88% of the 145 decks with Rograkh, Son
+   of Rohgahh and 45% of the 282 decks with Flare of Duplication", `pairCounts`); in Win rate, the win
+   rate of the tournament decks with both.
 
    With enough tournament decks (20 or more in the period), each of the three graphs has a **Play rate |
    Win rate** toggle (the choice carries over from graph to graph). Win rate keeps the same cards and
