@@ -269,6 +269,12 @@ time, a few KB after that).
 
    ![The Bloom Tender + Faeburrow Elder package's graph: the package in the middle, its two cards beside it, and around them the cards decks running it add most, such as Emiel the Blessed, Delney and Noble Hierarch](docs/images/screenshot-package.webp)
 
+   Its **combos** show the same two ways (Graph | List): the graph is the package map for combos, one
+   node per combo in 1% of the decks or more (the most played of each group of combos that differ in one
+   card; its pieces but the commander, whose art it shows), the combo's pieces and what it makes when
+   pointed at, linked when the same decks run two; picking one shows its graph, its pieces and the cards
+   decks running it add most.
+
    Pointing at a line in any of the graphs lights it up and gives its numbers above the graph: in Play
    rate, how many decks play (or run) both its ends and what share of those with each ("Rograkh, Son of
    Rohgahh and Flare of Duplication: 127 of 1,320 decks play both, 88% of the 145 decks with Rograkh, Son

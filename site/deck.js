@@ -1098,9 +1098,10 @@ const clearResult = r => r.evidence !== null && Math.abs(r.evidence) >= 2
 // (members running it), name: its two strongest cards, lift?, tested?, have?}]; edges: [{a, b, strength}]; won: [{key,
 // lift, tested: [tournament decks with it, with none of it]}]
 export const MAP_PACKAGES = 12, PACKAGE_LINK = 0.15, PACKAGE_APART = -0.1;
-export function packageMap(shard, packages, members, { lists = null, w = 0, have = null, n = MAP_PACKAGES, aspect = 1, keep = null } = {}) {
+export function packageMap(shard, packages, members, { lists = null, w = 0, have = null, n = MAP_PACKAGES, aspect = 1, keep = null, least = null } = {}) {
   shard = decoded(shard);
-  const all = members.length, least = Math.max(3, 0.03 * all);
+  const all = members.length;
+  least ??= Math.max(3, 0.03 * all); // run by this many decks or more (combos: as many as their list asks)
   const enough = packages.map(({ cards }, i) => ({ key: `p${i}`, cards, runs: running(shard, cards, members) }))
     .filter(p => p.runs.length >= least).map((p, i) => ({ ...p, i }))
     .sort((a, b) => b.runs.length - a.runs.length || a.i - b.i);

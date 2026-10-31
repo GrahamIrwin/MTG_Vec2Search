@@ -908,8 +908,13 @@ function synergyChart(box, graph, { names, lead, shard }, name, lists = null, w 
 // A commander's packages as a map (packageMap's) in box; picking one shows its graph (packageGraph's) in
 // its place, with a way back, and picking a card there opens it. The package open is kept on the box, so
 // drawing again (with the tournament decks, once loaded) stays on it. these: the decks' name ("these
-// decks"); lists, w, period: the tournament decks, if any; have: a pasted deck's cards (a Set), if any
-function packageCharts(box, { shard, packages, members, names, lead, these, lists = null, w = 0, period = "", have = null }) {
+// decks"); lists, w, period: the tournament decks, if any; have: a pasted deck's cards (a Set), if any.
+// noun: "package", or "combo" for Commander Spellbook's combos (packages: [{cards: its pieces but the
+// commander, makes: what it makes}]; least: the decks one needs to be on the map)
+function packageCharts(box, { shard, packages, members, names, lead, these, lists = null, w = 0, period = "", have = null, noun = "package", least = null }) {
+  const nouns = `${noun}s`, Nouns = noun === "combo" ? "Combos" : "Packages";
+  const makes = new Map(packages.filter(p => p.makes).map(p => [p.cards.join("."), p.makes]));
+  const what = cards => (makes.get(cards.join(".")) ? `; makes ${makes.get(cards.join("."))}` : "");
   const front = c => frontName(names[c]);
   const title = cards => cards.slice(0, 2).map(front).join(" + ");
   const m = members.length;
@@ -928,18 +933,18 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
     delete box.dataset.open;
     // A pasted deck's: just the packages it runs (all its cards, or at least half), placed by the whole map
     const keep = have && (p => 2 * p.cards.filter(c => have.has(c)).length >= p.cards.length);
-    const graph = packageMap(shard, packages, members, { lists, w, have, keep, aspect: graphAspect(box), ...(box.clientWidth < 520 && { n: 8 }) });
+    const graph = packageMap(shard, packages, members, { lists, w, have, keep, least, aspect: graphAspect(box), ...(box.clientWidth < 520 && { n: 8 }) });
     if (graph.nodes.length < 3) {
       box.replaceChildren(el("p", { className: "muted deck-lede", textContent: have
-        ? `Your deck runs too few of the packages ${lead} decks play to map (${graph.nodes.length}).`
-        : `Too few packages in ${these} to map.` }));
+        ? `Your deck runs too few of the ${nouns} ${lead} decks play to map (${graph.nodes.length}).`
+        : `Too few ${nouns} in ${these} to map.` }));
       return;
     }
     graphChart(box, graph, {
-      title: `Packages ${these} play`,
-      hint: have ? `The packages ${lead} decks play that your deck runs, linked when the same decks run them; dotted ring: `
-        + "it has only some of the package's cards. Pick one to see its cards."
-        : `Packages ${these} play, linked when the same decks run them. Pick one to see its cards.`,
+      title: `${Nouns} ${these} play`,
+      hint: have ? `The ${nouns} ${lead} decks play that your deck runs, linked when the same decks run them; dotted ring: `
+        + `it has only some of the ${noun}'s cards. Pick one to see its cards.`
+        : `${Nouns} ${these} play, linked when the same decks run them. Pick one to see its cards.`,
       legend: {
         together: "Run by the same decks: strongest to weakest, ranked within this graph",
         apart: "Rarely run together (different builds)",
@@ -948,9 +953,9 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
       },
       label: n => ({ text: title(n.cards), art: n.cards.slice(0, 2) }),
       tip: n => (n.kind === "won"
-        ? `Won, in tournaments of the last ${period}: green lines to the packages whose decks win more than those `
+        ? `Won, in tournaments of the last ${period}: green lines to the ${nouns} whose decks win more than those `
           + "with none of it, red to those that win less."
-        : `${n.cards.map(front).join(", ")}: ${percent(n.decks / m)} of ${these} run all of them (${decksText(n.decks)})`
+        : `${n.cards.map(front).join(", ")}${what(n.cards)}: ${percent(n.decks / m)} of ${these} run all of them (${decksText(n.decks)})`
           + [...(n.lift === undefined ? [] : [higher(n, "them", "none")]), ...yours(n)].map(t => `; ${t}`).join("")),
       onPick: n => open(n.cards),
       win: lists && { lists, w, sets: n => n.cards },
@@ -962,15 +967,15 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
     const graph = packageGraph(shard, cards, members, { lists, w, have, mine: !!have, aspect: graphAspect(box), ...(box.clientWidth < 520 && { extra: 4 }) });
     const k = graph.nodes[0].decks;
     if (graph.nodes.length < 3) { // too little of it in a pasted deck to draw: say so, with the way back
-      graphChart(box, { nodes: [], edges: [], won: [] }, { breadcrumb: [["All packages", map], [title(cards), null]] });
+      graphChart(box, { nodes: [], edges: [], won: [] }, { breadcrumb: [[`All ${nouns}`, map], [title(cards), null]] });
       box.append(el("p", { className: "muted deck-lede", textContent: `Your deck runs ${graph.nodes.length - 1} of its `
         + `${cards.length} cards, and none of the cards decks with it add most.` }));
       return;
     }
     graphChart(box, graph, {
       title: `${title(cards)}: its cards, and the cards decks with it add most`,
-      breadcrumb: [["All packages", map], [title(cards), null]],
-      hint: `${have ? "The package's cards your deck runs" : "Its cards"} in the middle; around them, the cards decks with it add most`
+      breadcrumb: [[`All ${nouns}`, map], [title(cards), null]],
+      hint: `${have ? `The ${noun}'s cards your deck runs` : "Its cards"} in the middle; around them, the cards decks with it add most`
         + `${have ? " that your deck runs too" : ""}. `
         + "Pick a card to open it.",
       legend: {
@@ -982,13 +987,13 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
       label: n => ({ text: n.card === undefined ? title(cards) : front(n.card), art: n.card ?? cards.slice(0, 2) }),
       tip: n => {
         if (n.kind === "won") return `Won, in tournaments of the last ${period}: green lines to what decks with the `
-          + "package win more with, red to what they win less with.";
-        if (n.key === "pkg") return `${cards.map(front).join(", ")}: ${percent(k / m)} of ${these} run all of them (${decksText(k)})`
+          + `${noun} win more with, red to what they win less with.`;
+        if (n.key === "pkg") return `${cards.map(front).join(", ")}${what(cards)}: ${percent(k / m)} of ${these} run all of them (${decksText(k)})`
           + (n.lift === undefined ? "" : `; ${higher(n, "them", "none")}`);
         const bits = n.kind === "extra"
-          ? [`${percent(n.base)} of decks without the package, ${percent(n.with)} of the ${decksText(k)} with it`]
+          ? [`${percent(n.base)} of decks without the ${noun}, ${percent(n.with)} of the ${decksText(k)} with it`]
           : [`in ${share(n.decks)}`];
-        if (n.lift !== undefined) bits.push(higher(n, "the package and it", "the package alone"));
+        if (n.lift !== undefined) bits.push(higher(n, `the ${noun} and it`, `the ${noun} alone`));
         return `${names[n.card]}: ${[...bits, ...yours(n)].join("; ")}`;
       },
       onPick: n => openByNumber(n.card),
@@ -1541,6 +1546,7 @@ const commanderMessage = text => {
   $("commander-message").hidden = !text;
 };
 let packagesAs = null; // a commander's packages as a "graph" or a "list" (null: a graph, if there are enough)
+let combosAs = null; // the same for its combos
 const commanderLink = key => "?" + new URLSearchParams({ commander: key });
 
 // Changes some of the URL's parameters (null: leaves it out), so a view is a link to share
@@ -1996,6 +2002,14 @@ async function showCommander(key) {
       ? `Combos in 1% of ${these} or more, most played first.`
       : `None of Commander Spellbook's combos is in 1% of ${these}.`;
     showRows($("combos"), $("more-combos"), combos.map(group => comboRow(group, k => `${percent(k / m)} of ${these} (${k.toLocaleString()})`)), testPackage);
+    // For the graph: each group's most played combo, its pieces but the commander (every deck has it)
+    const seen = new Set();
+    comboPackages = combos.flatMap(({ options }) => {
+      const cards = options[0].combo.cards.filter(c => !leaders.includes(c)), key = cards.join(".");
+      if (!cards.length || seen.has(key)) return [];
+      seen.add(key);
+      return [{ cards, makes: options[0].combo.makes.join(", ") }];
+    });
     shard.sets ??= shard.decks.map(d => new Set(d.cards));
     const counted = packages.map(({ cards, combos }) => {
       const ps = cards.map(c => shard.position.get(c));
@@ -2011,8 +2025,21 @@ async function showCommander(key) {
       test: p.cards,
     })), testPackage);
     // As a graph or a list: a graph needs 3 packages or more (packageMap shows the same ones, at most 12)
-    if (g.name !== packagesOf) delete $("packages-graph").dataset.open; // another build or bracket: back to the map
+    if (g.name !== packagesOf) { // another build or bracket: back to the maps
+      delete $("packages-graph").dataset.open;
+      delete $("combos-graph").dataset.open;
+    }
     packagesOf = g.name;
+    // Combos the same way: a graph of 3 or more
+    const showCombosAs = () => {
+      const as = comboPackages.length >= 3 ? combosAs ?? "graph" : "list";
+      chipRow($("combos-as"), [["graph", "Graph", comboPackages.length < 3, comboPackages.length < 3 ? "Too few combos for a graph" : ""],
+        ["list", "List"]], as, a => { combosAs = a; showCombosAs(); });
+      $("combos-as").hidden = !comboPackages.length;
+      $("combos-graph").hidden = as !== "graph";
+      $("combos-list").hidden = as === "graph";
+      drawCombos();
+    };
     const showAs = () => {
       const as = counted.length >= 3 ? packagesAs ?? "graph" : "list";
       chipRow($("packages-as"), [["graph", "Graph", counted.length < 3, counted.length < 3 ? "Too few packages for a graph" : ""],
@@ -2029,6 +2056,7 @@ async function showCommander(key) {
       for (const [t] of tabs) $(`${t}-tab`).hidden = t !== name;
       chipRow($("combo-tabs"), tabs.map(([t, label, k]) => [t, withCount(label, k)]), name, pickTab);
       showAs();
+      showCombosAs();
     };
     pickTab(comboTab);
   }
@@ -2041,7 +2069,21 @@ async function showCommander(key) {
     if (!box.offsetParent || !current) return;
     packageCharts(box, { shard, packages, members: current.members, names, lead, these: "these decks",
       lists: packageLists, w: tournament?.w ?? 0, period: tournament?.period ?? "" });
-    if (results && !packageLists) listsFile(key).then(data => { if (!packageLists) { packageLists = data; drawPackages(); } }, () => {});
+    if (results && !packageLists) listsFile(key).then(data => { if (!packageLists) { packageLists = data; drawPackages(); drawCombos(); } }, () => {});
+  }
+  // Either graph drawn once it shows, if it didn't then (the page still loading, say): drawn at its size
+  for (const [id, draw] of [["packages-graph", () => drawPackages()], ["combos-graph", () => drawCombos()]]) {
+    new ResizeObserver(() => { if ($(id).offsetParent && !$(id).childElementCount) draw(); }).observe($(id));
+  }
+  // The combos graph, the same way: on the map, the combos in 1% of the decks or more, as listed
+  let comboPackages = [];
+  function drawCombos() {
+    const box = $("combos-graph");
+    if (!box.offsetParent || !current) return;
+    packageCharts(box, { shard, packages: comboPackages, members: current.members, names, lead, these: "these decks",
+      lists: packageLists, w: tournament?.w ?? 0, period: tournament?.period ?? "", noun: "combo",
+      least: Math.max(3, 0.01 * current.members.length) });
+    if (results && !packageLists) listsFile(key).then(data => { if (!packageLists) { packageLists = data; drawPackages(); drawCombos(); } }, () => {});
   }
 
   // Trends: what the decks made lately play more of, for a window of days (index.json's windows)
@@ -2103,7 +2145,7 @@ async function showCommander(key) {
     $("commander-how").textContent = how[view];
     $("commander-source").hidden = view !== "tournaments";
     if (view === "trends") showMonths(); // drawn at the size it's shown at
-    if (view === "combos") drawPackages();
+    if (view === "combos") { drawPackages(); drawCombos(); }
   };
 
   // Decks made per month, over every deck of its (not only the newest the page has)
