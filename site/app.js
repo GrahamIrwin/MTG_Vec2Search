@@ -585,7 +585,10 @@ const graphAspect = box => Math.min(2.2, Math.max(0.6, ((box.clientWidth || 480)
 // The graphs' view, kept from graph to graph: "play" (lines: how often cards are played together) or "win"
 // (how the tournament decks playing both ends of each line do)
 let graphView = "play";
+let drawings = 0; // each drawing's clip shapes get ids of their own: with the same ids, a graph would clip by
+// another's, which doesn't work from one that's hidden (the combos' graph while the packages' shows)
 function graphChart(box, graph, opts) {
+  const drawing = ++drawings;
   const { hint, legend, label: nameOf, tip, onPick = null, breadcrumb = null, title = "", win = null, lineTip = null } = opts;
   box.replaceChildren();
   // win: {lists, w, sets(node) -> its cards}, the tournament decks to tell win rates from (none: no Win rate)
@@ -678,7 +681,7 @@ function graphChart(box, graph, opts) {
   for (const r of new Set(graph.nodes.map(radius))) {
     for (const [id, shape] of [["", svgEl("circle", { r })], ["-l", svgEl("path", { d: `M0 ${-r}A${r} ${r} 0 0 0 0 ${r}Z` })],
       ["-r", svgEl("path", { d: `M0 ${-r}A${r} ${r} 0 0 1 0 ${r}Z` })]]) {
-      const clip = svgEl("clipPath", { id: `syn-clip-${r}${id}` });
+      const clip = svgEl("clipPath", { id: `syn-clip-${drawing}-${r}${id}` });
       clip.append(shape);
       defs.append(clip);
     }
@@ -838,7 +841,7 @@ function graphChart(box, graph, opts) {
       arts.forEach((a, i) => {
         const half = arts.length === 2 ? (i ? 1 : -1) : 0; // each art's middle in the middle of its half
         const img = svgEl("image", { x: -r * 1.4 + half * r / 2, y: -r, width: r * 2.8, height: r * 2,
-          preserveAspectRatio: "xMidYMid slice", "clip-path": `url(#syn-clip-${r}${half ? (half < 0 ? "-l" : "-r") : ""})` });
+          preserveAspectRatio: "xMidYMid slice", "clip-path": `url(#syn-clip-${drawing}-${r}${half ? (half < 0 ? "-l" : "-r") : ""})` });
         cardInfo(a).then(info => img.setAttribute("href", artCrop(info.id)));
         g.append(img);
       });
