@@ -1710,7 +1710,7 @@ function showRows(list, more, rows, test = null) {
     return [button, box];
   };
   const row = r => {
-    const opens = [r.how && opener("How it works", r.how),
+    const opens = [r.how && opener("How it works", r.how), ...(r.more ?? []).map(([label, show]) => opener(label, show)),
       test && r.test && opener("Test in tournaments", () => test(r.test)
         .catch(() => [el("p", { className: "muted", textContent: "Couldn't load the tournament decks." })]))].filter(Boolean);
     return el("li", {}, el("div", { className: "combo-cards" }, ...r.cards),
@@ -2001,7 +2001,8 @@ async function showCommander(key) {
     $("combos-lede").textContent = combos.length
       ? `Combos in 1% of ${these} or more, most played first.`
       : `None of Commander Spellbook's combos is in 1% of ${these}.`;
-    showRows($("combos"), $("more-combos"), combos.map(group => comboRow(group, k => `${percent(k / m)} of ${these} (${k.toLocaleString()})`)), testPackage);
+    showRows($("combos"), $("more-combos"), combos.map(group => ({ ...comboRow(group, k => `${percent(k / m)} of ${these} (${k.toLocaleString()})`),
+      more: [["Decks playing it", () => decksPlaying(group.options[0].combo.cards, g.members, group.options.length > 1 && group.options[0].card)]] })), testPackage);
     // For the graph: each group's most played combo, its pieces but the commander (every deck has it)
     const seen = new Set();
     comboPackages = combos.flatMap(({ options }) => {
@@ -2061,6 +2062,21 @@ async function showCommander(key) {
     pickTab(comboTab);
   }
   let comboTab = "combos";
+  // The newest of these decks (members) playing every card of a combo but the commander, linked as the
+  // decklists below are; choice: the card of a group of combos its first one has (the others aren't counted)
+  const PLAYING_SHOWN = 12;
+  async function decksPlaying(cards, members, choice = null) {
+    const ps = cards.filter(c => !leaders.includes(c)).map(c => shard.position.get(c));
+    shard.sets ??= shard.decks.map(d => new Set(d.cards));
+    const playing = members.filter(d => ps.every(p => p !== undefined && shard.sets[d].has(p)));
+    const newest = playing.map(d => shard.decks[d]).sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, PLAYING_SHOWN);
+    return [el("ul", { className: "found-list combo-decks" }, ...newest.map(deck => el("li", {},
+      el("span", { className: "deck-name", textContent: deck.name || "Untitled deck" }), " ", openDeck(deck.id), " ",
+      el("small", { textContent: `updated ${deck.updated}` })))),
+    el("p", { className: "muted", textContent: ((choice ? `With ${(await cardInfo(choice)).name}: ` : "") + (playing.length > PLAYING_SHOWN
+      ? `the newest ${PLAYING_SHOWN} of the ${decksText(playing.length)} playing it.`
+      : `${playing.length === 1 ? "the one deck" : `all ${decksText(playing.length)}`} playing it.`)).replace(/^./, c => c.toUpperCase()) })];
+  }
   // The packages graph, of the decks shown: drawn only when it shows, at the size it's shown at; first
   // without the tournament decks, then again with them once they're loaded
   let packageLists = null, packagesOf = null;
@@ -3015,18 +3031,30 @@ const trendsMessage = text => {
 
 let trendData; // decks/trends.json, with each commander's name and colors
 let trendCombos; // decks/trend-combos.json
-// How the combo at index in trend-combos.json works, from its block of decks/trend-combo-steps/ (fetched
-// the first time one of the block's is asked for), as comboSteps wants it
+// The combo at index in trend-combos.json, from its block of decks/trend-combo-details/ (fetched the first
+// time one of the block's is asked for): how it works, as comboSteps wants it, and the commanders playing it
+// most ([[commander file name, its decks playing it]])
 const COMBO_BLOCK = 100; // COMBO_BLOCK in build_decks.py
-const comboStepBlocks = new Map();
-async function trendComboHow(index) {
+const comboBlocks = new Map();
+async function trendComboDetails(index) {
   const k = Math.floor(index / COMBO_BLOCK);
-  if (!comboStepBlocks.has(k)) {
-    comboStepBlocks.set(k, getJson(`decks/trend-combo-steps/${k}.json`));
-    comboStepBlocks.get(k).catch(() => comboStepBlocks.delete(k)); // try again next time
+  if (!comboBlocks.has(k)) {
+    comboBlocks.set(k, getJson(`decks/trend-combo-details/${k}.json`));
+    comboBlocks.get(k).catch(() => comboBlocks.delete(k)); // try again next time
   }
-  const [mana, easy, notable, steps] = (await comboStepBlocks.get(k))[index % COMBO_BLOCK];
-  return { mana, easy, notable, steps };
+  const [mana, easy, notable, steps, commanders] = (await comboBlocks.get(k))[index % COMBO_BLOCK];
+  return { how: { mana, easy, notable, steps }, commanders };
+}
+// The commanders whose decks play a Trends combo most, each linked to its page's combos: its decks
+// playing it, and their share of its decks
+async function comboCommanders(index, trends, names) {
+  const { commanders } = await trendComboDetails(index);
+  const made = new Map(trends.commanders.map(c => [c.key, c.made[0]]));
+  return [el("ul", { className: "found-list combo-commanders" }, ...commanders.map(([key, decks]) => el("li", {},
+    el("a", { href: `${commanderLink(key)}&view=combos`, textContent: commanderNames(key, names) }), " ",
+    el("small", { textContent: `${decksText(decks)}${made.get(key) ? `, ${percent(decks / made.get(key))} of its decks` : ""}` })))),
+  el("p", { className: "muted", textContent: commanders.length >= 24 ? "The 24 commanders playing it in the most decks."
+    : "Every commander playing it, most decks first." })];
 }
 function loadTrends() {
   trendData ??= Promise.all([loadDeckData(), getJson("decks/trends.json")]).then(([{ names }, data]) => {
@@ -3150,6 +3178,7 @@ async function showTrends() {
 
     // Combos: over the decks of the color identities kept (the other filters don't narrow them)
     trendCombos ??= getJson("decks/trend-combos.json").catch(() => null);
+    const { names: deckNames } = await loadDeckData();
     const comboData = await trendCombos;
     if (asked !== shownFor) return;
     $("trends-page").querySelector('[data-view="combos"]').dataset.empty = comboData ? "" : "1";
@@ -3163,7 +3192,8 @@ async function showTrends() {
     const rows = (list, say) => groupCombos(list).map(group => {
       const row = comboRow(group, () => say(group.options[0].combo));
       const first = group.options[0].combo;
-      row.how = async () => comboSteps({ id: first.id, how: await trendComboHow(first.index) }, group.options.length > 1 && group.options[0].card);
+      row.how = async () => comboSteps({ id: first.id, how: (await trendComboDetails(first.index)).how }, group.options.length > 1 && group.options[0].card);
+      row.more = [["Commanders playing it", () => comboCommanders(first.index, trends, deckNames)]];
       return row;
     });
     $("rising-combos-panel").hidden = !days;
