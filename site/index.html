@@ -682,6 +682,9 @@
     :is(.synergy, .synergy-legend) .pos { stroke: var(--up); }
     :is(.synergy, .synergy-legend) .neg { stroke: var(--down); }
     :is(.synergy, .synergy-legend) .won-link { stroke-dasharray: 6 5; stroke-linecap: butt; }
+    /* Win rate view: lines green or red by how the decks with both do; grey dots, too few to tell */
+    :is(.synergy, .synergy-legend) .tie.few { stroke: var(--ink-faint); stroke-dasharray: 0.1 7; stroke-width: 3.5; opacity: .7; }
+    .graph-views { margin: 0 0 8px; }
     :is(.synergy, .synergy-legend) .tie.apart { stroke: var(--ink-soft); stroke-dasharray: 0.1 7; stroke-width: 4; }
     .synergy .node { cursor: pointer; outline: none; }
     .synergy .node .back { fill: var(--paper-3); }

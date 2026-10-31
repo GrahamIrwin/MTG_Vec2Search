@@ -4,7 +4,7 @@ import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
-  playedMoreWith, winsMoreWith, synergyGraph, packageMap, packageGraph, playRateByMonth, resultsByMonth,
+  playedMoreWith, winsMoreWith, synergyGraph, packageMap, packageGraph, playRateByMonth, resultsByMonth, winTies,
 } from "../site/deck.js";
 
 const NAMES = ["Sol Ring", "Atraxa, Praetors' Voice", "Delver of Secrets // Insectile Aberration", "Island",
@@ -389,6 +389,21 @@ test("wins more with: among a card's tournament decks, those with another card a
   assert.ok(all.lift < rows[0].lift);
   assert.deepEqual(winsMoreWith(wonLists, 7, 1, { min: 5 }).map(r => r.card).sort((a, b) => a - b), [8, 9, 10]);
   assert.deepEqual(winsMoreWith(wonLists, 42, 3, { min: 10 }), []);
+});
+
+test("win ties: how the tournament decks playing a node, and both ends of a line, did against the rest", () => {
+  // wonLists: of the 30 decks with 7 (in window 1), the 15 with 8 win 4 of 6, the others 1 of 6; 10 decks play 8 and 9
+  const ties = winTies(wonLists, 1, new Map([["a", [7]], ["b", [8]], ["c", [9]], ["ab", [7, 8]], ["none", [42]]]),
+    [["a", "b"], ["a", "c"], ["a", "none"]]);
+  assert.equal(ties.decks, 40);
+  assert.equal(ties.nodes.get("a").decks, 30);
+  assert.equal(ties.nodes.get("ab").decks, 15); // a package: decks playing all of it
+  const ab = ties.pairs.get("a|b");
+  assert.deepEqual([ab.decks, ab.games, ab.wins], [15, 90, 60]);
+  assert.ok(ab.lift > 0 && ab.evidence > 2); // they win far more than the rest
+  assert.equal(ties.pairs.get("a|c").decks, 5);
+  assert.equal(ties.pairs.get("a|c").lift, null); // too few decks to say
+  assert.equal(ties.pairs.get("a|none").decks, 0);
 });
 
 test("a card's tournament results by month, against all the commander's decks; none in older files", () => {

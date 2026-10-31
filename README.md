@@ -268,6 +268,14 @@ time, a few KB after that).
 
    ![The Bloom Tender + Faeburrow Elder package's graph: the package in the middle, its two cards beside it, and around them the cards decks running it add most, such as Emiel the Blessed, Delney and Noble Hierarch](docs/images/screenshot-package.webp)
 
+   With enough tournament decks (20 or more in the period), each of the three graphs has a **Play rate |
+   Win rate** toggle (the choice carries over from graph to graph). Win rate keeps the same cards and
+   layout, but each line shows how the tournament decks playing both its ends do against the rest
+   (`winTies`, pulled toward the decks' win rate as for single cards): green for more, red for less,
+   darker the clearer, grey dots where fewer than 10 decks play both; pointing at a line gives its
+   numbers ("21.0% win rate in 125 decks (all 1,495 decks: 22.2%)"), and a node is ringed green or red
+   when its own decks clearly win more or less. The Won node isn't needed there, so it's left out.
+
    All three graphs (a card's, the package map, a package's) are laid out the same way
    (`layoutGraph`): nodes push each other apart and lines pull the cards they join together (the
    stronger, the closer; either/ors apart), and each node is pulled toward the middle the more lines it

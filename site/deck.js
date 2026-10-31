@@ -745,6 +745,44 @@ export function winsMoreWith(lists, card, w, { min = MIN_PAIR_DECKS } = {}) {
   }).sort((a, b) => b.lift - a.lift || a.card - b.card);
 }
 
+// A graph's win rates, for its Win rate view: how the tournament decks (lists, window w) playing each of
+// its nodes (sets: Map key -> its cards; a deck plays a package when it plays all of them) did, and those
+// playing both ends of each line (pairs: [[key, key]]), against the rest of the decks, as cardResults
+// compares (pulled toward the decks' win rate). Each {decks, games, wins, lift, evidence}, lift and
+// evidence null under MIN_RESULT_DECKS decks. Returns {nodes: Map key -> it, pairs: Map "a|b" -> it,
+// decks (in the window), rate (their win rate)}
+export function winTies(lists, w, sets, pairs) {
+  const position = new Map(lists.cards.map((c, p) => [c, p]));
+  const keys = [...sets.keys()], want = keys.map(k => sets.get(k).map(c => position.get(c)));
+  const has = keys.map(() => []), decks = [];
+  let games = 0, wins = 0;
+  for (const [narrowest, g, k, , ...gaps] of lists.decks) {
+    if (narrowest > w) continue;
+    games += g;
+    wins += k;
+    let p = 0;
+    const plays = new Set(gaps.map(x => (p += x)));
+    want.forEach((ps, i) => { if (ps.length && ps.every(q => q !== undefined && plays.has(q))) has[i].push(decks.length); });
+    decks.push([g, k]);
+  }
+  const rate = games ? wins / games : 0;
+  const stat = these => {
+    let n = 0, k = 0;
+    for (const d of these) [n, k] = [n + decks[d][0], k + decks[d][1]];
+    const fair = these.length >= MIN_RESULT_DECKS && n && games - n > 0 && rate > 0 && rate < 1;
+    return { decks: these.length, games: n, wins: k, ...(fair ? compare(k, n, wins - k, games - n, rate) : { lift: null, evidence: null }) };
+  };
+  const at = new Map(keys.map((k, i) => [k, i]));
+  return {
+    nodes: new Map(keys.map((k, i) => [k, stat(has[i])])),
+    pairs: new Map(pairs.filter(([a, b]) => at.has(a) && at.has(b)).map(([a, b]) => {
+      const one = new Set(has[at.get(a)]);
+      return [`${a}|${b}`, stat(has[at.get(b)].filter(d => one.has(d)))];
+    })),
+    decks: decks.length, rate,
+  };
+}
+
 // A card's synergy graph: the card in the middle, and on a ring around it the cards played with it
 // clearly more than chance (their phi with it, over all the commander's decks, PARTNER_PHI or more; the
 // strongest n). Every line is a phi, the correlation between two cards being in a deck: positive, played

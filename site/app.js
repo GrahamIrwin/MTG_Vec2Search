@@ -7,7 +7,7 @@ import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, playCounts, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
-  cardResults, packageResults, MIN_RESULT_DECKS, playedMoreWith, winsMoreWith, synergyGraph, packageMap, packageGraph, playRateByMonth, resultsByMonth,
+  cardResults, packageResults, MIN_RESULT_DECKS, playedMoreWith, winsMoreWith, synergyGraph, packageMap, packageGraph, playRateByMonth, resultsByMonth, winTies,
 } from "./deck.js";
 
 const PAGE_SIZE = 30;
@@ -549,7 +549,7 @@ async function showCardWith(card) {
     $("with-tabs").hidden = false;
     const current = views.some(([v]) => v === withTab) ? withTab : "details";
     showSections(modal, $("with-tabs"), views, current, v => { withTab = v; tabs(); }, "with");
-    if (current === "synergy") synergyChart($("synergy"), graph, ctx, name);
+    if (current === "synergy") synergyChart($("synergy"), graph, ctx, name, lists, w ?? 0);
     if (current === "time") drawTime();
   };
   tabs();
@@ -581,15 +581,36 @@ const tierColor = t => `color-mix(in oklab, var(--tie-strong) ${100 - 25 * t}%, 
 const GRAPH_SIZES = { package: 1.15, extra: 0.8 }; // the hub's 1.3, others 1
 // The shape of the room a graph in box gets (width / height; see graphChart's height), for its layout
 const graphAspect = box => Math.min(2.2, Math.max(0.6, ((box.clientWidth || 480) - 120) / 480));
-function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = null, breadcrumb = null, title = "" }) {
+// The graphs' view, kept from graph to graph: "play" (lines: how often cards are played together) or "win"
+// (how the tournament decks playing both ends of each line do)
+let graphView = "play";
+function graphChart(box, graph, opts) {
+  const { hint, legend, label: nameOf, tip, onPick = null, breadcrumb = null, title = "", win = null } = opts;
   box.replaceChildren();
+  // win: {lists, w, sets(node) -> its cards}, the tournament decks to tell win rates from (none: no Win rate)
+  const ties = win?.lists ? winTies(win.lists, win.w, new Map(graph.nodes.filter(n => n.kind !== "won").map(n => [n.key, win.sets(n)])),
+    graph.edges.map(e => [e.a, e.b])) : null;
+  const canWin = ties && ties.decks >= 2 * MIN_RESULT_DECKS;
+  const winView = canWin && graphView === "win";
+  if (winView) graph = { ...graph, nodes: graph.nodes.filter(n => n.kind !== "won"), won: [] }; // its lines say it
   const crumbs = breadcrumb && el("nav", { className: "graph-crumbs", ariaLabel: "Graph" }, ...breadcrumb.flatMap(([text, go], i) => [
     i ? el("span", { className: "sep", ariaHidden: "true", textContent: "›" }) : "",
     go ? el("button", { type: "button", className: "link-button", textContent: text, onclick: go })
       : el("span", { textContent: text, ...(i === breadcrumb.length - 1 && { ariaCurrent: "page" }) })]));
+  const views = canWin && el("div", { className: "chips type-filter graph-views", role: "group", ariaLabel: "Lines" });
+  if (views) chipRow(views, [["play", "Play rate"], ["win", "Win rate"]], winView ? "win" : "play", v => {
+    graphView = v;
+    graphChart(box, graph, opts);
+  });
   const noteBox = el("p", { className: "with-note" }), chart = el("div", { className: "synergy" });
   const legendBox = el("ul", { className: "synergy-legend" });
-  box.append(...[crumbs, noteBox, chart, legendBox].filter(Boolean));
+  box.append(...[crumbs, views, noteBox, chart, legendBox].filter(Boolean));
+  // A node's numbers, and in Win rate its tournament decks'
+  const winText = x => (x.decks ? `${percent1(x.wins / x.games)} win rate in ${decksText(x.decks)}` : "no tournament decks");
+  const tipOf = n => {
+    const x = winView && ties.nodes.get(n.key);
+    return x ? `${tip(n)}; tournament decks with it: ${winText(x)} (all ${decksText(ties.decks)}: ${percent1(ties.rate)})` : tip(n);
+  };
   if (graph.nodes.length < 3) { // nothing to draw: just the way back, if any
     for (const e of [noteBox, chart, legendBox]) e.remove();
     return;
@@ -618,7 +639,9 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
   const at = n => [ox + (n.x - x0) * sx, top + (n.y - y0) * sy];
   const radius = n => Math.round(size * (n === hub ? 1.3 : GRAPH_SIZES[n.kind] ?? 1));
   const short = (t, chars) => (t.length > chars ? t.slice(0, Math.max(1, chars - 1)).trimEnd() + "…" : t);
-  const lift = new Map(graph.won.map(x => [x.key, x.lift]));
+  // Ringed green or red: what the Won node links to; in Win rate, nodes whose decks clearly win more or less
+  const lift = winView ? new Map([...ties.nodes].filter(([, x]) => x.lift !== null && Math.abs(x.evidence) >= SIGNAL).map(([k, x]) => [k, x.lift]))
+    : new Map(graph.won.map(x => [x.key, x.lift]));
   // The room for a name under a node: the nearest node across whose circle or name is level with it (each
   // name centred under its node, so two level names share the space between them; a circle, half of it)
   const nameRows = n => (n.kind === "package" && n !== hub ? 2 : 1);
@@ -699,8 +722,23 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
   };
   const ranked = [...graph.edges].sort((p, q) => q.strength - p.strength);
   const together = ranked.filter(e => e.strength >= 0);
-  ranked.forEach(e => root.append(line(byKey.get(e.a), byKey.get(e.b), e.strength < 0 ? { class: "tie apart" }
-    : { class: "tie", style: `stroke: ${tierColor(Math.floor(together.indexOf(e) * TIERS / together.length))}` })));
+  // Win rate: each line green or red as the decks playing both its ends win more or less than the rest, the
+  // clearer the darker; grey dots where too few decks play both to tell. The numbers when pointed at
+  const pairWin = e => ties.pairs.get(`${e.a}|${e.b}`);
+  if (winView) {
+    for (const e of ranked) {
+      const x = pairWin(e), known = x.lift !== null;
+      const node = line(byKey.get(e.a), byKey.get(e.b), known
+        ? { class: `tie win ${x.lift >= 0 ? "pos" : "neg"}`, "stroke-opacity": (0.2 + 0.8 * Math.min(1, Math.abs(x.evidence) / 3)).toFixed(2) }
+        : { class: "tie few" });
+      node.append(svgEl("title", {}, `${nameOf(byKey.get(e.a)).text} with ${nameOf(byKey.get(e.b)).text}: ${known ? winText(x)
+        : `too few tournament decks with both (${x.decks})`} (all ${decksText(ties.decks)}: ${percent1(ties.rate)})`));
+      root.append(node);
+    }
+  } else {
+    ranked.forEach(e => root.append(line(byKey.get(e.a), byKey.get(e.b), e.strength < 0 ? { class: "tie apart" }
+      : { class: "tie", style: `stroke: ${tierColor(Math.floor(together.indexOf(e) * TIERS / together.length))}` })));
+  }
   // A win rate 5 points higher or lower shows about as strongly as a correlation of 0.3
   for (const x of graph.won) root.append(line(wonNode, byKey.get(x.key),
     { class: `won-link ${x.lift >= 0 ? "pos" : "neg"}`, "stroke-opacity": shade(6 * x.lift) }));
@@ -713,12 +751,19 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
     segments.forEach((attrs, i) => svg.append(svgEl("line", { x1: 3 + (long + 2) * i, y1: 5, x2: 3 + (long + 2) * i + long, y2: 5, ...attrs })));
     return svg;
   };
-  legendBox.replaceChildren(...[
+  const wins = winView ? ranked.map(pairWin) : [];
+  legendBox.replaceChildren(...(winView ? [
+    wins.some(x => x.lift !== null && x.lift >= 0) && [sample([0.6, 0.85, 1].map(o => ({ class: "tie win pos", "stroke-opacity": o }))),
+      "Tournament decks with both win more than the rest (darker: clearer)"],
+    wins.some(x => x.lift !== null && x.lift < 0) && [sample([0.6, 0.85, 1].map(o => ({ class: "tie win neg", "stroke-opacity": o }))),
+      "Tournament decks with both win less than the rest"],
+    wins.some(x => x.lift === null) && [sample([{ class: "tie few" }], 28), "Too few tournament decks with both to tell"],
+  ] : [
     together.length && [sample(Array.from({ length: TIERS }, (_, t) => ({ class: "tie", style: `stroke: ${tierColor(t)}` }))), legend.together],
     ranked.length > together.length && [sample([{ class: "tie apart" }], 28), legend.apart],
     lifts.some(l => l > 0) && [sample([{ class: "won-link pos" }], 28), legend.more],
     lifts.some(l => l < 0) && [sample([{ class: "won-link neg" }], 28), legend.less],
-  ].filter(Boolean).map(([svg, text]) => el("li", {}, svg, text)));
+  ]).filter(Boolean).map(([svg, text]) => el("li", {}, svg, text)));
   // A package's name ("A + B") isn't drawn under it, where it would have to be cut short: it shows in full
   // over the graph while its node is pointed at
   const named = n => !(n.kind === "package" && n !== hub);
@@ -736,7 +781,7 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
   };
   const focus = n => {
     for (const [node, a, b] of lines) node.classList.toggle("dim", !!n && a !== n && b !== n);
-    noteBox.textContent = n ? tip(n) : hint;
+    noteBox.textContent = n ? tipOf(n) : winView ? "Each line: how the tournament decks with both its cards do. Point at one for its numbers." : hint;
     showName(n);
   };
   // As tall as its longest text, so pointing at a node doesn't change the page's height: when it's
@@ -753,7 +798,7 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
     const have = n.have === false || n.have === "none" ? " missing" : n.have === "some" ? " partial" : "";
     const g = svgEl("g", { class: `node ${n.kind}${n === hub ? " hub" : ""}${lift.has(n.key) ? lift.get(n.key) > 0 ? " wins" : " loses" : ""}${have}`,
       transform: `translate(${x.toFixed(1)},${y.toFixed(1)})` });
-    g.append(svgEl("title", {}, tip(n)), svgEl("circle", { class: "back", r }));
+    g.append(svgEl("title", {}, tipOf(n)), svgEl("circle", { class: "back", r }));
     if (n === wonNode) g.append(svgEl("text", { class: "inside", "text-anchor": "middle", y: 5.5 }, "Won"));
     else {
       // Its card's art; two cards' (a package's): the left half of the circle the first's, the right the second's
@@ -774,7 +819,7 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
     if (n !== hub) {
       g.setAttribute("tabindex", "0");
       g.setAttribute("role", "button");
-      g.setAttribute("aria-label", tip(n));
+      g.setAttribute("aria-label", tipOf(n));
       if (n !== wonNode && onPick) {
         g.addEventListener("click", () => onPick(n));
         g.addEventListener("keydown", e => {
@@ -796,7 +841,7 @@ function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = nul
 
 // The card dialog's synergy graph (synergyGraph's): the card in the middle, the cards its decks play more
 // with it around it, and a Won node linked to those its tournament decks win more or less with
-function synergyChart(box, graph, { names, lead }, name) {
+function synergyChart(box, graph, { names, lead }, name, lists = null, w = 0) {
   const key = c => (c === null ? "won" : `c${c}`);
   graphChart(box, {
     nodes: graph.nodes.map(n => ({ ...n, key: key(n.card) })),
@@ -821,6 +866,7 @@ function synergyChart(box, graph, { names, lead }, name) {
       return `${names[n.card]}: ${bits.join("; ")}`;
     },
     onPick: n => openByNumber(n.card),
+    win: lists && { lists, w, sets: n => [n.card] },
   });
 }
 
@@ -872,6 +918,7 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
         : `${n.cards.map(front).join(", ")}: ${percent(n.decks / m)} of ${these} run all of them (${decksText(n.decks)})`
           + [...(n.lift === undefined ? [] : [higher(n, "them", "none")]), ...yours(n)].map(t => `; ${t}`).join("")),
       onPick: n => open(n.cards),
+      win: lists && { lists, w, sets: n => n.cards },
     });
   };
   const open = cards => {
@@ -909,6 +956,7 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
         return `${names[n.card]}: ${[...bits, ...yours(n)].join("; ")}`;
       },
       onPick: n => openByNumber(n.card),
+      win: lists && { lists, w, sets: n => n.cards ?? [n.card] },
     });
   };
   const opened = packages.find(p => p.cards.join(".") === box.dataset.open);
