@@ -794,6 +794,11 @@ def crawl(per_commander, only=None, hours=None, top=None, upload=False, state_pa
 #              decks made [ever, in each window], price, bracket, theme numbers]; and everything:
 #              [decks made, gaps between the cards they play, [how many play each card, per window]]
 #              over all their decks
+#   trend-combos.json  the Commander Spellbook combos the decks of the commanders in trends.json play every
+#              card of, for Trends: totals: [[identity (WUBRG bits), decks made ever, in each window]], over
+#              those commanders' decks; combos: [[Spellbook id, card numbers, other pieces it needs, what it
+#              makes, [[identity, decks playing it made ever, in each window]]]], the TREND_COMBOS most played
+#              (in MIN_COMBO_DECKS decks or more), most played first
 #   trend-cards/<identity>.json  the same as everything, for each commander in trends.json of that
 #              color identity (WUBRG bits, as in the card index): [its number in trends.json, gaps,
 #              per window]. Most of its cards; a filter fetches just the identities it keeps.
@@ -813,6 +818,7 @@ BEST_DECKS, BREAKOUT_DECKS, RISING_DECKS = 20, 10, 15  # decks a commander needs
 TOP_FINISH, MAX_FINISHES = 4, 200  # best finishes on a commander page: the newest MAX_FINISHES in the top 4
 MIN_DECKS = 5  # fewer decks than this don't make useful recommendations
 MIN_COMBO_DECKS = 5  # decks playing every card of a combo, for its commander's file to have it
+TREND_COMBOS = 3000  # the most played combos in trend-combos.json
 STAPLE = 0.05  # of all decks: a card played this widely says nothing about a commander's packages
 MAX_DECKS = 10000  # per commander, newest first: keeps a file around 1 MB to download (gzipped)
 SIGNATURE = 24
@@ -1305,6 +1311,29 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
         for b, block in blocks.items():
             write_json(os.path.join(out_dir, "results", "pilots", f"{b}.json"), block)
         write_json(os.path.join(out_dir, "results", "ranking.json"), {"windows": RESULT_WINDOWS, "pilots": ranking(histories, today)})
+    # Trends' combos: for each deck of a commander in trends.json, the combos it plays every card of (the
+    # commander counting as played; a combo's must-be-commander cards only when they are), by the commander's
+    # color identity, made ever and in each window
+    identity_totals, combo_counts = defaultdict(lambda: [0] * (len(WINDOWS) + 1)), {}
+
+    def count_combos(key, decks):
+        leaders = {int(n) for n in key.split("-")}
+        colors = sum(1 << j for j, color in enumerate("WUBRG") if any(color in cards[n].get("color_identity", []) for n in leaders))
+        totals = identity_totals[colors]
+        for d, played in decks:
+            flags = [1] + [int(s is not None and made[d["id"]] >= s) for s in since]
+            for k, f in enumerate(flags):
+                totals[k] += f
+            has = set(played) | leaders
+            for c in has:
+                for id, ns, must, shown in by_rarest.get(c, ()):
+                    if must <= leaders and all(x in has for x in ns):
+                        if id not in combo_counts:
+                            combo_counts[id] = [ns, shown[0], shown[1], defaultdict(lambda: [0] * (len(WINDOWS) + 1))]
+                        row = combo_counts[id][3][colors]
+                        for k, f in enumerate(flags):
+                            row[k] += f
+
     commanders, trends = [], []
     # Every deck of the commanders in trends.json, exactly: what Trends shows until a filter is picked
     every_count, every_play = [0] * (len(WINDOWS) + 1), defaultdict(lambda: [0] * (len(WINDOWS) + 1))
@@ -1313,6 +1342,7 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
         for key, decks in sorted(groups.items()):
             if len(decks) < MIN_DECKS:
                 continue
+            count_combos(key, decks)
             here = Counter(c for _, played in decks for c in played)
             known_themes = themes(here, len(decks), usual, card_tags)
             price = median([round(100 * math.fsum(prices[o] * k for o, k in d["cards"].items() if o in prices and o not in basic))
@@ -1386,6 +1416,12 @@ def build(corpus, cards, tags=None, out_dir=OUT_DIR, prices=None, today=None, re
                 by_card[card] += [i, ever]
     for colors, rows in by_identity.items():
         write_json(os.path.join(out_dir, "trend-cards", f"{colors}.json"), rows)
+    played_combos_all = sorted(([id, ns, needs, makes, [[colors, *row] for colors, row in sorted(by.items())]]
+                                for id, (ns, needs, makes, by) in combo_counts.items()
+                                if sum(row[0] for row in by.values()) >= MIN_COMBO_DECKS),
+                               key=lambda c: (-sum(row[1] for row in c[4]), c[0]))[:TREND_COMBOS]
+    write_json(os.path.join(out_dir, "trend-combos.json"), {
+        "totals": [[colors, *row] for colors, row in sorted(identity_totals.items())], "combos": played_combos_all})
     for k in range(0, len(cards), CARD_BLOCK):
         write_json(os.path.join(out_dir, "card-commanders", f"{k // CARD_BLOCK}.json"),
                    [by_card.get(n, []) for n in range(k, min(k + CARD_BLOCK, len(cards)))])

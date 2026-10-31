@@ -602,6 +602,36 @@ export function trendingCards(scope, window) {
   return { popular, rising, total, recent };
 }
 
+// Trends' combos (decks/trend-combos.json): each combo's decks among those of the color identities kept
+// (identities: a Set of WUBRG bits, null: all), ever and in the window, as trendingCards counts cards.
+// Popular: the share of the window's decks that play every card of each; rising: the most above its share
+// of all the decks (by a tenth or more), from at least MIN_RISING decks and COMBO_FLOOR of them. Each {id, cards, needs, makes, decks,
+// share, was}
+export function trendingCombos(data, identities, window) {
+  const kept = colors => !identities || identities.has(colors);
+  let total = 0, recent = 0;
+  for (const [colors, ever, ...made] of data.totals) {
+    if (!kept(colors)) continue;
+    total += ever;
+    recent += window ? made[window - 1] : ever;
+  }
+  const popular = data.combos.flatMap(([id, cards, needs, makes, rows]) => {
+    let ever = 0, now = 0;
+    for (const [colors, e, ...made] of rows) {
+      if (!kept(colors)) continue;
+      ever += e;
+      now += window ? made[window - 1] : e;
+    }
+    return now ? [{ id, cards, needs, makes, decks: now, share: now / recent, was: ever / total }] : [];
+  }).sort((a, b) => b.share - a.share || a.id.localeCompare(b.id));
+  const rising = !window ? [] : popular
+    .filter(x => x.share >= RISING_COMBO * x.was && x.decks >= Math.max(MIN_RISING, COMBO_FLOOR * recent))
+    .sort((a, b) => rise(b) - rise(a));
+  return { popular, rising, total, recent };
+}
+const RISING_COMBO = 1.1; // a tenth more of the window's decks than of all of them, at least: less reads as no change
+const COMBO_FLOOR = 0.002; // of the window's decks: combos are far rarer than cards, so a lower bar than their 1%
+
 // The commanders whose decks play a card, most of their decks first: [{...commander, decks, share}].
 // pairs: its row of a card-commanders/ file, [commander number, decks playing it, ...]
 export function commandersPlaying(commanders, pairs) {

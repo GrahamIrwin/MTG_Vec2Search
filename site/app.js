@@ -6,7 +6,7 @@ import { CURRENCIES, detectCurrency, usdRate, moneyFormatter } from "./currency.
 import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, playCounts, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
-  decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
+  decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards, trendingCombos,
   cardResults, packageResults, MIN_RESULT_DECKS, playedMoreWith, winsMoreWith, synergyGraph, packageMap, packageGraph, playRateByMonth, resultsByMonth, winTies,
   pairCounts,
 } from "./deck.js";
@@ -3014,6 +3014,7 @@ const trendsMessage = text => {
 };
 
 let trendData; // decks/trends.json, with each commander's name and colors
+let trendCombos; // decks/trend-combos.json
 function loadTrends() {
   trendData ??= Promise.all([loadDeckData(), getJson("decks/trends.json")]).then(([{ names }, data]) => {
     const trends = decodeTrends(data);
@@ -3133,6 +3134,35 @@ async function showTrends() {
     showTrendPlayed(cards.popular.slice(0, MAX_TRENDING).map(x => pick(x, played(x.decks, x.share))));
     showTrendNew(cards.popular.filter(x => isNew(released, x.card)).slice(0, MAX_TRENDING)
       .map(x => pick(x, played(x.decks, x.share))));
+
+    // Combos: over the decks of the color identities kept (the other filters don't narrow them)
+    trendCombos ??= getJson("decks/trend-combos.json").catch(() => null);
+    const comboData = await trendCombos;
+    if (asked !== shownFor) return;
+    $("trends-page").querySelector('[data-view="combos"]').dataset.empty = comboData ? "" : "1";
+    if (!comboData) return;
+    const combos = trendingCombos(comboData, active ? new Set(scope.map(c => c.identity)) : null, w);
+    const these = days ? `the decks made in the last ${days} days` : "all these decks";
+    $("trend-combos-note").hidden = !active;
+    $("trend-combos-note").textContent = "Combos follow the color filter: the decks of the kept commanders' color identities, "
+      + "whatever the other filters.";
+    // Combos that differ in one card as one, as on a commander's page
+    const rows = (list, say) => groupCombos(list).map(group => {
+      const row = comboRow(group, () => say(group.options[0].combo));
+      delete row.how; // their steps are on the commanders' pages
+      return row;
+    });
+    $("rising-combos-panel").hidden = !days;
+    $("trend-rising-combos-lede").textContent = `Combos ${these} play more often than these decks do overall, from a few `
+      + "decks up counting for more.";
+    showRows($("trend-rising-combos"), $("more-trend-rising-combos"), rows(combos.rising.slice(0, MAX_TRENDING),
+      x => `${percent1(x.was)} → ${percent1(x.share)} of decks (${decksText(x.decks)})`));
+    $("trend-played-combos-lede").textContent = `The share of ${these} that play every card of each combo.`;
+    showRows($("trend-played-combos"), $("more-trend-played-combos"), rows(combos.popular.slice(0, MAX_TRENDING),
+      x => `${percent1(x.share)} of decks (${decksText(x.decks)})`));
+    $("trend-new-combos-lede").textContent = `Combos with a card first printed in the last few months, by how many of ${these} play them.`;
+    showRows($("trend-new-combos"), $("more-trend-new-combos"), rows(combos.popular.filter(x => x.cards.some(c => isNew(released, c)))
+      .slice(0, MAX_TRENDING), x => `${percent1(x.share)} of decks (${decksText(x.decks)})`));
   }
   $("trend-form").addEventListener("input", async () => {
     await update();
@@ -3141,13 +3171,18 @@ async function showTrends() {
   await update();
   trendsMessage("");
   $("trends-page").hidden = false;
-  const sections = pageSections($("trends-page"), $("trend-views"), [["commanders", "Commanders"], ["cards", "Cards"]], $("trends-how"), {
+  const sections = pageSections($("trends-page"), $("trend-views"), [["commanders", "Commanders"], ["cards", "Cards"], ["combos", "Combos"]], $("trends-how"), {
     commanders: "Rising: commanders whose share of the decks made in the period beats their share of all decks the most, "
       + "relative to it, so going from 1% to 4% beats 60% to 66%. Most popular: the most decks made in the period. The "
       + "filters keep the commanders that pass them (color identity: exactly those colors).",
     cards: "Rising cards: what the period's new decks play more often than these commanders' decks do overall. Most played: "
       + "the share of the period's decks that play each card. New cards: first printed in the last few months. With "
       + "filters, the cards are those of the commanders that pass them.",
+    combos: "Commander Spellbook's combos that decks play every card of (the commander counting). Rising: played more by "
+      + "the period's new decks than by all the decks, relative to how many play them, so 1% to 3% beats 20% to 25%. Most "
+      + "played: the share of the period's decks. New: with a card first printed in the last few months. Combos that "
+      + "differ in one card show as one. The color filter keeps the decks of those color identities; the other filters "
+      + "don't narrow combos.",
   });
 }
 

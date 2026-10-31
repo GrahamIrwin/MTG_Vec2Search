@@ -378,6 +378,13 @@ time, a few KB after that).
    partners; a minimum of decks) narrow it to the commanders that pass; the cards are then those commanders' decks'. Rising compares a share
    of the window's decks with the share of all decks, relative to it, so a
    commander or card going from 1% to 4% beats one going from 60% to 66%.
+   - **Combos** (the third tab): Commander Spellbook's combos the decks play every card of (the
+     commander counting), as rising, most played and new (with a card first printed in the last few
+     months), combos that differ in one card shown as one, as on a commander's page. Rising needs a
+     tenth more of the window's decks than of all decks and 0.2% of the window's decks (combos are far
+     rarer than cards). `trend-combos.json` counts the 3,000 most played combos' decks by the
+     commander's color identity and window, so the color filter narrows combos exactly; the other
+     filters don't.
    - The crawler keeps each deck's creation date (and fills it in for decks it
      already had from the search listings it reads anyway). Archidekt decks
      crawled before dates were kept get the date of the last dated deck before

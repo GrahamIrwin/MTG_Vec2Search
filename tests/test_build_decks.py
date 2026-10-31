@@ -171,6 +171,13 @@ with tempfile.TemporaryDirectory() as tmp:
     assert sorted(shard["cards"][p] for p in precon) == [2, 7], shard["precon"]
     assert shard["combos"] == [["1-2", [0, 2], [], ["Win the game"], ["", "", "", "Cast it.\nWin."]],
                                ["w", [98, 2], ["Mana Dork"], ["Infinite mana"], ["", "", "", "Cast it.\nWin."]]], shard["combos"]
+    # Trends' combos: each played by all 5 decks (identity 0: the test cards have no colors); "x" in 4,
+    # under MIN_COMBO_DECKS; "y" needs c0 as the commander, which it isn't
+    with open(os.path.join(out, "trend-combos.json"), encoding="utf-8") as f:
+        tc = json.load(f)
+    assert tc["totals"] == [[0, 5, 2, 2, 1]], tc["totals"]
+    assert [(c[0], c[1], c[4]) for c in tc["combos"]] == [("1-2", [0, 2], [[0, 5, 2, 2, 1]]), ("w", [98, 2], [[0, 5, 2, 2, 1]])], tc["combos"]
+    assert tc["combos"][1][2:4] == [["Mana Dork"], ["Infinite mana"]]
     first = shard["decks"][0]
     assert first[0] == 5 and first[2] == "2026-09-05" and first[4] == "2026-10-01"  # newest first; when it was made
     assert [d[5] for d in shard["decks"]] == [4, 0, 3, 3, 3]  # its bracket (0: none)
