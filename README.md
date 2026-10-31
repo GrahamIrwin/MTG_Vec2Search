@@ -224,8 +224,9 @@ time, a few KB after that).
    rate (412 decks play both, 300 only Jeska's Will)"), and a **synergy graph**:
    the card in the middle and around it the cards played with it clearly more than chance (a
    correlation of 0.2 or more between being in a deck, the strongest 12; 8 on a phone). Every line is
-   such a correlation, the same width: green for played together, red for rarely together (one or
-   the other: two packages, two color builds), darker for stronger. Between the cards around it, only
+   such a correlation, the same width, ranked strongest to weakest and coloured by its fifth of the
+   ranking, green to red, so a graph's ties are easy to tell apart; dotted lines are pairs rarely
+   played together (one or the other: two packages, two color builds). Between the cards around it, only
    pairs that stand out from the rest show (the decks playing a card mostly share one build, so most
    of its partners go together a little). With tournament results, dashed lines join a "Won" node to
    the cards whose decks win clearly more (green) or less (red) with them. Picking a card in the

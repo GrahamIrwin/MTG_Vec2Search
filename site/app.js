@@ -571,6 +571,9 @@ async function showCardWith(card) {
 // to the ones its decks play more with it (thicker: more), between those played together, and from a "Won"
 // node to the cards its decks win more with. Pointing at a card says why it's there; picking it opens it.
 const shade = strength => (0.2 + 0.8 * Math.min(1, Math.abs(strength) / 0.6)).toFixed(2);
+// The synergy graph's ranked line colours, green to red: hues for each fifth of the ranking
+const TIERS = [135, 90, 52, 28, 4];
+const tierColor = t => `hsl(${TIERS[t]} 62% var(--tier-l))`;
 function synergyChart(box, graph, { names, lead }, name) {
   box.replaceChildren();
   if (graph.nodes.length < 3) return;
@@ -624,19 +627,22 @@ function synergyChart(box, graph, { names, lead }, name) {
     defs.append(clip);
   }
   root.append(defs);
-  // Every line the same width: green for together (or winning more), red for apart (or less), the
-  // stronger the more opaque
+  // Every line the same width. Played together or not: ranked, strongest first, and coloured by their
+  // fifth of the ranking, green to red (dotted: rarely together). Won's: green for winning more, red
+  // for less, the bigger the difference the more opaque
   const lines = [];
-  const line = (a, b, cls, strength) => {
+  const line = (a, b, attrs) => {
     const [x1, y1] = at(a), [x2, y2] = at(b);
-    const node = svgEl("line", { class: `${cls} ${strength >= 0 ? "pos" : "neg"}`, x1, y1, x2, y2,
-      "stroke-opacity": shade(strength) });
+    const node = svgEl("line", { x1, y1, x2, y2, ...attrs });
     lines.push([node, a, b]);
     return node;
   };
-  for (const e of graph.edges) root.append(line(byCard.get(e.a), byCard.get(e.b), "tie", e.strength));
+  const ranked = [...graph.edges].sort((p, q) => q.strength - p.strength);
+  ranked.forEach((e, i) => root.append(line(byCard.get(e.a), byCard.get(e.b), { class: `tie${e.strength < 0 ? " apart" : ""}`,
+    style: `stroke: ${tierColor(Math.floor(i * TIERS.length / ranked.length))}` })));
   // A win rate 5 points higher or lower shows about as strongly as a correlation of 0.3
-  for (const x of graph.won) root.append(line(wonNode, byCard.get(x.card), "won-link", 6 * x.lift));
+  for (const x of graph.won) root.append(line(wonNode, byCard.get(x.card),
+    { class: `won-link ${x.lift >= 0 ? "pos" : "neg"}`, "stroke-opacity": shade(6 * x.lift) }));
 
   const say = n => {
     if (n.kind === "won") return `Won: ${lead} tournament decks with ${name} win more often with the cards it has green lines to, `
@@ -648,20 +654,20 @@ function synergyChart(box, graph, { names, lead }, name) {
   };
   const has = test => graph.edges.some(test);
   const lifts = graph.won.map(x => x.lift);
-  const sample = (cls, strengths) => {
-    const long = cls === "won-link" ? 28 : 10; // long enough to show its dashes
-    const svg = svgEl("svg", { viewBox: `0 0 ${(long + 2) * strengths.length + 4} 10`, "aria-hidden": "true",
-      style: `width: ${(long + 2) * strengths.length + 4}px` });
-    strengths.forEach((v, i) => svg.append(svgEl("line", { class: `${cls} ${v >= 0 ? "pos" : "neg"}`,
-      x1: 3 + (long + 2) * i, y1: 5, x2: 3 + (long + 2) * i + long, y2: 5, "stroke-opacity": shade(v) })));
+  // A legend sample: segments, each {class, style or opacity}
+  const sample = (segments, long = 10) => {
+    const svg = svgEl("svg", { viewBox: `0 0 ${(long + 2) * segments.length + 4} 10`, "aria-hidden": "true",
+      style: `width: ${(long + 2) * segments.length + 4}px` });
+    segments.forEach((attrs, i) => svg.append(svgEl("line", { x1: 3 + (long + 2) * i, y1: 5, x2: 3 + (long + 2) * i + long, y2: 5, ...attrs })));
     return svg;
   };
   $("synergy-legend").replaceChildren(...[
-    ["tie", [0.15, 0.35, 0.6], "Played together (darker: more often)"],
-    has(e => e.strength < 0) && ["tie", [-0.15, -0.35, -0.6], "Rarely played together (one or the other)"],
-    lifts.some(l => l > 0) && ["won-link", [0.6], "Tournament decks win more with it"],
-    lifts.some(l => l < 0) && ["won-link", [-0.6], "Tournament decks win less with it"],
-  ].filter(Boolean).map(([cls, strengths, text]) => el("li", {}, sample(cls, strengths), text)));
+    [sample(TIERS.map((_, t) => ({ class: "tie", style: `stroke: ${tierColor(t)}` }))), "Strongest to weakest tie, ranked within this graph"],
+    has(e => e.strength < 0) && [sample([{ class: "tie apart", style: `stroke: ${tierColor(TIERS.length - 1)}` }], 28),
+      "Rarely played together (one or the other)"],
+    lifts.some(l => l > 0) && [sample([{ class: "won-link pos" }], 28), "Tournament decks win more with it"],
+    lifts.some(l => l < 0) && [sample([{ class: "won-link neg" }], 28), "Tournament decks win less with it"],
+  ].filter(Boolean).map(([svg, text]) => el("li", {}, svg, text)));
   const note = "Point at a card for its numbers, or pick one to open it.";
   const noteBox = $("synergy-hint");
   const focus = n => {
