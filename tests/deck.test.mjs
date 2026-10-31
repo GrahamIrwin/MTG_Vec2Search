@@ -4,7 +4,7 @@ import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, cardResults, packageResults, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
-  playedMoreWith, winsMoreWith, synergyGraph, playRateByMonth, resultsByMonth,
+  playedMoreWith, winsMoreWith, synergyGraph, packageMap, packageGraph, playRateByMonth, resultsByMonth,
 } from "../site/deck.js";
 
 const NAMES = ["Sol Ring", "Atraxa, Praetors' Voice", "Delver of Secrets // Insectile Aberration", "Island",
@@ -459,4 +459,107 @@ test("synergy graph: partners around the card, every line a correlation, the Won
   assert.ok(!plain.nodes.some(n => n.kind === "won"));
   assert.equal(plain.nodes[0].x, 0.5);
   assert.deepEqual(synergyGraph(shard, lists, 999, 0), { nodes: [{ card: 999, x: 0.5, y: 0.5, kind: "center" }], edges: [], won: [] });
+});
+
+// 200 decks, cards 10..22 (positions 0..12). Packages: [10, 11] in decks 0..79; [12, 13] in 0..59 (mostly
+// with it); [14, 15] in 100..159 (never with either: another build); [16, 17] in 4 only; [18, 19] in every
+// fifth deck (with any of them by chance). 20: every deck; 21: decks 0..69; 22: 0..9 and 100..109.
+const pkgPlays = i => [
+  ...(i < 80 ? [10, 11] : []), ...(i < 60 ? [12, 13] : []), ...(i >= 100 && i < 160 ? [14, 15] : []),
+  ...(i >= 190 && i < 194 ? [16, 17] : []), ...(i % 5 ? [] : [18, 19]), 20, ...(i < 70 ? [21] : []),
+  ...(i < 10 || (i >= 100 && i < 110) ? [22] : [])].sort((a, b) => a - b);
+const pkgShard = { cards: range(10, 23), decks: range(0, 200).map(i => [i, "", "", gaps(pkgPlays(i).map(c => c - 10))]) };
+const pkgs = [[10, 11], [12, 13], [14, 15], [16, 17], [18, 19]].map(cards => ({ cards }));
+// Tournament decks: 20 with 10, 11 and 21 win 5 of 6; 20 with 10 and 11 only win 1 of 6 (12 in half of
+// each); 20 with 14 and 15 win 1 of 6
+const pkgLists = { cards: [10, 11, 12, 14, 15, 21], decks: [
+  ...range(0, 20).map(i => listDeck(0, 5, [0, 1, ...(i < 10 ? [2] : []), 5])),
+  ...range(0, 20).map(i => listDeck(0, 1, [0, 1, ...(i < 10 ? [2] : [])])),
+  ...range(0, 20).map(() => listDeck(0, 1, [3, 4])),
+] };
+const spread = g => {
+  for (const n of g.nodes) assert.ok(n.x >= 0 && n.x <= 1 && n.y >= 0 && n.y <= 1, `${n.key} at ${n.x}, ${n.y}`);
+  for (const a of g.nodes) for (const b of g.nodes) if (a !== b) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= 0.08, `${a.key} on ${b.key}`);
+};
+const edgeOf = (g, a, b) => g.edges.find(e => (e.a === a && e.b === b) || (e.a === b && e.b === a));
+
+test("package map: packages run by enough decks, linked by how often decks run both, the Won node to the right", () => {
+  const shard = decodeShard(pkgShard), all = range(0, 200);
+  const map = packageMap(shard, pkgs, all, { lists: pkgLists, w: 0 });
+  assert.deepEqual(map, packageMap(shard, pkgs, all, { lists: pkgLists, w: 0 })); // the same every time
+  assert.deepEqual(packageMap(pkgShard, pkgs, all, { lists: pkgLists, w: 0 }), map); // a raw file is decoded first
+  const byKey = new Map(map.nodes.map(n => [n.key, n]));
+  // [16, 17]: in 4 decks, under the floor (3% of 200)
+  assert.deepEqual(map.nodes.filter(n => n.kind === "package").map(n => n.key).sort(), ["p0", "p1", "p2", "p4"]);
+  assert.deepEqual([byKey.get("p0").decks, byKey.get("p2").decks, byKey.get("p4").decks], [80, 60, 40]);
+  assert.deepEqual(byKey.get("p0").name, [10, 11]);
+  assert.deepEqual(byKey.get("p0").cards, [10, 11]);
+  // Together: [10, 11] and [12, 13]; either/or: [14, 15] with both; [18, 19]: with none in particular
+  assert.ok(edgeOf(map, "p0", "p1").strength > 0.5);
+  assert.ok(edgeOf(map, "p0", "p2").strength < -0.1 && edgeOf(map, "p1", "p2").strength < -0.1);
+  assert.ok(!map.edges.some(e => e.a === "p4" || e.b === "p4"));
+  // Won: decks with [10, 11] win more than those without, [14, 15] less; [12, 13] isn't in the lists
+  assert.deepEqual(map.won.map(x => x.key).sort(), ["p0", "p2"]);
+  assert.ok(byKey.get("p0").lift > 0 && byKey.get("p2").lift < 0 && !("lift" in byKey.get("p1")));
+  assert.ok(map.won.every(x => x.tested.every(k => k >= 10)) && byKey.get("p0").tested === map.won.find(x => x.key === "p0").tested);
+  assert.equal(byKey.get("won").x, 1);
+  assert.ok(byKey.get("p0").x > 0.5 && byKey.get("p2").x > 0.5); // nearest the Won node
+  // The n most run; within a build (members); a pasted deck's share of each
+  assert.deepEqual(packageMap(shard, pkgs, all, { n: 2 }).nodes.map(n => n.key).sort(), ["p0", "p1"]);
+  assert.deepEqual(packageMap(shard, pkgs, range(100, 200)).nodes.map(n => n.key).sort(), ["p2", "p3", "p4"]); // 4 of 100 is enough
+  const mine = packageMap(shard, pkgs, all, { have: new Set([10, 11, 12]) });
+  assert.deepEqual(mine.nodes.map(n => [n.key, n.have]).sort(), [["p0", "all"], ["p1", "some"], ["p2", "none"], ["p4", "none"]]);
+  assert.ok(!("have" in map.nodes[0]));
+  // No lists: no Won node, the ring in the middle
+  const plain = packageMap(shard, pkgs, all);
+  assert.deepEqual(plain.won, []);
+  assert.ok(!plain.nodes.some(n => n.kind === "won"));
+  for (const g of [map, plain, mine, packageMap(shard, pkgs, all, { n: 2 }), packageMap(shard, pkgs.slice(0, 1), all)]) spread(g);
+  assert.deepEqual(packageMap(shard, [], all), { nodes: [], edges: [], won: [] });
+});
+
+test("package graph: its cards in the middle, what decks running it add around them, the Won node to the right", () => {
+  const shard = decodeShard(pkgShard), all = range(0, 200);
+  const graph = packageGraph(shard, [10, 11], all, { lists: pkgLists, w: 0 });
+  assert.deepEqual(graph, packageGraph(shard, [10, 11], all, { lists: pkgLists, w: 0 })); // the same every time
+  const byKey = new Map(graph.nodes.map(n => [n.key, n]));
+  const center = byKey.get("pkg");
+  assert.equal(center.kind, "package");
+  assert.equal(center.decks, 80);
+  assert.deepEqual(graph.nodes.filter(n => n.kind === "core").map(n => n.card).sort(), [10, 11]);
+  // Extras: what decks running it play far more than the others (21, 12, 13); not 20 (every deck),
+  // 22 (barely more), 14 (less)
+  const extras = graph.nodes.filter(n => n.kind === "extra");
+  assert.deepEqual(extras.map(n => n.card).sort(), [12, 13, 21]);
+  const { base, with: share, decksWith } = byKey.get("c21");
+  assert.deepEqual({ base, share, decksWith }, { base: 0, share: 70 / 80, decksWith: 70 });
+  assert.deepEqual(packageGraph(shard, [10, 11], all, { extra: 1 }).nodes.filter(n => n.kind === "extra").map(n => n.card), [21]);
+  // Lines: the core pair, and a spoke to each extra (none to the core: its decks all play it)
+  assert.equal(edgeOf(graph, "c10", "c11").strength, 1);
+  assert.ok(extras.every(n => edgeOf(graph, "pkg", n.key).strength >= 0.2));
+  assert.equal(graph.edges.length, 1 + extras.length);
+  // Won: the package (its decks win more than those without it) and 21 (its decks with 21 win more); not 12
+  assert.deepEqual(graph.won.map(x => x.key).sort(), ["c21", "pkg"]);
+  assert.ok(center.lift > 0 && byKey.get("c21").lift > 0 && !("lift" in byKey.get("c12")));
+  assert.ok(graph.won.every(x => x.tested.length === 2) && center.tested.every(k => k >= 10));
+  assert.equal(byKey.get("won").x, 1);
+  // No spoke (or the line to Won) runs over a card of the package, and its two cards don't face each other
+  // across the middle
+  const angle = n => Math.atan2(n.y - center.y, n.x - center.x);
+  const cores = graph.nodes.filter(n => n.kind === "core");
+  for (const c of cores) for (const t of [...extras, byKey.get("won")]) {
+    assert.ok(Math.abs(Math.atan2(Math.sin(angle(c) - angle(t)), Math.cos(angle(c) - angle(t)))) > 0.35, `${c.key} by ${t.key}`);
+  }
+  assert.ok(Math.abs((cores[0].x + cores[1].x) / 2 - center.x) > 0.08);
+  // A pasted deck: which cards it has
+  const mine = packageGraph(shard, [10, 11], all, { have: new Set([10, 21]) });
+  assert.deepEqual(mine.nodes.filter(n => n.card).map(n => [n.card, n.have]).sort((a, b) => a[0] - b[0]),
+    [[10, true], [11, false], [12, false], [13, false], [21, true]]);
+  // Three cards: every pair linked; an either/or pair is negative
+  const three = packageGraph(shard, [10, 11, 14], all);
+  assert.equal(three.nodes[0].decks, 0);
+  assert.ok(edgeOf(three, "c10", "c14").strength < 0);
+  assert.equal(three.edges.length, 3); // run by no deck: no extras
+  for (const g of [graph, mine, three, packageGraph(shard, [10, 11, 21], all), packageGraph(shard, [10, 11], all, { lists: pkgLists, w: 0, extra: 12 })]) spread(g);
+  assert.equal(packageGraph(shard, [10, 999], all).nodes[0].decks, 0);
 });

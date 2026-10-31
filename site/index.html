@@ -685,13 +685,21 @@
     .synergy .node .back { fill: var(--paper-3); }
     .synergy .node .ring { fill: none; stroke: var(--paper); stroke-width: 2; }
     .synergy .node.center .ring { stroke: var(--brass); stroke-width: 3; }
+    .synergy .node.missing .ring { stroke: var(--ink-faint); stroke-dasharray: 5 4; }
     .synergy .node.wins .ring { stroke: var(--up); stroke-width: 2.5; }
     .synergy .node.loses .ring { stroke: var(--down); stroke-width: 2.5; }
     .synergy .node.won .back { fill: var(--accent-soft); }
     .synergy .node.won .ring { stroke: var(--up); stroke-width: 2; }
     .synergy .node.won text.inside { fill: var(--up); font-weight: bold; font-size: 16px; }
     .synergy .node:hover .ring, .synergy .node:focus-visible .ring { stroke: var(--focus); stroke-width: 3; }
-    .synergy .center { cursor: default; }
+    .synergy .hub { cursor: default; }
+    .synergy .node.missing image { opacity: .35; }
+    .synergy .node.partial image { opacity: .55; }
+    .synergy .node.partial .ring { stroke: var(--ink-soft); stroke-width: 3; stroke-dasharray: 2 4; stroke-linecap: round; }
+    .synergy .node.missing text:not(.inside) { opacity: .7; }
+    .graph-crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 0 8px; font-size: 16px; color: var(--ink); }
+    .graph-crumbs .sep { color: var(--ink-faint); }
+    .graph-crumbs .link-button { font: inherit; }
     .synergy text { font-family: inherit; font-size: 15px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
     .synergy.narrow text { font-size: 13px; }
     .synergy .dim { opacity: .15; }
@@ -943,6 +951,12 @@
             <div class="more-wrap"><button id="more-near-combos" class="btn-quiet" type="button" hidden>Show more</button></div>
           </details>
           </div>
+          <div data-view="packages">
+          <details class="panel" open id="deck-packages-panel" hidden>
+            <summary><h2 class="deck-heading">Packages</h2></summary>
+            <div id="deck-packages"></div>
+          </details>
+          </div>
           <div data-view="tournament">
           <details class="panel" open id="deck-tournament" hidden>
             <summary><h2 class="deck-heading">Tournament check</h2></summary>
@@ -1155,8 +1169,12 @@
               </div>
               <div id="packages-tab" hidden>
                 <p class="muted deck-lede" id="packages-lede"></p>
-                <ol class="combo-list" id="packages"></ol>
-                <div class="more-wrap"><button id="more-packages" class="btn-quiet" type="button" hidden>Show more</button></div>
+                <div class="chips type-filter" id="packages-as" role="group" aria-label="Show as"></div>
+                <div id="packages-graph" hidden></div>
+                <div id="packages-list">
+                  <ol class="combo-list" id="packages"></ol>
+                  <div class="more-wrap"><button id="more-packages" class="btn-quiet" type="button" hidden>Show more</button></div>
+                </div>
               </div>
             </details>
           </div>
@@ -1650,9 +1668,7 @@
       <a id="scryfall-link" target="_blank" rel="noopener">View on Scryfall ↗</a>
       </div>
       <div class="with-panel" hidden data-with="synergy">
-        <p class="with-note" id="synergy-hint"></p>
-        <div class="synergy" id="synergy"></div>
-        <ul class="synergy-legend" id="synergy-legend"></ul>
+        <div id="synergy"></div>
       </div>
       <div class="with-panel" hidden data-with="played">
         <p class="with-note" id="played-with-lede"></p>

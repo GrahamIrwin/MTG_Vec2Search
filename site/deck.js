@@ -714,7 +714,8 @@ export function playedMoreWith(shard, card, { min = MIN_WITH, least = MIN_PLAYIN
   return rows.sort((a, b) => b.score - a.score || a.card - b.card).map(({ score, ...row }) => row);
 }
 
-// Wins more with: among a commander's tournament decks (results/lists/<key>.json) playing `card`, over
+// Wins more with: among a commander's tournament decks (results/lists/<key>.json) playing `card` (or all of
+// several: a package), over
 // window w (as packageResults), those also playing each other card against those that don't, compared as
 // cardResults does (pulled toward the win rate of the decks playing `card`). Both sides need `min` decks:
 // twice a single card's, since with fewer a shuffled corpus turns up as many "wins more" rows as the real one.
@@ -722,8 +723,8 @@ export function playedMoreWith(shard, card, { min = MIN_WITH, least = MIN_PLAYIN
 // an evidence of SIGNAL (2) or more is a clear difference
 export const MIN_PAIR_DECKS = 2 * MIN_RESULT_DECKS;
 export function winsMoreWith(lists, card, w, { min = MIN_PAIR_DECKS } = {}) {
-  const p = lists.cards.indexOf(card);
-  if (p < 0) return [];
+  const need = [card].flat().map(c => lists.cards.indexOf(c));
+  if (need.includes(-1)) return [];
   const side = () => ({ decks: 0, games: 0, wins: 0 });
   const add = (s, games, wins) => { s.decks++; s.games += games; s.wins += wins; };
   const total = side(), both = new Map(); // position -> the decks playing it and `card`
@@ -731,9 +732,9 @@ export function winsMoreWith(lists, card, w, { min = MIN_PAIR_DECKS } = {}) {
     if (narrowest > w) continue;
     let q = 0;
     const plays = gaps.map(g => (q += g));
-    if (!plays.includes(p)) continue;
+    if (!need.every(p => plays.includes(p))) continue;
     add(total, games, wins);
-    for (const o of plays) if (o !== p) add(both.get(o) ?? both.set(o, side()).get(o), games, wins);
+    for (const o of plays) if (!need.includes(o)) add(both.get(o) ?? both.set(o, side()).get(o), games, wins);
   }
   const rate = total.wins / total.games;
   if (!(rate > 0 && rate < 1)) return [];
@@ -803,26 +804,189 @@ export function synergyGraph(shard, lists, card, w, { n = GRAPH_PARTNERS, link =
   // The ring's order: won partners first, then the rest, each next one the most linked to the one before
   const lift = new Map(won.map(x => [x.card, x.lift]));
   const isWon = i => lift.has(partners[i].card);
-  const order = [];
-  for (const group of [[...partners.keys()].filter(isWon), [...partners.keys()].filter(i => !isWon(i))]) {
-    const left = new Set(group);
-    while (left.size) {
-      const last = order.at(-1);
-      let next = -1, best = -Infinity;
-      for (const i of left) {
-        const s = last === undefined ? 0 : phi(last, i);
-        if (s > best) [next, best] = [i, s];
-      }
-      order.push(next);
-      left.delete(next);
-    }
-  }
+  const order = ringOrder([[...partners.keys()].filter(isWon), [...partners.keys()].filter(i => !isWon(i))], phi);
   const cx = won.length ? 0.36 : 0.5, cy = 0.5, r = 0.3, step = 2 * Math.PI / Math.max(m, 1);
   const first = -(partners.filter((_, i) => isWon(i)).length - 1) / 2 * step; // won ones centred on the right
   const nodes = [{ card, x: cx, y: cy, kind: "center" }];
   order.forEach((i, j) => nodes.push({ ...partners[i], x: cx + r * Math.cos(first + j * step), y: cy + r * Math.sin(first + j * step),
     kind: "partner", ...(isWon(i) && { lift: lift.get(partners[i].card) }) }));
   if (won.length) nodes.push({ card: null, x: 1, y: cy, kind: "won" });
+  return { nodes, edges, won };
+}
+
+// A ring's order: each group in turn, each next one the most linked (link(i, j)) to the one before,
+// so linked ones sit side by side
+function ringOrder(groups, link) {
+  const order = [];
+  for (const group of groups) {
+    const left = new Set(group);
+    while (left.size) {
+      const last = order.at(-1);
+      let next = -1, best = -Infinity;
+      for (const i of left) {
+        const s = last === undefined ? 0 : link(last, i);
+        if (s > best) [next, best] = [i, s];
+      }
+      order.push(next);
+      left.delete(next);
+    }
+  }
+  return order;
+}
+
+// === Packages as graphs ===
+// The correlation (phi) of two yes/no things over n decks: a and b decks have each, k both
+const phiOf = (k, a, b, n) => {
+  const spread = Math.sqrt(a * (n - a) * b * (n - b));
+  return spread ? (k * n - a * b) / spread : 0;
+};
+// The members (numbers in shard.decks) running a package: playing all its cards (card numbers)
+function running(shard, cards, members) {
+  shard.sets ??= shard.decks.map(d => new Set(d.cards));
+  const ps = cards.map(c => shard.position.get(c));
+  return ps.includes(undefined) ? [] : members.filter(d => ps.every(p => shard.sets[d].has(p)));
+}
+// How much of a package a deck has (have: a Set of card numbers)
+const hasOf = (have, cards) => {
+  const k = cards.filter(c => have.has(c)).length;
+  return k === cards.length ? "all" : k ? "some" : "none";
+};
+// A package's tournament results (packageResults'), when its decks clearly win more or less than those
+// with none of it: enough decks a side (as for a single card), 2 standard errors or more
+const clearResult = r => r.evidence !== null && Math.abs(r.evidence) >= 2
+  && r.all.decks >= MIN_RESULT_DECKS && r.none.decks >= MIN_RESULT_DECKS;
+
+// The map of a commander's packages: one node per package (packages: [{cards: card numbers}], strongest
+// cards first, as the commander page builds them) run by enough of these decks (members: numbers in
+// shard.decks; running: playing all its cards), the n most run; every line the phi between decks running
+// two packages, among members: positive ones that stand out (PACKAGE_LINK and STAND_OUT above the typical
+// pair's, each package's TOGETHER_LINKS strongest at most), negative ones of PACKAGE_APART or less (an
+// either/or: two builds), the clearest few a package. With tournament decks (lists, window w), a Won node
+// to the right linked to the packages whose decks clearly win more or less. have (a Set of card numbers,
+// a pasted deck's): how much of each package it has. Laid out as synergyGraph does, with no card in the
+// middle. nodes: [{key: "p<index in packages>" | "won", kind: "package" | "won", x, y, cards, decks
+// (members running it), name: its two strongest cards, lift?, tested?, have?}]; edges: [{a, b, strength}]; won: [{key,
+// lift, tested: [tournament decks with it, with none of it]}]
+export const MAP_PACKAGES = 12, PACKAGE_LINK = 0.15, PACKAGE_APART = -0.1;
+export function packageMap(shard, packages, members, { lists = null, w = 0, have = null, n = MAP_PACKAGES } = {}) {
+  shard = decoded(shard);
+  const all = members.length, least = Math.max(3, 0.03 * all);
+  const shown = packages.map(({ cards }, i) => ({ key: `p${i}`, cards, runs: running(shard, cards, members) }))
+    .filter(p => p.runs.length >= least).map((p, i) => ({ ...p, i }))
+    .sort((a, b) => b.runs.length - a.runs.length || a.i - b.i).slice(0, n);
+  const m = shown.length;
+  const sets = shown.map(p => new Set(p.runs));
+  const both = new Int32Array(m * m), phi = new Float64Array(m * m);
+  for (let i = 0; i < m; i++) for (let j = 0; j < m; j++) {
+    both[i * m + j] = shown[i].runs.reduce((k, d) => k + sets[j].has(d), 0);
+    phi[i * m + j] = phiOf(both[i * m + j], shown[i].runs.length, shown[j].runs.length, all);
+  }
+  const won = lists ? shown.flatMap(p => {
+    const r = packageResults(lists, p.cards, w);
+    return clearResult(r) ? [{ key: p.key, lift: r.lift, tested: [r.all.decks, r.none.decks] }] : [];
+  }) : [];
+
+  const pairs = [];
+  for (let i = 0; i < m; i++) for (let j = i + 1; j < m; j++) pairs.push([phi[i * m + j], i, j]);
+  const typical = [...pairs].sort((p, q) => p[0] - q[0])[pairs.length >> 1]?.[0] ?? 0;
+  pairs.sort((p, q) => q[0] - p[0] || p[1] - q[1] || p[2] - q[2]);
+  const edges = [], links = new Array(m).fill(0), aparts = new Array(m).fill(0);
+  for (const [s, i, j] of pairs) {
+    if (s >= Math.max(PACKAGE_LINK, typical + STAND_OUT) && both[i * m + j] >= MIN_WITH && (links[i] < TOGETHER_LINKS || links[j] < TOGETHER_LINKS)) {
+      links[i]++;
+      links[j]++;
+      edges.push({ a: shown[i].key, b: shown[j].key, strength: s });
+    }
+  }
+  for (const [s, i, j] of pairs.reverse()) {
+    if (s <= PACKAGE_APART && aparts[i] < TOGETHER_LINKS && aparts[j] < TOGETHER_LINKS) {
+      aparts[i]++;
+      aparts[j]++;
+      edges.push({ a: shown[i].key, b: shown[j].key, strength: s });
+    }
+  }
+
+  const lift = new Map(won.map(x => [x.key, x.lift])), tested = new Map(won.map(x => [x.key, x.tested]));
+  const isWon = i => lift.has(shown[i].key);
+  const order = ringOrder([[...shown.keys()].filter(isWon), [...shown.keys()].filter(i => !isWon(i))], (i, j) => phi[i * m + j]);
+  const cx = won.length ? 0.4 : 0.5, cy = 0.5, r = m > 1 ? 0.36 : 0, step = 2 * Math.PI / Math.max(m, 1);
+  const first = -(won.length - 1) / 2 * step; // won ones centred on the right
+  const nodes = order.map((i, j) => {
+    const { key, cards, runs } = shown[i];
+    return { key, kind: "package", x: cx + r * Math.cos(first + j * step), y: cy + r * Math.sin(first + j * step),
+      cards, decks: runs.length, name: cards.slice(0, 2), ...(lift.has(key) && { lift: lift.get(key), tested: tested.get(key) }),
+      ...(have && { have: hasOf(have, cards) }) };
+  });
+  if (won.length) nodes.push({ key: "won", kind: "won", x: 1, y: cy });
+  return { nodes, edges, won };
+}
+
+// A package's graph, among members (numbers in shard.decks): the package (cards: card numbers) in the
+// middle; its cards on an inner ring, every pair linked by its phi (negative: rarely together, an
+// either/or); on an outer ring the `extra` cards decks running it add most: whose phi with running it is
+// PARTNER_PHI or more, played more by the decks running it than by the others. With tournament decks
+// (lists, window w), a Won node to the right linked to the package, if its decks clearly win more or less
+// than those with none of it, and to the extra cards its tournament decks clearly win more or less with
+// (as winsMoreWith, `min` decks a side). have (a Set of card numbers): which cards a pasted deck has.
+// nodes: [{key: "pkg" | "c<card>" | "won", kind: "package" | "core" | "extra" | "won", x, y, ...}]: the
+// package {cards, decks (members running it), name}; core {card, decks (members playing it)}; extra
+// {card, base (share of the other members playing it), with (share of those running the package),
+// decksWith, phi}; lift?, tested? and have? (card nodes) on each. edges: [{a, b, strength}]; won: [{key, lift,
+// tested: [tournament decks with it, without it (the package's: with none of it)]}]
+export const PACKAGE_EXTRAS = 6;
+export function packageGraph(shard, cards, members, { lists = null, w = 0, have = null, extra = PACKAGE_EXTRAS, min = MIN_PAIR_DECKS } = {}) {
+  shard = decoded(shard);
+  const all = members.length, runs = running(shard, cards, members), k = runs.length;
+  const ps = cards.map(c => shard.position.get(c));
+  const counts = playCounts(shard, members), withIt = playCounts(shard, runs);
+  shard.sets ??= shard.decks.map(d => new Set(d.cards));
+  const plays = p => (p === undefined ? 0 : counts[p]);
+  const key = card => `c${card}`;
+  const edges = [];
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const ab = ps[i] === undefined || ps[j] === undefined ? 0 : members.reduce((n, d) => n + (shard.sets[d].has(ps[i]) && shard.sets[d].has(ps[j])), 0);
+    edges.push({ a: key(cards[i]), b: key(cards[j]), strength: phiOf(ab, plays(ps[i]), plays(ps[j]), all) });
+  }
+  const core = new Set(ps);
+  const extras = k < MIN_PLAYING ? [] : [...counts.keys()].flatMap(q => {
+    if (core.has(q) || withIt[q] < MIN_WITH) return [];
+    const phi = phiOf(withIt[q], k, counts[q], all), base = (counts[q] - withIt[q]) / (all - k), share = withIt[q] / k;
+    return phi >= PARTNER_PHI && share > base ? [{ card: shard.cards[q], base, with: share, decksWith: withIt[q], phi }] : [];
+  }).sort((a, b) => b.phi - a.phi || a.card - b.card).slice(0, extra);
+  for (const x of extras) edges.push({ a: "pkg", b: key(x.card), strength: x.phi });
+
+  const result = lists ? packageResults(lists, cards, w) : null;
+  const inRing = new Set(extras.map(x => x.card));
+  const won = [...(result && clearResult(result) ? [{ key: "pkg", lift: result.lift, tested: [result.all.decks, result.none.decks] }] : []),
+    ...(lists ? winsMoreWith(lists, cards, w, { min }) : []).filter(x => inRing.has(x.card) && Math.abs(x.evidence) >= 2)
+      .map(x => ({ key: key(x.card), lift: x.lift, tested: [x.with.decks, x.without.decks] }))];
+  const lift = new Map(won.map(x => [x.key, x.lift])), tested = new Map(won.map(x => [x.key, x.tested]));
+  const marks = (card, k) => ({ ...(lift.has(k) && { lift: lift.get(k), tested: tested.get(k) }), ...(have && { have: have.has(card) }) });
+
+  // Rings around the middle, half a step off the line from it to the Won node where that line would hit one
+  const cx = won.length ? 0.4 : 0.5, cy = 0.5, at = (r, a) => ({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  const nodes = [{ key: "pkg", kind: "package", ...at(0, 0), cards, decks: k, name: cards.slice(0, 2), ...(lift.has("pkg") && { lift: lift.get("pkg"), tested: tested.get("pkg") }) }];
+  const phiAt = (i, j) => edges.find(e => e.a === key(cards[Math.min(i, j)]) && e.b === key(cards[Math.max(i, j)])).strength;
+  const wonExtras = extras.filter(x => lift.has(key(x.card)));
+  const outer = 2 * Math.PI / Math.max(extras.length, 1); // won ones centred on the right
+  const first = (-(wonExtras.length - 1) / 2 + (lift.has("pkg") && wonExtras.length % 2 ? 0.5 : 0)) * outer;
+  // The package's cards (and the outer ring, unless won ones are centred on it) turned so the cards sit
+  // clearest of the spokes and the line to the Won node: none runs over a card. Two cards go on the same
+  // side: facing each other, their line would run under the middle and look like two spokes to it
+  const inner = 2 * Math.PI / Math.max(cards.length, 1);
+  const arrangements = cards.length === 2 ? [0.8, 0.5, 0.6, 0.7, 0.9, 1].map(d => [Math.PI - d, Math.PI + d])
+    : Array.from({ length: 16 }, (_, t) => cards.map((_, j) => (j + 0.5 + t / 16) * inner));
+  const layouts = (wonExtras.length ? [0] : [0, 0.5, 0.25, 0.75]).flatMap(t => arrangements.map(core => ({ t, core })));
+  const clearOf = ({ t, core }) => {
+    const taken = extras.map((_, j) => first + (j + t) * outer).concat(won.length ? [0] : []);
+    return Math.min(...core.flatMap(a => taken.map(x => Math.abs(Math.atan2(Math.sin(a - x), Math.cos(a - x))))));
+  };
+  const best = layouts.reduce((b, l) => (clearOf(l) > clearOf(b) + 1e-9 ? l : b));
+  ringOrder([[...cards.keys()]], phiAt).forEach((i, j) =>
+    nodes.push({ key: key(cards[i]), kind: "core", ...at(0.19, best.core[j]), card: cards[i], decks: plays(ps[i]), ...marks(cards[i], key(cards[i])) }));
+  [...wonExtras, ...extras.filter(x => !lift.has(key(x.card)))].forEach((x, j) =>
+    nodes.push({ key: key(x.card), kind: "extra", ...at(0.38, first + (j + best.t) * outer), ...x, ...marks(x.card, key(x.card)) }));
+  if (won.length) nodes.push({ key: "won", kind: "won", x: 1, y: cy });
   return { nodes, edges, won };
 }
 

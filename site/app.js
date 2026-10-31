@@ -7,7 +7,7 @@ import {
   nameLookup, parseDecklist, decodeShard, similarDecks, foldCopies, recommend, closestCommanders,
   findBuilds, playCounts, distinctive, averageDeck, playedDifferently, buildName, buildTags, findPackages, packageGroups, comboDecks, groupCombos, comboPrimer,
   decodeTrends, withCards, filterCommanders, trendingCommanders, trendingCards, commandersPlaying, risingCards,
-  cardResults, packageResults, MIN_RESULT_DECKS, playedMoreWith, winsMoreWith, synergyGraph, playRateByMonth, resultsByMonth,
+  cardResults, packageResults, MIN_RESULT_DECKS, playedMoreWith, winsMoreWith, synergyGraph, packageMap, packageGraph, playRateByMonth, resultsByMonth,
 } from "./deck.js";
 
 const PAGE_SIZE = 30;
@@ -567,59 +567,95 @@ async function showCardWith(card) {
   tabs();
 }
 
-// A synergy graph (synergyGraph's) in box: each card's art in a circle, named under it; lines from the card
-// to the ones its decks play more with it (thicker: more), between those played together, and from a "Won"
-// node to the cards its decks win more with. Pointing at a card says why it's there; picking it opens it.
+// A graph in box: a hint line above (what's pointed at), the graph, and a legend of the kinds of line in it.
+// graph = {nodes: [{key, x, y, kind}], edges: [{a, b, strength}], won: [{key, lift}]} (layout in a 0..1 box).
+// Nodes: card art in circles ("center"/"package" big, "extra" small), "won" a Won circle; node.have false or
+// "none" faded with a dashed ring, "some" half faded. opts: {hint, legend: {together, apart, more, less},
+// label(node) -> {text, art}, tip(node), onPick(node) or null, breadcrumb: [[text, onClick or null]], title}.
+// Pointing at a node says why it's there; picking it calls onPick
 const shade = strength => (0.2 + 0.8 * Math.min(1, Math.abs(strength) / 0.6)).toFixed(2);
-// The synergy graph's ranked line colours: each fifth of the ranking, dark green to pale grey
+// The ranked line colours: each fifth of the ranking, dark green to pale grey
 const TIERS = 5;
 const tierColor = t => `color-mix(in oklab, var(--tie-strong) ${100 - 25 * t}%, var(--tie-weak))`;
-function synergyChart(box, graph, { names, lead }, name) {
+const GRAPH_SIZES = { package: 1.15, extra: 0.8 }; // the hub's 1.3, others 1
+function graphChart(box, graph, { hint, legend, label: nameOf, tip, onPick = null, breadcrumb = null, title = "" }) {
   box.replaceChildren();
   if (graph.nodes.length < 3) return;
+  const crumbs = breadcrumb && el("nav", { className: "graph-crumbs", ariaLabel: "Graph" }, ...breadcrumb.flatMap(([text, go], i) => [
+    i ? el("span", { className: "sep", ariaHidden: "true", textContent: "›" }) : "",
+    go ? el("button", { type: "button", className: "link-button", textContent: text, onclick: go })
+      : el("span", { textContent: text, ...(i === breadcrumb.length - 1 && { ariaCurrent: "page" }) })]));
+  const noteBox = el("p", { className: "with-note" }), chart = el("div", { className: "synergy" });
+  const legendBox = el("ul", { className: "synergy-legend" });
+  box.append(...[crumbs, noteBox, chart, legendBox].filter(Boolean));
   // Filling the width up to a height, centred: on a phone, stretched taller and with smaller nodes to fit
-  const W = Math.max(260, box.clientWidth || 480), narrow = W < 520;
-  box.classList.toggle("narrow", narrow);
+  const W = Math.max(260, chart.clientWidth || 480), narrow = W < 520;
+  chart.classList.toggle("narrow", narrow);
   const size = narrow ? 19 : 30;
-  // Names go outward from the ring: beside the cards at its sides (room kept for them), above or below the
-  // rest. On a phone there's no room beside them: every name goes under its card
-  const charW = narrow ? 7.2 : 8.4, sideRoom = narrow ? 0 : 170;
-  const [mx, my] = [size + 12 + sideRoom, size + (narrow ? 22 : 30)];
+  // Names go outward from the ring: beside the nodes at its sides (room kept for them), above or below the
+  // rest. On a phone there's no room beside them: every name goes under its node
+  // The hub (a card's or a package's own node) sits in the middle; without one, the ring's middle
+  const byKey = new Map(graph.nodes.map(n => [n.key, n]));
+  const wonNode = byKey.get("won");
+  const hub = graph.nodes.find(n => n.kind === "center" || n.key === "pkg");
+  const around = graph.nodes.filter(n => n !== hub && n !== wonNode);
+  // A ring of packages: their names take two lines, so more room above and below, and more height
+  const packages = around.some(n => n.kind === "package");
+  const charW = narrow ? 7.2 : 8.4, sideRoom = narrow ? 0 : 170, lineH = narrow ? 15 : 17;
+  const [mx, my] = [size + 12 + sideRoom, size + (narrow ? 22 : 30) + (packages ? lineH : 0)];
   const xs = graph.nodes.map(n => n.x), ys = graph.nodes.map(n => n.y);
   const [x0, y0] = [Math.min(...xs), Math.min(...ys)];
   const [rx, ry] = [Math.max(0.1, Math.max(...xs) - x0), Math.max(0.1, Math.max(...ys) - y0)];
   let sx = (W - 2 * mx) / rx, sy = narrow ? 1.7 * sx : sx;
-  const fit = Math.min(1, ((narrow ? 520 : 500) - 2 * my - 22) / (ry * sy));
+  const fit = Math.min(1, ((narrow ? 520 : 500) + (packages ? 100 : 0) - 2 * my - 22) / (ry * sy));
   [sx, sy] = [sx * fit, sy * fit];
   const H = Math.round(2 * my + ry * sy);
   const ox = (W - rx * sx) / 2;
   const at = n => [ox + (n.x - x0) * sx, my + (n.y - y0) * sy];
-  const radius = n => Math.round(size * (n.kind === "center" ? 1.3 : 1));
+  const radius = n => Math.round(size * (n === hub ? 1.3 : GRAPH_SIZES[n.kind] ?? 1));
   const short = (t, chars) => (t.length > chars ? t.slice(0, Math.max(1, chars - 1)).trimEnd() + "…" : t);
-  // A name above or below a card has the room between it and the next card on the ring
-  const [cx, cy] = at(graph.nodes[0]);
-  const ring = graph.nodes.filter(n => n.kind === "partner");
-  const ringR = ring.length ? Math.hypot(...at(ring[0]).map((v, i) => v - [cx, cy][i])) : 0;
-  const between = ring.length > 1 ? 2 * ringR * Math.sin(Math.PI / ring.length) : W;
+  const lift = new Map(graph.won.map(x => [x.key, x.lift]));
+  const [cx, cy] = hub ? at(hub) : [0, 1].map(i => around.reduce((s, n) => s + at(n)[i], 0) / around.length);
+  // A name above or below a node has the room between it and the next one on its ring
+  const between = new Map();
+  for (const kind of new Set(around.map(n => n.kind))) {
+    const ring = around.filter(n => n.kind === kind);
+    const ringR = Math.hypot(...at(ring[0]).map((v, i) => v - [cx, cy][i]));
+    between.set(kind, ring.length > 1 ? 2 * ringR * Math.sin(Math.PI / ring.length) : W);
+  }
+  // A node's name; a package's ("A + B") on two lines, each part shortened to fit
   const label = (n, x, y, r) => {
-    const full = frontName(names[n.card]);
-    if (n.kind === "center") return svgEl("text", { "text-anchor": "middle", y: r + 18 }, short(full, narrow ? 14 : 22));
-    if (narrow) { // kept inside the edges
-      const shown = short(full, 11), half = shown.length * charW / 2;
-      return svgEl("text", { "text-anchor": "middle", x: Math.min(W - 2 - half - x, Math.max(2 + half - x, 0)).toFixed(1), y: r + 15 }, shown);
+    const parts = n.kind === "package" ? nameOf(n).text.split(" + ") : [nameOf(n).text];
+    const rows = chars => parts.map((p, i) => (i < parts.length - 1 ? short(p, chars - 2) + " +" : short(p, chars)));
+    // Its lines from baseline y, `up` of them above it
+    const text = (attrs, chars, y, up = 0) => {
+      const shown = rows(chars);
+      if (shown.length === 1) return svgEl("text", { ...attrs, y }, shown[0]);
+      const t = svgEl("text", attrs);
+      shown.forEach((row, i) => t.append(svgEl("tspan", { x: attrs.x ?? 0, y: y + (i - up) * lineH }, row)));
+      return t;
+    };
+    if (n === hub) return text({ "text-anchor": "middle" }, narrow ? 14 : 22, r + 18);
+    // On a phone, under it (a package's own cards above the middle: above it, clear of the middle node), kept
+    // inside the edges; a package ring's two-line names no wider than the room between them
+    if (narrow) {
+      const chars = packages ? Math.min(15, Math.max(6, Math.floor((between.get(n.kind) - 6) / charW))) : 11;
+      const half = Math.max(...rows(chars).map(row => row.length)) * charW / 2;
+      const up = n.kind === "core" && y < cy - 1;
+      return text({ "text-anchor": "middle", x: Math.min(W - 2 - half - x, Math.max(2 + half - x, 0)).toFixed(1) }, chars,
+        up ? -(r + 6) : r + 15, up ? parts.length - 1 : 0);
     }
     const d = Math.hypot(x - cx, y - cy) || 1, cos = (x - cx) / d;
     // Beside it at the ring's sides; on the right, not toward the Won node
     if (Math.abs(cos) >= 0.55 && !(cos > 0 && wonNode)) {
-      return svgEl("text", { "text-anchor": cos > 0 ? "start" : "end", x: (cos > 0 ? 1 : -1) * (r + 6), y: 5 },
-        short(full, Math.floor(sideRoom / charW)));
+      return text({ "text-anchor": cos > 0 ? "start" : "end", x: (cos > 0 ? 1 : -1) * (r + 6) }, Math.floor(sideRoom / charW), 5,
+        (parts.length - 1) / 2);
     }
-    return svgEl("text", { "text-anchor": "middle", y: y < cy - 1 ? -(r + 8) : r + 18 },
-      short(full, Math.max(6, Math.floor((between - 8) / charW))));
+    const above = y < cy - 1;
+    return text({ "text-anchor": "middle" }, Math.max(6, Math.floor((between.get(n.kind) - 8) / charW)), above ? -(r + 8) : r + 18,
+      above ? parts.length - 1 : 0);
   };
-  const byCard = new Map(graph.nodes.filter(n => n.card !== null).map(n => [n.card, n]));
-  const wonNode = graph.nodes.find(n => n.kind === "won");
-  const root = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group", "aria-label": `Cards ${lead} decks play more with ${name}` });
+  const root = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group", "aria-label": title });
   const defs = svgEl("defs", {});
   for (const r of new Set(graph.nodes.map(radius))) {
     const clip = svgEl("clipPath", { id: `syn-clip-${r}` });
@@ -639,21 +675,12 @@ function synergyChart(box, graph, { names, lead }, name) {
   };
   const ranked = [...graph.edges].sort((p, q) => q.strength - p.strength);
   const together = ranked.filter(e => e.strength >= 0);
-  ranked.forEach(e => root.append(line(byCard.get(e.a), byCard.get(e.b), e.strength < 0 ? { class: "tie apart" }
+  ranked.forEach(e => root.append(line(byKey.get(e.a), byKey.get(e.b), e.strength < 0 ? { class: "tie apart" }
     : { class: "tie", style: `stroke: ${tierColor(Math.floor(together.indexOf(e) * TIERS / together.length))}` })));
   // A win rate 5 points higher or lower shows about as strongly as a correlation of 0.3
-  for (const x of graph.won) root.append(line(wonNode, byCard.get(x.card),
+  for (const x of graph.won) root.append(line(wonNode, byKey.get(x.key),
     { class: `won-link ${x.lift >= 0 ? "pos" : "neg"}`, "stroke-opacity": shade(6 * x.lift) }));
 
-  const say = n => {
-    if (n.kind === "won") return `Won: ${lead} tournament decks with ${name} win more often with the cards it has green lines to, `
-      + "less often with those it has red lines to.";
-    if (n.kind === "center") return names[n.card];
-    const bits = [n.base !== undefined && `${percent(n.base)} → ${percent(n.with)} of decks with ${name} (${decksText(n.decksWith)})`,
-      n.lift !== undefined && `tournament decks with both win ${n.lift > 0 ? "more" : "less"} than those with only ${name}`].filter(Boolean);
-    return `${names[n.card]}: ${bits.join("; ")}`;
-  };
-  const has = test => graph.edges.some(test);
   const lifts = graph.won.map(x => x.lift);
   // A legend sample: segments, each {class, style or opacity}
   const sample = (segments, long = 10) => {
@@ -662,22 +689,18 @@ function synergyChart(box, graph, { names, lead }, name) {
     segments.forEach((attrs, i) => svg.append(svgEl("line", { x1: 3 + (long + 2) * i, y1: 5, x2: 3 + (long + 2) * i + long, y2: 5, ...attrs })));
     return svg;
   };
-  $("synergy-legend").replaceChildren(...[
-    [sample(Array.from({ length: TIERS }, (_, t) => ({ class: "tie", style: `stroke: ${tierColor(t)}` }))),
-      "Played together: strongest to weakest, ranked within this graph"],
-    has(e => e.strength < 0) && [sample([{ class: "tie apart" }], 28), "Rarely played together (one or the other)"],
-    lifts.some(l => l > 0) && [sample([{ class: "won-link pos" }], 28), "Tournament decks win more with it"],
-    lifts.some(l => l < 0) && [sample([{ class: "won-link neg" }], 28), "Tournament decks win less with it"],
+  legendBox.replaceChildren(...[
+    together.length && [sample(Array.from({ length: TIERS }, (_, t) => ({ class: "tie", style: `stroke: ${tierColor(t)}` }))), legend.together],
+    ranked.length > together.length && [sample([{ class: "tie apart" }], 28), legend.apart],
+    lifts.some(l => l > 0) && [sample([{ class: "won-link pos" }], 28), legend.more],
+    lifts.some(l => l < 0) && [sample([{ class: "won-link neg" }], 28), legend.less],
   ].filter(Boolean).map(([svg, text]) => el("li", {}, svg, text)));
-  const note = "Point at a card for its numbers, or pick one to open it.";
-  const noteBox = $("synergy-hint");
   const focus = n => {
     for (const [node, a, b] of lines) node.classList.toggle("dim", !!n && a !== n && b !== n);
-    noteBox.textContent = n ? say(n) : note;
+    noteBox.textContent = n ? tip(n) : hint;
   };
-  // As tall as its longest text, so pointing at a card doesn't change the dialog's height: when it's
+  // As tall as its longest text, so pointing at a node doesn't change the page's height: when it's
   // scrolled to the bottom, that would move the graph out from under the pointer and back
-  noteBox.style.minHeight = "";
   let tallest = 0;
   for (const n of [null, ...graph.nodes]) {
     focus(n);
@@ -687,27 +710,33 @@ function synergyChart(box, graph, { names, lead }, name) {
   focus(null);
   for (const n of graph.nodes) {
     const [x, y] = at(n), r = radius(n);
-    const g = svgEl("g", { class: `node ${n.kind}${n.lift === undefined ? "" : n.lift > 0 ? " wins" : " loses"}`,
+    const have = n.have === false || n.have === "none" ? " missing" : n.have === "some" ? " partial" : "";
+    const g = svgEl("g", { class: `node ${n.kind}${n === hub ? " hub" : ""}${lift.has(n.key) ? lift.get(n.key) > 0 ? " wins" : " loses" : ""}${have}`,
       transform: `translate(${x.toFixed(1)},${y.toFixed(1)})` });
-    g.append(svgEl("title", {}, say(n)), svgEl("circle", { class: "back", r }));
-    if (n.kind === "won") g.append(svgEl("text", { class: "inside", "text-anchor": "middle", y: 5.5 }, "Won"));
+    g.append(svgEl("title", {}, tip(n)), svgEl("circle", { class: "back", r }));
+    if (n === wonNode) g.append(svgEl("text", { class: "inside", "text-anchor": "middle", y: 5.5 }, "Won"));
     else {
-      const img = svgEl("image", { x: -r * 1.4, y: -r, width: r * 2.8, height: r * 2, preserveAspectRatio: "xMidYMid slice",
-        "clip-path": `url(#syn-clip-${r})` });
-      cardInfo(n.card).then(info => img.setAttribute("href", artCrop(info.id)));
-      g.append(img, label(n, x, y, r));
+      const { art } = nameOf(n);
+      if (art !== null && art !== undefined) {
+        const img = svgEl("image", { x: -r * 1.4, y: -r, width: r * 2.8, height: r * 2, preserveAspectRatio: "xMidYMid slice",
+          "clip-path": `url(#syn-clip-${r})` });
+        cardInfo(art).then(info => img.setAttribute("href", artCrop(info.id)));
+        g.append(img);
+      }
+      // A package's own node is named by the breadcrumb above: a name under it would run into its cards
+      if (!(n === hub && n.kind === "package")) g.append(label(n, x, y, r));
     }
     g.append(svgEl("circle", { class: "ring", r }));
-    if (n.kind !== "center") {
+    if (n !== hub) {
       g.setAttribute("tabindex", "0");
       g.setAttribute("role", "button");
-      g.setAttribute("aria-label", say(n));
-      if (n.card !== null) {
-        g.addEventListener("click", () => openByNumber(n.card));
+      g.setAttribute("aria-label", tip(n));
+      if (n !== wonNode && onPick) {
+        g.addEventListener("click", () => onPick(n));
         g.addEventListener("keydown", e => {
           if (e.key !== "Enter" && e.key !== " ") return;
           e.preventDefault();
-          openByNumber(n.card);
+          onPick(n);
         });
       }
     }
@@ -717,8 +746,128 @@ function synergyChart(box, graph, { names, lead }, name) {
     g.addEventListener("blur", () => focus(null));
     root.append(g);
   }
-  box.append(root);
+  chart.append(root);
 }
+
+// The card dialog's synergy graph (synergyGraph's): the card in the middle, the cards its decks play more
+// with it around it, and a Won node linked to those its tournament decks win more or less with
+function synergyChart(box, graph, { names, lead }, name) {
+  const key = c => (c === null ? "won" : `c${c}`);
+  graphChart(box, {
+    nodes: graph.nodes.map(n => ({ ...n, key: key(n.card) })),
+    edges: graph.edges.map(e => ({ ...e, a: key(e.a), b: key(e.b) })),
+    won: graph.won.map(x => ({ key: key(x.card), lift: x.lift })),
+  }, {
+    title: `Cards ${lead} decks play more with ${name}`,
+    hint: "Point at a card for its numbers, or pick one to open it.",
+    legend: {
+      together: "Played together: strongest to weakest, ranked within this graph",
+      apart: "Rarely played together (one or the other)",
+      more: "Tournament decks win more with it",
+      less: "Tournament decks win less with it",
+    },
+    label: n => ({ text: frontName(names[n.card]), art: n.card }),
+    tip: n => {
+      if (n.kind === "won") return `Won: ${lead} tournament decks with ${name} win more often with the cards it has green lines to, `
+        + "less often with those it has red lines to.";
+      if (n.kind === "center") return names[n.card];
+      const bits = [n.base !== undefined && `${percent(n.base)} → ${percent(n.with)} of decks with ${name} (${decksText(n.decksWith)})`,
+        n.lift !== undefined && `tournament decks with both win ${n.lift > 0 ? "more" : "less"} than those with only ${name}`].filter(Boolean);
+      return `${names[n.card]}: ${bits.join("; ")}`;
+    },
+    onPick: n => openByNumber(n.card),
+  });
+}
+
+// A commander's packages as a map (packageMap's) in box; picking one shows its graph (packageGraph's) in
+// its place, with a way back, and picking a card there opens it. The package open is kept on the box, so
+// drawing again (with the tournament decks, once loaded) stays on it. these: the decks' name ("these
+// decks"); lists, w, period: the tournament decks, if any; have: a pasted deck's cards (a Set), if any
+function packageCharts(box, { shard, packages, members, names, lead, these, lists = null, w = 0, period = "", have = null }) {
+  const front = c => frontName(names[c]);
+  const title = cards => cards.slice(0, 2).map(front).join(" + ");
+  const m = members.length;
+  const share = k => `${percent(k / m)} of ${these} (${decksText(k)})`;
+  // "tournament decks with them: win rate 6.4 points higher than with none (120 decks against 300)" (the
+  // period's in the Won node's)
+  const higher = ({ lift, tested: [a, b] }, who, than) => `tournament decks with ${who}: win rate ${Math.abs(lift * 100).toFixed(1)} `
+    + `points ${lift > 0 ? "higher" : "lower"} than with ${than} (${decksText(a)} against ${b.toLocaleString()})`;
+  const yours = n => {
+    if (!have) return [];
+    if (n.kind !== "package") return n.have === false ? ["not in your deck"] : [];
+    const k = n.cards.filter(c => have.has(c)).length;
+    return [`your deck has ${k === n.cards.length ? "all of them" : k ? `${k} of them` : "none of them"}`];
+  };
+  const map = () => {
+    delete box.dataset.open;
+    const graph = packageMap(shard, packages, members, { lists, w, have, ...(box.clientWidth < 520 && { n: 8 }) });
+    if (graph.nodes.length < 3) {
+      box.replaceChildren(el("p", { className: "muted deck-lede", textContent: `Too few packages in ${these} to map.` }));
+      return;
+    }
+    graphChart(box, graph, {
+      title: `Packages ${these} play`,
+      hint: have ? `Packages ${lead} decks play. Faded: your deck has none of its cards; dotted ring: some of them. Pick one to see its cards.`
+        : `Packages ${these} play, linked when the same decks run them. Pick one to see its cards.`,
+      legend: {
+        together: "Run by the same decks: strongest to weakest, ranked within this graph",
+        apart: "Rarely run together (different builds)",
+        more: "Tournament decks with it win more",
+        less: "Tournament decks with it win less",
+      },
+      label: n => ({ text: title(n.cards), art: n.cards[0] }),
+      tip: n => (n.kind === "won"
+        ? `Won, in tournaments of the last ${period}: green lines to the packages whose decks win more than those `
+          + "with none of it, red to those that win less."
+        : `${n.cards.map(front).join(", ")}: ${percent(n.decks / m)} of ${these} run all of them (${decksText(n.decks)})`
+          + [...(n.lift === undefined ? [] : [higher(n, "them", "none")]), ...yours(n)].map(t => `; ${t}`).join("")),
+      onPick: n => open(n.cards),
+    });
+  };
+  const open = cards => {
+    box.dataset.open = cards.join(".");
+    const graph = packageGraph(shard, cards, members, { lists, w, have, ...(box.clientWidth < 520 && { extra: 4 }) });
+    const k = graph.nodes[0].decks;
+    graphChart(box, graph, {
+      title: `${title(cards)}: its cards, and the cards decks with it add most`,
+      breadcrumb: [["All packages", map], [title(cards), null]],
+      hint: `Its cards in the middle; around them, the cards decks with it add most.${have ? " Faded: not in your deck." : ""} `
+        + "Pick a card to open it.",
+      legend: {
+        together: "Played together: strongest to weakest, ranked within this graph",
+        apart: "Rarely played together (one or the other)",
+        more: "Tournament decks win more with it",
+        less: "Tournament decks win less with it",
+      },
+      label: n => ({ text: n.card === undefined ? title(cards) : front(n.card), art: n.card ?? cards[0] }),
+      tip: n => {
+        if (n.kind === "won") return `Won, in tournaments of the last ${period}: green lines to what decks with the `
+          + "package win more with, red to what they win less with.";
+        if (n.key === "pkg") return `${cards.map(front).join(", ")}: ${percent(k / m)} of ${these} run all of them (${decksText(k)})`
+          + (n.lift === undefined ? "" : `; ${higher(n, "them", "none")}`);
+        const bits = n.kind === "extra"
+          ? [`${percent(n.base)} of decks without the package, ${percent(n.with)} of the ${decksText(k)} with it`]
+          : [`in ${share(n.decks)}`];
+        if (n.lift !== undefined) bits.push(higher(n, "the package and it", "the package alone"));
+        return `${names[n.card]}: ${[...bits, ...yours(n)].join("; ")}`;
+      },
+      onPick: n => openByNumber(n.card),
+    });
+  };
+  const opened = packages.find(p => p.cards.join(".") === box.dataset.open);
+  opened ? open(opened.cards) : map();
+}
+
+// A commander's packages (findPackages'), strongest first, compared among decks of the same build, as tuned
+// and with as many Game Changers (packageGroups): [{cards: card numbers, combos: how many combos have all of it}]
+function commanderPackages(shard, { lands, builds, staples }) {
+  const groups = packageGroups(shard, builds, { lands, gameChangers: new Set(index.game_changers ?? []) });
+  return findPackages(shard, { lands, staples: new Set(staples.map(c => shard.position.get(c))), groups })
+    .map(p => p.cards.map(q => shard.cards[q]))
+    .map(cards => ({ cards, combos: shard.combos.filter(c => cards.every(x => c.cards.includes(x))).length }));
+}
+// The positions in a shard (or lists file) of its lands
+const landsIn = shard => new Set(shard.cards.flatMap((c, p) => (index.columns.types[c] & (1 << index.types.indexOf("Land")) ? [p] : [])));
 
 // card: its number in the index, when known, for links to the commanders that play it
 // foilFirst: show its foil price first (a foil printing's tile on the Prices page)
@@ -1073,6 +1222,28 @@ async function findSimilar(key) {
   showRows($("near-combos"), $("more-near-combos"), near.map(c => comboRow({ core: c.cards, options: [{ card: null, decks: c.decks, combo: c }] },
     decksSay, away(c)[0])));
 
+  // Packages this commander's decks play, how much of each your deck has: found the first time they show
+  // (that takes a moment for a commander with many decks), drawn at the size they're shown at
+  let packages = null, packageLists = null;
+  const shown = deckShown = {};
+  delete $("deck-packages").dataset.open;
+  $("deck-packages-panel").hidden = false;
+  const drawPackages = () => {
+    const box = $("deck-packages");
+    if (!box.offsetParent) return;
+    if (!packages) {
+      const lands = landsIn(shard);
+      packages = commanderPackages(shard, { lands, builds: findBuilds(shard, { ignore: lands }), staples: decks.staples ?? [] });
+    }
+    packageCharts(box, { shard, packages, members: shard.decks.map((_, d) => d), names, lead, these: "these decks",
+      lists: packageLists, w: tw ?? 0, period: tournament?.period ?? "", have: inDeck });
+    if (tourney && !packageLists) listsFile(key).then(data => {
+      if (packageLists || deckShown !== shown) return;
+      packageLists = data;
+      drawPackages();
+    }, () => {});
+  };
+
   // Cuts only make sense against decks with your own commander: another's never play its cards
   $("cuts-section").hidden = key !== ownKey;
   const rare = cuts.filter(c => c.share < CUT_BELOW).slice(0, SHOW_CUTS);
@@ -1159,7 +1330,7 @@ async function findSimilar(key) {
   $("deck-results").hidden = false;
   deckSections = pageSections($("deck-results"), $("deck-views"), [["against", fromDeck?.average ? "Against the average deck"
     : "Against their list"], ["adds", "Cards to add"],
-    ["cuts", "Cards to cut"], ["combos", "Combos"], ["tournament", "Tournament check"], ["similar", "Similar decks"],
+    ["cuts", "Cards to cut"], ["combos", "Combos"], ["packages", "Packages"], ["tournament", "Tournament check"], ["similar", "Similar decks"],
     ["worth", "What it's worth"]], $("deck-how"), {
     against: "Their list against yours: what's in theirs and not yours, and in yours and not theirs, each ranked by how "
       + "the commander's tournament decks with it did against those without.",
@@ -1173,8 +1344,12 @@ async function findSimilar(key) {
     tournament: "How the commander's cEDH tournament decks with each card did against those without it.",
     similar: "The decks behind these picks, and commanders whose decks play the most of your cards.",
     worth: "Each card at its cheapest printing, now and 30 days and a year ago (over the cards priced then).",
-  }, fromDeck ? "against" : "adds");
+    packages: `Cards ${lead} decks play together far more often than chance (as on the commander page), each package a `
+      + "circle, linked when the same decks run them. Pick one for its cards and the cards decks with it add most. "
+      + "Faded: packages or cards your deck doesn't have; half faded: some of a package's cards.",
+  }, fromDeck ? "against" : "adds", v => v === "packages" && drawPackages());
 }
+let deckShown = null; // the deck shown last, so what's loaded late for one shown before is dropped
 let deckSections = () => {}; // shows the deck's sections again, as one fills in later (its worth)
 
 // A gallery of cards with a type filter, PAGE_ADDS cards at a time. Returns a function that
@@ -1222,6 +1397,7 @@ const commanderMessage = text => {
   $("commander-message").textContent = text;
   $("commander-message").hidden = !text;
 };
+let packagesAs = null; // a commander's packages as a "graph" or a "list" (null: a graph, if there are enough)
 const commanderLink = key => "?" + new URLSearchParams({ commander: key });
 
 // Changes some of the URL's parameters (null: leaves it out), so a view is a link to share
@@ -1237,8 +1413,8 @@ function showSections(root, box, views, current, pick, attr = "view") {
 // A page's sections (showSections), the one in the URL (view=) shown and kept there. views:
 // [[name, label]], those with nothing in them (every panel hidden) left out; how: {name: text} for
 // howBox; first: the one shown first when it's there. Returns a function that shows them again,
-// for when a section's panels change
-function pageSections(page, box, views, howBox, how, first = null) {
+// for when a section's panels change. onShow(name): called once it shows, to draw what's drawn at its size
+function pageSections(page, box, views, howBox, how, first = null, onShow = () => {}) {
   let view = new URLSearchParams(location.search).get("view");
   const draw = () => {
     const shown = views.filter(([v]) => [...page.querySelectorAll(`[data-view="${v}"] .panel`)].some(p => !p.hidden));
@@ -1249,6 +1425,7 @@ function pageSections(page, box, views, howBox, how, first = null) {
       draw();
     });
     howBox.textContent = how[view] ?? "";
+    onShow(view);
   };
   draw();
   return draw;
@@ -1485,8 +1662,7 @@ async function showCommander(key) {
       href: "?" + new URLSearchParams({ trends: "", w: "all", theme: tagLabel(t) }) })));
 
   // Builds: lands are left out of telling them apart (they mostly show a deck's budget)
-  const landBit = 1 << index.types.indexOf("Land");
-  const lands = new Set(shard.cards.flatMap((c, p) => (index.columns.types[c] & landBit ? [p] : [])));
+  const lands = landsIn(shard);
   // Each build is named for the Tagger tag it leans on most that a bigger build isn't named for;
   // failing that, a word its deck names share, or its most distinctive card
   const skip = new Set(lead.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'+-]*/gu));
@@ -1515,10 +1691,7 @@ async function showCommander(key) {
 
   // Packages, with the decks in groups of alike ones (see packageGroups), each with the combos it's part of
   // (Displacer Kitten and Teferi: with Sol Ring, or Mana Vault, ...)
-  const groupOf = packageGroups(shard, builds.map(b => b.members), { lands, gameChangers: new Set(index.game_changers ?? []) });
-  const staples = new Set((decks.staples ?? []).map(c => shard.position.get(c)));
-  const packages = findPackages(shard, { lands, staples, groups: groupOf }).map(p => p.cards.map(q => shard.cards[q]))
-    .map(cards => ({ cards, combos: shard.combos.filter(c => cards.every(x => c.cards.includes(x))).length }));
+  const packages = commanderPackages(shard, { lands, builds: builds.map(b => b.members), staples: decks.staples ?? [] });
 
   const ofBracket = (members, b) => members.filter(d => shard.decks[d].bracket === b);
   $("bracket-filter").hidden = !shard.decks.some(d => d.bracket);
@@ -1596,7 +1769,7 @@ async function showCommander(key) {
   const getTournamentShard = () => (tournamentShard ??= getJson(`decks/results/lists/${key}.json`).then(({ cards, decks }) => ({
     cards,
     decks: decks.map(([, , , topCut, ...gaps]) => { let p = 0; return { topCut, cards: gaps.map(gap => (p += gap)) }; }),
-    lands: new Set(cards.flatMap((c, p) => (index.columns.types[c] & landBit ? [p] : []))),
+    lands: landsIn({ cards }),
   })).catch(err => { tournamentShard = null; throw err; }));
   // The cards these tournament decks play most differently from the build's public decks (and
   // bracket's), each a row with a dot on a 0–100% track for its share of the public decks, of every
@@ -1694,16 +1867,39 @@ async function showCommander(key) {
         ...(p.combos ? [` · part of ${p.combos === 1 ? "a combo" : `${p.combos} combos`}`] : [])],
       test: p.cards,
     })), testPackage);
+    // As a graph or a list: a graph needs 3 packages or more (packageMap shows the same ones, at most 12)
+    if (g.name !== packagesOf) delete $("packages-graph").dataset.open; // another build or bracket: back to the map
+    packagesOf = g.name;
+    const showAs = () => {
+      const as = counted.length >= 3 ? packagesAs ?? "graph" : "list";
+      chipRow($("packages-as"), [["graph", "Graph", counted.length < 3, counted.length < 3 ? "Too few packages for a graph" : ""],
+        ["list", "List"]], as, a => { packagesAs = a; showAs(); });
+      $("packages-as").hidden = !counted.length;
+      $("packages-graph").hidden = as !== "graph";
+      $("packages-list").hidden = as === "graph";
+      drawPackages();
+    };
     // Combos or packages, one at a time
     const tabs = [["combos", "Combos", combos.length], ["packages", "Packages", counted.length]];
     const pickTab = name => {
       comboTab = name;
       for (const [t] of tabs) $(`${t}-tab`).hidden = t !== name;
       chipRow($("combo-tabs"), tabs.map(([t, label, k]) => [t, withCount(label, k)]), name, pickTab);
+      showAs();
     };
     pickTab(comboTab);
   }
   let comboTab = "combos";
+  // The packages graph, of the decks shown: drawn only when it shows, at the size it's shown at; first
+  // without the tournament decks, then again with them once they're loaded
+  let packageLists = null, packagesOf = null;
+  function drawPackages() {
+    const box = $("packages-graph");
+    if (!box.offsetParent || !current) return;
+    packageCharts(box, { shard, packages, members: current.members, names, lead, these: "these decks",
+      lists: packageLists, w: tournament?.w ?? 0, period: tournament?.period ?? "" });
+    if (results && !packageLists) listsFile(key).then(data => { if (!packageLists) { packageLists = data; drawPackages(); } }, () => {});
+  }
 
   // Trends: what the decks made lately play more of, for a window of days (index.json's windows)
   const windows = (decks.windows ?? []).map((days, i) => ({ days, since: decks.since[i] }));
@@ -1764,6 +1960,7 @@ async function showCommander(key) {
     $("commander-how").textContent = how[view];
     $("commander-source").hidden = view !== "tournaments";
     if (view === "trends") showMonths(); // drawn at the size it's shown at
+    if (view === "combos") drawPackages();
   };
 
   // Decks made per month, over every deck of its (not only the newest the page has)
@@ -1787,12 +1984,13 @@ async function showCommander(key) {
   // Tournament results; picking bracket 5 also notes each card's on its tile
   tournament = null;
   $("results-panel").hidden = !results;
-  const testPackage = results ? showResults(key, results, names, released, () => bracket === 5 && showBuild()) : null;
+  const testPackage = results ? showResults(key, results, names, released, () => (bracket === 5 ? showBuild() : drawPackages())) : null;
   const cedh = card => (bracket === 5 ? tournamentNote(card) : {});
   await showBuild();
   commanderMessage("");
   $("commander-page").hidden = false;
   if (view === "trends") showMonths(); // again, now the page shows: drawn at the size it's shown at
+  drawPackages();
 }
 
 // === Made the cut against missed it ===

@@ -145,6 +145,11 @@ time, a few KB after that).
    - A commander with too few decks is compared with the commander whose
      signature cards the deck plays the most of. That same match powers "decks
      like yours with other commanders".
+   - **Packages** shows the commander's package graph (the same as its page's, over all its decks),
+     each package whole, half faded or faded as the deck has all, some or none of its cards; a
+     package's own graph fades the cards the deck lacks, so it reads as what it's missing. The
+     packages are found the first time the section is opened, which takes a moment for a commander
+     with thousands of decks.
 
    ![Deck recommendations for a Derevi deck compared with top-cut tournament decks: cards to add, each with how many of the most alike top-cut decks play it](docs/images/screenshot-deck.webp)
 
@@ -158,7 +163,7 @@ time, a few KB after that).
    sections, shown one at a time (`view=` in the address bar), each with a line on what it is and
    the details under "How these are worked out" at the bottom (`pageSections()`): Prices, a
    commander's page, Trends (commanders, cards), Tournaments (commanders, pilots, cards) and a
-   deck's recommendations (against a list, cards to add and cut, combos, tournament check, similar
+   deck's recommendations (against a list, cards to add and cut, combos, packages, tournament check, similar
    decks, what it's worth). A section with nothing to show has no button.
    **Price tags read the same everywhere** (`priceTag()`): the price now, its change (green up, red
    down), and under it the printing (set, foil) and what it cost then, saying when ("$80.96 30 days
@@ -232,6 +237,21 @@ time, a few KB after that).
    the cards whose decks win clearly more (green) or less (red, used for nothing else) with them. Picking a card in the
    lists or the graph opens it. The page's **Trends** section charts the decks
    made per month, over all of the commander's decks.
+
+   Its **Combos & packages** section lists the Commander Spellbook combos its decks play and its
+   **packages**: cards its decks play together far more often than chance (`findPackages`), compared
+   among decks of the same build, as tuned and with as many Game Changers (`packageGroups`), so cards
+   don't go together just for being in the same kind of deck. Packages show as a list ("31% of these
+   decks play all of them (412)") or, with 3 or more, as a **graph** (Graph | List; the graph first):
+   one node per package run by enough of the build's decks (`packageMap`, the 12 most run; 8 on a
+   phone), named for its two strongest cards, every line the correlation between decks running two
+   packages, ranked and coloured like the synergy graph's, dotted for either/or packages (different
+   builds), and with tournament results a Won node joined to the packages whose decks clearly win
+   more (green) or less (red) than those with none of it. Picking a package swaps in its own graph
+   (`packageGraph`, "All packages › Displacer Kitten + Teferi" to go back): its cards around it,
+   linked by how strongly they pair, and around them the cards decks running it add most (played far
+   more by them than by the other decks; 4 on a phone), each tied to the Won node if decks with the
+   package and it win clearly more or less than those with the package alone. Picking a card opens it.
 
    **Tournament results**, for commanders with cEDH decklists on
    [TopDeck.gg](https://topdeck.gg) (where most cEDH tournaments are run), over the last 3, 6, 12 or
