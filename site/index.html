@@ -706,14 +706,27 @@
     .synergy text { font-family: inherit; font-size: 15px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
     .synergy.narrow text { font-size: 13px; }
     .synergy .dim { opacity: .15; }
-    /* The vine by the scrollbar and its climbing elf (vine.js), on a computer */
-    #vine { position: fixed; top: 0; right: 0; width: 40px; height: 100vh; pointer-events: none; z-index: 5; }
-    #vine svg { display: block; overflow: visible; }
-    #vine .stem { fill: none; stroke: var(--vine); stroke-width: 4; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1;
-      transition: stroke-dashoffset .35s ease-out; }
-    #vine .leaf { fill: var(--leaf); opacity: 0; transition: opacity .5s; }
-    #vine .leaf.out { opacity: 1; }
-    @media (prefers-reduced-motion: reduce) { #vine .stem, #vine .leaf { transition: none; } }
+    /* On a computer every scrollbar is a vine (vine.js): the page's and each scrolling box's, in place of
+       their own, which are hidden */
+    html.vines, html.vines :is(dialog, .printings) { scrollbar-width: none; }
+    html.vines::-webkit-scrollbar, html.vines :is(dialog, .printings)::-webkit-scrollbar { display: none; }
+    html.vines .printings { padding-right: 28px; } /* room for its vine */
+    .vine { position: fixed; z-index: 5; touch-action: none; user-select: none; }
+    .vine svg { display: block; overflow: visible; }
+    .vine .track { fill: transparent; cursor: pointer; }
+    .vine .stem { fill: none; stroke: var(--vine); stroke-width: 4; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1;
+      transition: stroke-dashoffset .35s ease-out; pointer-events: none; }
+    .vine .ghost { fill: none; stroke: var(--vine); stroke-width: 2; stroke-linecap: round; opacity: .3; pointer-events: none; }
+    .vine .elf { cursor: grab; }
+    .vine.held .elf { cursor: grabbing; }
+    .vine .grip { fill: transparent; }
+    .vine .leaf { cursor: pointer; }
+    .vine .leaf .hit { fill: transparent; }
+    .vine .leaf path { fill: var(--leaf); opacity: .45; transform: scale(.6); transform-box: fill-box; transform-origin: 0 50%;
+      transition: opacity .4s, transform .4s; }
+    .vine .leaf.out path { opacity: 1; transform: none; }
+    .vine .leaf:hover path { fill: var(--focus); opacity: 1; }
+    @media (prefers-reduced-motion: reduce) { .vine .stem, .vine .leaf path { transition: none; } }
     .synergy .hover-name { font-weight: bold; pointer-events: none; }
     .field input.short { width: 90px; }
     #trend-theme { width: 220px; max-width: 100%; }

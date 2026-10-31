@@ -7,9 +7,11 @@ Archidekt link, or a decklist) to see which cards similar decks play that
 yours doesn't, browse every commander's decks and what's trending, and see
 which cards' decks win more in cEDH tournaments, and which cards' prices are rising
 or falling, with every printing's price history since 2020. Dark mode by
-default; on a computer, a vine grows down beside the scrollbar as far as you've read, and a little
-pixel elf climbs it hand over hand as you scroll (`site/vine.js`; still for anyone who'd rather have
-less motion). It's a static site: all the heavy lifting happens at build time, and a
+default. On a computer every scrollbar is a vine (`site/vine.js`): the page's, each dialog's and the
+printings list's. It grows down as far as you've read, its leaves are the sections showing (pick one to
+jump there; ones not reached yet are buds), and a little pixel elf climbs it hand over hand as you
+scroll; drag the elf, or pick the vine anywhere, to scroll there. The elf holds still for anyone who'd
+rather have less motion. It's a static site: all the heavy lifting happens at build time, and a
 search only downloads the small pieces of the index it needs (~200 KB the first
 time, a few KB after that).
 
