@@ -384,7 +384,8 @@ time, a few KB after that).
      tenth more of the window's decks than of all decks and 0.2% of the window's decks (combos are far
      rarer than cards). `trend-combos.json` counts the 3,000 most played combos' decks by the
      commander's color identity and window, so the color filter narrows combos exactly; the other
-     filters don't.
+     filters don't. Each combo's **How it works** opens its steps, as on a commander's page, from
+     `trend-combo-steps/<block>.json` (100 combos a file, fetched when one of them is opened).
    - The crawler keeps each deck's creation date (and fills it in for decks it
      already had from the search listings it reads anyway). Archidekt decks
      crawled before dates were kept get the date of the last dated deck before

@@ -178,6 +178,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert tc["totals"] == [[0, 5, 2, 2, 1]], tc["totals"]
     assert [(c[0], c[1], c[4]) for c in tc["combos"]] == [("1-2", [0, 2], [[0, 5, 2, 2, 1]]), ("w", [98, 2], [[0, 5, 2, 2, 1]])], tc["combos"]
     assert tc["combos"][1][2:4] == [["Mana Dork"], ["Infinite mana"]]
+    with open(os.path.join(out, "trend-combo-steps", "0.json"), encoding="utf-8") as f:
+        assert json.load(f) == [["", "", "", "Cast it." + chr(10) + "Win."]] * 2  # how each works, in the same order
     first = shard["decks"][0]
     assert first[0] == 5 and first[2] == "2026-09-05" and first[4] == "2026-10-01"  # newest first; when it was made
     assert [d[5] for d in shard["decks"]] == [4, 0, 3, 3, 3]  # its bracket (0: none)

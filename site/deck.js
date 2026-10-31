@@ -606,7 +606,7 @@ export function trendingCards(scope, window) {
 // (identities: a Set of WUBRG bits, null: all), ever and in the window, as trendingCards counts cards.
 // Popular: the share of the window's decks that play every card of each; rising: the most above its share
 // of all the decks (by a tenth or more), from at least MIN_RISING decks and COMBO_FLOOR of them. Each {id, cards, needs, makes, decks,
-// share, was}
+// share, was, index (its place in data.combos, for its steps)}
 export function trendingCombos(data, identities, window) {
   const kept = colors => !identities || identities.has(colors);
   let total = 0, recent = 0;
@@ -615,14 +615,14 @@ export function trendingCombos(data, identities, window) {
     total += ever;
     recent += window ? made[window - 1] : ever;
   }
-  const popular = data.combos.flatMap(([id, cards, needs, makes, rows]) => {
+  const popular = data.combos.flatMap(([id, cards, needs, makes, rows], index) => {
     let ever = 0, now = 0;
     for (const [colors, e, ...made] of rows) {
       if (!kept(colors)) continue;
       ever += e;
       now += window ? made[window - 1] : e;
     }
-    return now ? [{ id, cards, needs, makes, decks: now, share: now / recent, was: ever / total }] : [];
+    return now ? [{ id, cards, needs, makes, decks: now, share: now / recent, was: ever / total, index }] : [];
   }).sort((a, b) => b.share - a.share || a.id.localeCompare(b.id));
   const rising = !window ? [] : popular
     .filter(x => x.share >= RISING_COMBO * x.was && x.decks >= Math.max(MIN_RISING, COMBO_FLOOR * recent))

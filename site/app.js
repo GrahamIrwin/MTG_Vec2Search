@@ -3015,6 +3015,19 @@ const trendsMessage = text => {
 
 let trendData; // decks/trends.json, with each commander's name and colors
 let trendCombos; // decks/trend-combos.json
+// How the combo at index in trend-combos.json works, from its block of decks/trend-combo-steps/ (fetched
+// the first time one of the block's is asked for), as comboSteps wants it
+const COMBO_BLOCK = 100; // COMBO_BLOCK in build_decks.py
+const comboStepBlocks = new Map();
+async function trendComboHow(index) {
+  const k = Math.floor(index / COMBO_BLOCK);
+  if (!comboStepBlocks.has(k)) {
+    comboStepBlocks.set(k, getJson(`decks/trend-combo-steps/${k}.json`));
+    comboStepBlocks.get(k).catch(() => comboStepBlocks.delete(k)); // try again next time
+  }
+  const [mana, easy, notable, steps] = (await comboStepBlocks.get(k))[index % COMBO_BLOCK];
+  return { mana, easy, notable, steps };
+}
 function loadTrends() {
   trendData ??= Promise.all([loadDeckData(), getJson("decks/trends.json")]).then(([{ names }, data]) => {
     const trends = decodeTrends(data);
@@ -3149,7 +3162,8 @@ async function showTrends() {
     // Combos that differ in one card as one, as on a commander's page
     const rows = (list, say) => groupCombos(list).map(group => {
       const row = comboRow(group, () => say(group.options[0].combo));
-      delete row.how; // their steps are on the commanders' pages
+      const first = group.options[0].combo;
+      row.how = async () => comboSteps({ id: first.id, how: await trendComboHow(first.index) }, group.options.length > 1 && group.options[0].card);
       return row;
     });
     $("rising-combos-panel").hidden = !days;
