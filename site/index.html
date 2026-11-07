@@ -295,6 +295,9 @@
       transition: opacity .15s, background .15s, transform .25s ease;
     }
     .flip:hover, .flip:focus-visible { opacity: 1; background: rgb(20 14 10 / .8); }
+    /* Partners' swap button: bottom right of the art, off the name and cost of the one behind (a margin's %
+       is of the width, so this finds the art's foot, its height a card's to its width, in a tile or not) */
+    .flip.swap { top: 0; margin-top: calc(100% * 680 / 488 - 42px); font-size: 18px; }
     .flip-wrap:hover .flip { transform: translateY(-4px); }
     .flip-wrap:hover .card-art { transform: translateY(-4px); box-shadow: 0 2px 3px rgb(0 0 0 / .25), 0 18px 28px -12px rgb(0 0 0 / .6); }
     .card:focus-visible .card-art { outline: 2px solid var(--focus); outline-offset: 3px; }

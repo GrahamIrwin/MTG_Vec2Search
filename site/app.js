@@ -1630,27 +1630,28 @@ function setParams(changes) {
   history.replaceState(null, "", "?" + url);
 }
 
-// Partners, overlapped: the one behind shows its name and cost above the other, and pointing at it
-// (or focusing it) brings it forward until the pointer leaves the pair (or focus moves on)
-function overlap(cards, className = "") {
+// Partners, overlapped: the one behind shows its name and cost above the other. A swap button over the
+// top right of tile (the pair, or the tile holding it: beside it, as a button can't be in a link) brings
+// the one behind forward; focusing a card does too, until focus moves on
+function overlap(cards, className = "", tile = null) {
   const pair = el("span", { className: `pair ${className}` }, ...cards);
-  const flip = second => {
+  let chosen = false; // the second in front
+  const show = second => {
     if (cards[0].classList.contains("back") === second) return;
     pair.classList.add("shuffled");
     cards[0].classList.toggle("back", second);
     cards[1].classList.toggle("back", !second);
   };
   cards[1].classList.add("back");
-  // The strip where the one behind shows: the top and left 10%, by where the pointer is rather
-  // than which card is under it, since flipping slides the other card under the pointer
-  pair.onpointermove = e => {
-    const r = pair.getBoundingClientRect();
-    if (e.clientX - r.left < r.width * 0.1 || e.clientY - r.top < r.height * 0.1) flip(true);
+  pair.addEventListener("focusin", e => show(cards[1].contains(e.target)));
+  pair.addEventListener("focusout", () => show(chosen));
+  const swap = el("button", { type: "button", className: "flip swap", ariaLabel: "Swap commanders", title: "Swap commanders",
+    ariaPressed: "false", textContent: "⇄" });
+  swap.onclick = () => {
+    show(chosen = !chosen);
+    swap.ariaPressed = String(chosen);
   };
-  pair.onpointerleave = () => flip(false);
-  pair.addEventListener("focusin", e => flip(cards[1].contains(e.target)));
-  pair.addEventListener("focusout", () => flip(false));
-  return pair;
+  return el("div", { className: "flip-wrap" }, tile ? tile(pair) : pair, swap);
 }
 
 // A gallery of commanders, PAGE_COMMANDERS at a time, each opening its page. Returns a function
@@ -1671,12 +1672,14 @@ function commanderGallery(gallery, moreButton) {
         img.src = imageUrl(info.id);
         return img;
       });
-      const tile = el("a", { className: "card", href: commanderLink(c.key), title: c.name },
-        imgs.length > 1 ? overlap(imgs, "card-art") : el("span", { className: "card-art" }, ...imgs),
-        el("span", { className: "card-name", textContent: c.name }),
-        el("span", { className: "card-meta" }, el("span", { textContent: c.detail })));
-      tile.style.setProperty("--i", i);
-      return imgs.length > 1 ? tile : withFlip(tile, imgs[0], infos[i][0]);
+      const tile = art => {
+        const a = el("a", { className: "card", href: commanderLink(c.key), title: c.name }, art,
+          el("span", { className: "card-name", textContent: c.name }),
+          el("span", { className: "card-meta" }, el("span", { textContent: c.detail })));
+        a.style.setProperty("--i", i);
+        return a;
+      };
+      return imgs.length > 1 ? overlap(imgs, "card-art", tile) : withFlip(tile(el("span", { className: "card-art" }, ...imgs)), imgs[0], infos[i][0]);
     }));
     shown += page.length;
     moreButton.hidden = shown >= current.length;

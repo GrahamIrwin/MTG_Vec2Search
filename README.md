@@ -176,8 +176,8 @@ time, a few KB after that).
    down), and under it the printing (set, foil) and what it cost then, saying when ("$80.96 30 days
    ago", "before the reprint"); a change in how often a card is played names its period too.
 4. **Commanders** (`?commanders`) lists every commander with decks, which
-   Trends' filters narrow down; partners show both cards, overlapped, the one
-   behind coming forward when pointed at. Each one's
+   Trends' filters narrow down; partners show both cards, overlapped, with a swap
+   button (⇄, like a double-faced card's flip button) to bring the one behind forward. Each one's
    page (`?commander=<file name>`) shows its signature cards, every card its
    decks play, an average deck and the decklists themselves. The average deck
    takes as many spells and nonbasic lands as the decks play on average (the
