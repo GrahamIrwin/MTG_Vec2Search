@@ -579,6 +579,7 @@ const shade = strength => (0.2 + 0.8 * Math.min(1, Math.abs(strength) / 0.6)).to
 // The ranked line colours: each fifth of the ranking, dark green to pale grey
 const TIERS = 5;
 const tierColor = t => `color-mix(in oklab, var(--tie-strong) ${100 - 25 * t}%, var(--tie-weak))`;
+const tierStyle = t => `stroke: ${tierColor(t)}; stroke-width: ${6 - 1.1 * t}`; // and thick to thin
 const GRAPH_SIZES = { package: 1.15, extra: 0.8 }; // the hub's 1.3, others 1
 // The shape of the room a graph in box gets (width / height; see graphChart's height), for its layout
 const graphAspect = box => Math.min(2.2, Math.max(0.6, ((box.clientWidth || 480) - 120) / 480));
@@ -687,8 +688,8 @@ function graphChart(box, graph, opts) {
     }
   }
   root.append(defs);
-  // Every line the same width. Played together: ranked, strongest first, and coloured by their fifth of
-  // the ranking, dark green to pale grey; rarely together: dotted. Won's: green for winning more, red
+  // Played together: ranked, strongest first, and by their fifth of the ranking thick dark green to thin
+  // pale grey; rarely together: dotted. Won's: green for winning more, red
   // (kept for this) for less, the bigger the difference the more opaque
   const lines = [];
   // How close a path (points) comes to the edge of a node it doesn't join: negative, under it
@@ -753,7 +754,7 @@ function graphChart(box, graph, opts) {
   } else {
     for (const e of ranked) {
       const node = line(byKey.get(e.a), byKey.get(e.b), e.strength < 0 ? { class: "tie apart" }
-        : { class: "tie", style: `stroke: ${tierColor(Math.floor(together.indexOf(e) * TIERS / together.length))}` });
+        : { class: "tie", style: tierStyle(Math.floor(together.indexOf(e) * TIERS / together.length)) });
       if (lineTip) texts.set(e, lineTip(e, byKey.get(e.a), byKey.get(e.b)));
       root.append(node, ...(texts.has(e) ? [hitFor(node, e)] : []));
     }
@@ -778,18 +779,22 @@ function graphChart(box, graph, opts) {
       "Tournament decks with both win less than the rest"],
     wins.some(x => x.lift === null) && [sample([{ class: "tie few" }], 28), "Too few tournament decks with both to tell"],
   ] : [
-    together.length && [sample(Array.from({ length: TIERS }, (_, t) => ({ class: "tie", style: `stroke: ${tierColor(t)}` }))), legend.together],
+    together.length && [sample(Array.from({ length: TIERS }, (_, t) => ({ class: "tie", style: tierStyle(t) }))), legend.together],
     ranked.length > together.length && [sample([{ class: "tie apart" }], 28), legend.apart],
     lifts.some(l => l > 0) && [sample([{ class: "won-link pos" }], 28), legend.more],
     lifts.some(l => l < 0) && [sample([{ class: "won-link neg" }], 28), legend.less],
+    graph.nodes.some(n => n.held !== undefined) && [el("span", { className: "held-sample", textContent: "2/4" }),
+      "Your deck has only some of its cards (2 of 4)"],
   ]).filter(Boolean).map(([svg, text]) => el("li", {}, svg, text)));
-  // A package's name ("A + B") isn't drawn under it, where it would have to be cut short: it shows in full
-  // over the graph while its node is pointed at
-  const named = n => !(n.kind === "package" && n !== hub);
+  // A package's name ("A + B") is drawn under it cut short to fit: it shows in full over the graph, in place
+  // of the short one, while its node is pointed at
+  const full = n => n.kind === "package" && n !== hub;
+  const labels = new Map(); // each node's name under it
   const hoverName = svgEl("text", { class: "hover-name", "text-anchor": "middle" });
   const showName = n => {
     hoverName.replaceChildren();
-    if (!n || named(n) || n === wonNode) return;
+    for (const [o, t] of labels) t.style.visibility = o === n && full(n) ? "hidden" : "";
+    if (!n || !full(n)) return;
     const [x, y] = at(n), r = radius(n), rows = nameOf(n).text.split(" + ").map((p, i, all) => (i < all.length - 1 ? `${p} +` : p));
     const half = Math.max(...rows.map(row => row.length)) * charW / 2;
     const tx = Math.min(W - 2 - half, Math.max(2 + half, x));
@@ -847,7 +852,16 @@ function graphChart(box, graph, opts) {
       });
       if (arts.length === 2) g.append(svgEl("line", { class: "split", x1: 0, y1: -r, x2: 0, y2: r }));
       // A package's own node is named by the breadcrumb above: a name under it would run into its cards
-      if (named(n) && !(n === hub && n.kind === "package")) g.append(label(n, x, y, r));
+      if (!(n === hub && n.kind === "package")) {
+        labels.set(n, label(n, x, y, r));
+        g.append(labels.get(n));
+      }
+    }
+    // Only some of a package's cards in your deck: how many, on a badge
+    if (n.held !== undefined) {
+      const text = `${n.held}/${n.cards.length}`, w = 9 + 7 * text.length, [bx, by] = [r * 0.62, -r * 0.92];
+      g.append(svgEl("rect", { class: "held", x: (bx - w / 2).toFixed(1), y: (by - 9).toFixed(1), width: w, height: 18, rx: 9 }),
+        svgEl("text", { class: "held", "text-anchor": "middle", x: bx.toFixed(1), y: (by + 4.5).toFixed(1) }, text));
     }
     g.append(svgEl("circle", { class: "ring", r }));
     if (n !== hub) {
@@ -888,8 +902,8 @@ function synergyChart(box, graph, { names, lead, shard }, name, lists = null, w 
     title: `Cards ${lead} decks play more with ${name}`,
     hint: "Point at a card for its numbers, or pick one to open it.",
     legend: {
-      together: "Played together: strongest to weakest, ranked within this graph",
-      apart: "Rarely played together (one or the other)",
+      together: "Decks that play one tend to play the other (thicker: more so)",
+      apart: "Decks play one or the other, rarely both",
       more: "Tournament decks win more with it",
       less: "Tournament decks win less with it",
     },
@@ -945,12 +959,11 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
     }
     graphChart(box, graph, {
       title: `${Nouns} ${these} play`,
-      hint: have ? `The ${nouns} ${lead} decks play that your deck runs, linked when the same decks run them; dotted ring: `
-        + `it has only some of the ${noun}'s cards. Pick one to see its cards.`
-        : `${Nouns} ${these} play, linked when the same decks run them. Pick one to see its cards.`,
+      hint: `Each circle is a ${noun} ${have ? `${lead} decks play that your deck runs` : `${these} play`}, named by its first `
+        + `two cards; linked ones sit close together. Point at one for its numbers, or pick it to see its cards.`,
       legend: {
-        together: "Run by the same decks: strongest to weakest, ranked within this graph",
-        apart: "Rarely run together (different builds)",
+        together: "Decks that run one tend to run the other (thicker: more so)",
+        apart: "Decks run one or the other, rarely both",
         more: "Tournament decks with it win more",
         less: "Tournament decks with it win less",
       },
@@ -982,8 +995,8 @@ function packageCharts(box, { shard, packages, members, names, lead, these, list
         + `${have ? " that your deck runs too" : ""}. `
         + "Pick a card to open it.",
       legend: {
-        together: "Played together: strongest to weakest, ranked within this graph",
-        apart: "Rarely played together (one or the other)",
+        together: "Decks that play one tend to play the other (thicker: more so)",
+        apart: "Decks play one or the other, rarely both",
         more: "Tournament decks win more with it",
         less: "Tournament decks win less with it",
       },
@@ -1520,7 +1533,7 @@ async function findSimilar(key) {
     worth: "Each card at its cheapest printing, now and 30 days and a year ago (over the cards priced then).",
     packages: `Cards ${lead} decks play together far more often than chance (as on the commander page), each package a `
       + "circle, linked when the same decks run them; or their combos (Commander Spellbook's, in 1% of the decks or more), "
-      + "the same way. Only the ones your deck runs, all of their cards or at least half (a dotted ring: some). Pick one "
+      + "the same way. Only the ones your deck runs, all of their cards or at least half (a badge says how many). Pick one "
       + "for its cards and the cards decks with it add most.",
   }, fromDeck ? "against" : "adds", v => v === "packages" && drawPackages());
 }
@@ -2244,19 +2257,22 @@ function cutGroups(lists, w) {
 const OVERLAP = 0.04; // dots this close (of the 0–100% track) share a pop-up
 const shareText = x => (x > 0 && x < 0.005 ? "<1%" : percent(x)); // one deck in 231 isn't none
 const decksText = k => `${k.toLocaleString()} ${k === 1 ? "deck" : "decks"}`;
-const groupLabel = g => `${g.name[0].toUpperCase()}${g.name.slice(1)} (${g.decks.toLocaleString()})`;
-const vsLegend = groups => groups.map(g => el("span", { className: g.key, textContent: groupLabel(g) }));
+const groupLabel = g => `${g.name[0].toUpperCase()}${g.name.slice(1)} (${decksText(g.decks)})`;
+// The two groups' dots, and how to read a row
+const vsLegend = groups => [...groups.map(g => el("span", { className: g.key, textContent: groupLabel(g) })),
+  el("p", { className: "vs-how", textContent: "Each row: how many of each group's decks play the card. The arrow runs from missed to made: "
+    + "the longer it is, the bigger the difference." })];
 // The items of a .vs-rows list: a 0–100% scale, then for each of sections ([label, rows], rows as
 // playedDifferently's) a heading and a row per card: its name, a dot for its share of each group's
 // decks, and the shares. A row whose difference could well be chance (under 2 standard errors) is faded.
 function vsRows(groups, sections, names) {
   const row = r => {
     const shares = groups.map(g => (g.plays.get(r.card) ?? 0) / g.decks);
-    const low = Math.min(...shares), high = Math.max(...shares);
+    const low = Math.min(...shares), high = Math.max(...shares), gap = Math.round(100 * (shares[1] - shares[0]));
     return el("li", { className: Math.abs(r.evidence) < SIGNAL ? "faint" : "" },
       cardButton(r.card, names),
       el("div", { className: "vs-track" },
-        el("span", { className: "span", style: `left:${low * 100}%;width:${(high - low) * 100}%` }),
+        el("span", { className: `span ${shares[1] >= shares[0] ? "up" : "down"}`, style: `left:${low * 100}%;width:${(high - low) * 100}%` }),
         ...groups.map((g, i) => {
           // pointing at (or tapping, or tabbing to) a dot pops up its share, and those of the dots on top
           // of it (too close to point at apart, on a phone), opening toward the middle of the track
@@ -2268,7 +2284,12 @@ function vsRows(groups, sections, names) {
           dot.dataset.tip = tip;
           return dot;
         })),
-      el("span", { className: "shares", textContent: shares.map(shareText).join(" → ") }));
+      // "20 pts more", over the shares (made the cut's first), each in its dot's colour
+      el("span", { className: "shares", title: groups.map((g, i) => `${groupLabel(g).replace(/ \(.*/, "")}: ${shareText(shares[i])} `
+        + `(${decksText(g.plays.get(r.card) ?? 0)} of ${g.decks.toLocaleString()})`).reverse().join("\n") },
+        el("span", { className: "gap", textContent: `${Math.abs(gap)} pts ${gap >= 0 ? "more" : "less"}` }),
+        el("span", {}, el("span", { className: "made", textContent: shareText(shares[1]) }), " vs ",
+          el("span", { className: "missed", textContent: shareText(shares[0]) }))));
   };
   const scale = el("li", { className: "scale", ariaHidden: "true" }, el("span"),
     el("div", { className: "vs-track" }, ...["0%", "50%", "100%"].map(x => el("span", { textContent: x }))), el("span"));

@@ -505,7 +505,12 @@
     .vs-rows .term { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .vs-rows .group { display: block; margin: 10px 0 2px; font-size: 14px; color: var(--ink-soft); letter-spacing: .08em; text-transform: uppercase; }
     .vs-track { position: relative; height: 20px; margin: 0 7px; background: linear-gradient(to right, var(--rule) 1px, transparent 1px) 0 0 / 25% 100%; }
-    .vs-track .span { position: absolute; top: 9px; height: 2px; background: var(--rule); }
+    .vs-track .span { position: absolute; top: 9px; height: 2px; background: var(--ink-faint); }
+    /* its arrowhead, just short of the made-the-cut dot */
+    .vs-track .span::after { content: ""; position: absolute; top: -4px; border: 5px solid transparent; border-width: 5px 7px; }
+    .vs-track .span.up::after { right: 4px; border-left-color: var(--ink-faint); border-right-width: 0; }
+    .vs-track .span.down::after { left: 4px; border-right-color: var(--ink-faint); border-left-width: 0; }
+    .vs-legend .vs-how { flex-basis: 100%; margin: 0; }
     .vs-track .dot { position: absolute; top: 4px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; }
     .vs-track .missed { border: 2px solid var(--vs-missed); background: var(--paper); }
     .vs-track .made { background: var(--vs-made); }
@@ -522,7 +527,10 @@
     }
     .vs-track .dot.tip-start[data-tip]::after { left: -4px; transform: none; }
     .vs-track .dot.tip-end[data-tip]::after { left: auto; right: -4px; transform: none; }
-    .vs-rows .shares { font-size: 15px; color: var(--ink-soft); font-variant-numeric: tabular-nums; text-align: right; }
+    .vs-rows .shares { font-size: 15px; color: var(--ink-soft); font-variant-numeric: tabular-nums; text-align: right; display: flex; flex-direction: column; line-height: 1.25; }
+    .vs-rows .shares .gap { color: var(--ink); }
+    .vs-rows .shares .made { color: var(--vs-made); font-weight: bold; }
+    .vs-rows .shares .missed { color: var(--vs-missed); }
     .vs-rows .scale { padding: 0; }
     .vs-rows .more { display: flex; justify-content: center; margin: 8px 0 4px; }
     .vs-rows .scale .vs-track { height: auto; background: none; display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-faint); }
@@ -700,7 +708,11 @@
     .synergy .hub { cursor: default; }
     .synergy .node.missing image { opacity: .35; }
     .synergy .node.partial image { opacity: .55; }
-    .synergy .node.partial .ring { stroke: var(--ink-soft); stroke-width: 3; stroke-dasharray: 2 4; stroke-linecap: round; }
+    .synergy .node.partial .ring { stroke: var(--ink-soft); stroke-width: 2; }
+    /* how many of a package's cards a deck has, when only some */
+    .synergy rect.held { fill: var(--ink); }
+    .synergy .node text.held { fill: var(--paper); stroke: none; font-size: 12px; font-weight: bold; font-variant-numeric: tabular-nums; opacity: 1; }
+    .synergy-legend .held-sample { padding: 0 6px; border-radius: 9px; background: var(--ink); color: var(--paper); font-size: 12px; font-weight: bold; }
     .synergy .node.missing text:not(.inside) { opacity: .7; }
     .graph-crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 0 8px; font-size: 16px; color: var(--ink); }
     .graph-crumbs .sep { color: var(--ink-faint); }

@@ -151,12 +151,12 @@ time, a few KB after that).
      signature cards the deck plays the most of. That same match powers "decks
      like yours with other commanders".
    - **Packages & combos** shows (Packages | Combos) the packages, or the combos, of the commander's decks that the deck runs (all their cards, or
-     at least half: a dotted ring), linked as on the commander page; a package's own graph shows just
+     at least half: a badge such as "2/4" says how many), linked as on the commander page; a package's own graph shows just
      the cards of it, and of those decks with it add most, that the deck runs. The
      packages are found the first time the section is opened, which takes a moment for a commander
      with thousands of decks.
 
-     ![The packages of Derevi decks that a pasted Derevi deck runs, linked as on the commander page; two it runs only part of have a dotted ring](docs/images/screenshot-deck-packages.webp)
+     ![The packages of Derevi decks that a pasted Derevi deck runs, linked as on the commander page; two it runs only part of have a badge saying how many of their cards it has](docs/images/screenshot-deck-packages.webp)
 
    ![Deck recommendations for a Derevi deck compared with top-cut tournament decks: cards to add, each with how many of the most alike top-cut decks play it](docs/images/screenshot-deck.webp)
 
@@ -236,8 +236,8 @@ time, a few KB after that).
    rate (412 decks play both, 300 only Jeska's Will)"), and a **synergy graph**:
    the card in the middle and around it the cards played with it clearly more than chance (a
    correlation of 0.2 or more between being in a deck, the strongest 12; 8 on a phone). Every line is
-   such a correlation, the same width, ranked strongest to weakest and coloured by its fifth of the
-   ranking, dark green to pale grey, so a graph's ties are easy to tell apart; dotted lines are pairs
+   such a correlation, ranked strongest to weakest and drawn by its fifth of the ranking, thick dark
+   green to thin pale grey, so a graph's ties are easy to tell apart; dotted lines are pairs
    rarely played together (one or the other: two packages, two color builds). Between the cards around it, only
    pairs that stand out from the rest show (the decks playing a card mostly share one build, so most
    of its partners go together a little). With tournament results, dashed lines join a "Won" node to
@@ -255,8 +255,8 @@ time, a few KB after that).
    don't go together just for being in the same kind of deck. Packages show as a list ("31% of these
    decks play all of them (412)") or, with 3 or more, as a **graph** (Graph | List; the graph first):
    one node per package run by enough of the build's decks (`packageMap`, the 12 most run; 8 on a
-   phone), named for its two strongest cards (half of each one's art on it; the name shows, whole, when
-   it's pointed at, rather than cut short under it), every line the correlation between decks running two
+   phone), named for its two strongest cards (half of each one's art on it; the name under it, cut short
+   to fit, shows whole when it's pointed at), every line the correlation between decks running two
    packages, ranked and coloured like the synergy graph's, dotted for either/or packages (different
    builds), and with tournament results a Won node joined to the packages whose decks clearly win
    more (green) or less (red) than those with none of it. Picking a package swaps in its own graph
@@ -355,8 +355,9 @@ time, a few KB after that).
    - **Made the cut**: among the decks in events with a top cut, the cards whose share of decks
      differs most between those that made it and those that missed it (`cutGroups()` and
      `playedDifferently()`): what they play more, and less, the biggest gap first, 6 at a time
-     (**Show more** for the next), among cards at least 15% of either plays, over the period picked. Each card has a dot for each on a 0–100% track and its
-     two shares; pointing at, tapping or tabbing to a dot pops up its share and number of decks (dots
+     (**Show more** for the next), among cards at least 15% of either plays, over the period picked. Each card has a dot for each on a 0–100% track, an arrow
+     from missed to made, and the gap over its two shares ("21 pts more", "68% vs 47%", each in its dot's
+     colour; a line above the rows says how to read them); pointing at, tapping or tabbing to a dot pops up its share and number of decks (dots
      too close to point at apart share one). With a few hundred decks a small gap can be chance, so
      a difference under two standard errors is faded. It reads `results/lists/` too, so it's
      only counting once that's loaded.

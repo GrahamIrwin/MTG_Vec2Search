@@ -1157,7 +1157,7 @@ export function packageMap(shard, packages, members, { lists = null, w = 0, have
     { won: won.length ? "won" : null, wonLinks: won.map(x => x.key), aspect, ...(keep && { degrees }) }) : new Map();
   const nodes = shown.map(({ key, cards, runs }) => ({ key, kind: "package", x: at.get(key)[0], y: at.get(key)[1],
     cards, decks: runs.length, name: cards.slice(0, 2), ...(lift.has(key) && { lift: lift.get(key), tested: tested.get(key) }),
-    ...(have && { have: hasOf(have, cards) }) }));
+    ...(have && { have: hasOf(have, cards) }), ...(have && hasOf(have, cards) === "some" && { held: cards.filter(c => have.has(c)).length }) }));
   if (won.length) nodes.push({ key: "won", kind: "won", x: at.get("won")[0], y: at.get("won")[1] });
   return { nodes, edges, won };
 }
