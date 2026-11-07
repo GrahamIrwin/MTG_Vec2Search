@@ -69,6 +69,14 @@ with sync_playwright() as p:
     first = at(page.locator("#adds .card").nth(4))
     save(page, "screenshot-deck", {"x": 0, "y": top - 16, "width": WIDTH, "height": first["y"] + first["height"] + 16 - top + 16})
 
+    # 2b. Its packages: the commander's packages it runs, some only partly (a badge)
+    page.click("#deck-views button:has-text('Packages')")
+    page.wait_for_selector("#deck-packages svg .node")
+    settle(page, 3000)
+    top, box = at(page.locator("#deck-packages-as")), at(page.locator("#deck-packages"))
+    save(page, "screenshot-deck-packages", {"x": box["x"] - 12, "y": top["y"] - 12, "width": box["width"] + 24,
+                                            "height": box["y"] + box["height"] - top["y"] + 24})
+
     # 3. A commander page: builds, brackets and the top-cut average deck
     page.goto(f"{SITE}/?commander={DEREVI}&view=average&avg=topcut")
     page.wait_for_selector("#average .card")
@@ -85,6 +93,37 @@ with sync_playwright() as p:
     top, rows = at(page.locator("#results-parts")), at(page.locator("#topcut-rows"))
     save(page, "screenshot-topcut", {"x": rows["x"] - 24, "y": top["y"] - 12, "width": rows["width"] + 48,
                                      "height": rows["y"] + rows["height"] - top["y"] + 24})
+
+    # 3c. A card's synergy graph, opened from the commander's page (a taller window: the dialog's all in view)
+    page.set_viewport_size({"width": WIDTH, "height": 1100})
+    page.goto(f"{SITE}/?commander={DEREVI}")
+    page.locator(".card:has(.card-name:text-is('Swords to Plowshares'))").first.click()
+    page.click("#with-tabs button:has-text('Synergy')")
+    page.wait_for_selector("#synergy svg .node")
+    settle(page, 2500)
+    page.mouse.move(0, 0)
+    modal = page.locator("#modal").bounding_box()
+    shot = Image.open(io.BytesIO(page.screenshot()))  # the dialog sits over the viewport, not the page
+    shot.crop((int(modal["x"]), int(modal["y"]), int(modal["x"] + modal["width"]), int(modal["y"] + modal["height"])))         .save(os.path.join(OUT, "screenshot-synergy.webp"), quality=82, method=6)
+    page.set_viewport_size({"width": WIDTH, "height": 900})
+
+    # 3d. Its package map, a package pointed at; then that package's own graph
+    page.goto(f"{SITE}/?commander={DEREVI}&view=combos")
+    page.click("#combo-tabs button:has-text('Packages')")
+    page.wait_for_selector("#packages-graph svg .node")
+    settle(page, 3000)
+    node = page.locator("#packages-graph g.node[aria-label^='Bloom Tender']")
+    node.hover()
+    page.wait_for_timeout(300)
+    top, graph = at(page.locator("#packages-lede")), at(page.locator("#packages-graph"))
+    save(page, "screenshot-packages", {"x": graph["x"] - 12, "y": top["y"] - 12, "width": graph["width"] + 24,
+                                       "height": graph["y"] + graph["height"] - top["y"] + 24})
+    node.click()
+    page.wait_for_selector("#packages-graph .graph-crumbs")
+    settle(page, 2500)
+    page.mouse.move(0, 0)
+    graph = at(page.locator("#packages-graph"))
+    save(page, "screenshot-package", {"x": graph["x"] - 12, "y": graph["y"] - 12, "width": graph["width"] + 24, "height": graph["height"] + 24})
 
     # 4. Tournaments: the last 30 days' highlights, the period's numbers and the commanders' table
     page.goto(f"{SITE}/?tournaments")
